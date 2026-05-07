@@ -2,8 +2,7 @@ import { useEffect } from 'react'
 import { initStore } from './store'
 import { useStore } from './store'
 import { normalizeBaseUrl } from './lib/api'
-import { normalizeSettings, switchApiProfileProvider } from './lib/apiProfiles'
-import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigrationNotice'
+import { normalizeSettings, switchApiProfileProvider } from './lib/api/apiProfiles'
 import type { ApiMode, ApiProvider, AppSettings } from './types'
 import Header from './components/Header'
 import SearchBar from './components/SearchBar'
@@ -19,7 +18,6 @@ import ImageContextMenu from './components/ImageContextMenu'
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
-  useDockerApiUrlMigrationNotice()
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search)
@@ -47,8 +45,8 @@ export default function App() {
 
     const providerParam = searchParams.get('provider')?.trim().toLowerCase()
     if (providerParam) {
-      const provider: ApiProvider | null = providerParam === 'fal'
-        ? 'fal'
+      const provider: ApiProvider | null = providerParam === 'gemini'
+        ? 'gemini'
         : ['openai', 'openai-compatible'].includes(providerParam)
           ? 'openai'
           : null
@@ -100,6 +98,26 @@ export default function App() {
     document.addEventListener('dragstart', preventPageImageDrag)
     return () => document.removeEventListener('dragstart', preventPageImageDrag)
   }, [])
+
+  const theme = useStore((s) => s.settings.theme ?? 'light')
+
+  useEffect(() => {
+    const applyDark = (isDark: boolean) => {
+      document.documentElement.classList.toggle('dark', isDark)
+      const themeMeta = document.querySelector('meta[name="theme-color"]')
+      if (themeMeta) themeMeta.setAttribute('content', isDark ? '#09090b' : '#ffffff')
+    }
+
+    if (theme === 'system') {
+      const mql = window.matchMedia('(prefers-color-scheme: dark)')
+      applyDark(mql.matches)
+      const onChange = (e: MediaQueryListEvent) => applyDark(e.matches)
+      mql.addEventListener('change', onChange)
+      return () => mql.removeEventListener('change', onChange)
+    }
+
+    applyDark(theme === 'dark')
+  }, [theme])
 
   return (
     <>

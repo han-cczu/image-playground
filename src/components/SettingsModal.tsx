@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { normalizeBaseUrl } from '../lib/api'
-import { isApiProxyAvailable, readClientDevProxyConfig } from '../lib/devProxy'
+import { isApiProxyAvailable, readClientDevProxyConfig } from '../lib/api/devProxy'
+import { listModels } from '../lib/api/listModels'
 import { useStore, exportData, importData, clearAllData } from '../store'
 import {
   createDefaultOpenAIProfile,
-  DEFAULT_FAL_BASE_URL,
-  DEFAULT_FAL_MODEL,
+  DEFAULT_GEMINI_BASE_URL,
+  DEFAULT_GEMINI_MODEL,
   DEFAULT_IMAGES_MODEL,
   DEFAULT_OPENAI_PROFILE_ID,
   DEFAULT_RESPONSES_MODEL,
@@ -13,7 +14,7 @@ import {
   getActiveApiProfile,
   normalizeSettings,
   switchApiProfileProvider,
-} from '../lib/apiProfiles'
+} from '../lib/api/apiProfiles'
 import type { ApiProfile, AppSettings } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import Select from './Select'
@@ -23,7 +24,8 @@ function newId(prefix: string) {
 }
 
 function providerLabel(provider: string) {
-  return provider === 'fal' ? 'fal.ai' : 'OpenAI'
+  if (provider === 'gemini') return 'Gemini'
+  return 'OpenAI'
 }
 
 export default function SettingsModal() {
@@ -38,6 +40,11 @@ export default function SettingsModal() {
   const [timeoutInput, setTimeoutInput] = useState(String(getActiveApiProfile(settings).timeout))
   const [showApiKey, setShowApiKey] = useState(false)
   const [showProfileMenu, setShowProfileMenu] = useState(false)
+  const [modelListOpen, setModelListOpen] = useState(false)
+  const [modelListLoading, setModelListLoading] = useState(false)
+  const [modelList, setModelList] = useState<string[] | null>(null)
+  const [modelListError, setModelListError] = useState<string | null>(null)
+  const modelFieldRef = useRef<HTMLDivElement>(null)
   
   const apiProxyAvailable = isApiProxyAvailable(readClientDevProxyConfig())
   const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
@@ -69,19 +76,25 @@ export default function SettingsModal() {
   }, [activeProfile.id, activeProfile.timeout])
 
   const commitSettings = (nextDraft: AppSettings) => {
-    const normalizedProfiles = nextDraft.profiles.map((profile) => {
-      const normalizedBaseUrl = profile.provider === 'fal'
-        ? profile.baseUrl.trim().replace(/\/+$/, '') || DEFAULT_FAL_BASE_URL
-        : normalizeBaseUrl(profile.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl)
-      const defaultModel = profile.provider === 'fal' ? DEFAULT_FAL_MODEL : getDefaultModelForMode(profile.apiMode)
+    const normalizedProfiles: ApiProfile[] = nextDraft.profiles.map((profile) => {
+      const trimmedName = profile.name.trim() || (profile.id === DEFAULT_OPENAI_PROFILE_ID ? '默认' : '新配置')
+      const trimmedTimeout = Number(profile.timeout) || DEFAULT_SETTINGS.timeout
+      if (profile.provider === 'gemini') {
+        return {
+          ...profile,
+          name: trimmedName,
+          baseUrl: profile.baseUrl.trim().replace(/\/+$/, '') || DEFAULT_GEMINI_BASE_URL,
+          model: profile.model.trim() || DEFAULT_GEMINI_MODEL,
+          timeout: trimmedTimeout,
+        }
+      }
       return {
         ...profile,
-        name: profile.name.trim() || (profile.id === DEFAULT_OPENAI_PROFILE_ID ? '默认' : '新配置'),
-        baseUrl: normalizedBaseUrl,
-        model: profile.model.trim() || defaultModel,
-        timeout: Number(profile.timeout) || DEFAULT_SETTINGS.timeout,
-        apiProxy: profile.provider === 'openai' && apiProxyAvailable ? profile.apiProxy : false,
-        codexCli: profile.provider === 'openai' ? profile.codexCli : false,
+        name: trimmedName,
+        baseUrl: normalizeBaseUrl(profile.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl),
+        model: profile.model.trim() || getDefaultModelForMode(profile.apiMode),
+        timeout: trimmedTimeout,
+        apiProxy: apiProxyAvailable ? profile.apiProxy : false,
       }
     })
     const fallbackProfile = createDefaultOpenAIProfile({ id: newId('openai') })
@@ -96,10 +109,12 @@ export default function SettingsModal() {
     setSettings(normalizedDraft)
   }
 
-  const getDraftWithActiveProfilePatch = (patch: Partial<ApiProfile>) => ({
-      ...draft,
-      profiles: draft.profiles.map((profile) => profile.id === activeProfile.id ? { ...profile, ...patch } : profile),
-    })
+  const getDraftWithActiveProfilePatch = (patch: Partial<ApiProfile>): AppSettings => ({
+    ...draft,
+    profiles: draft.profiles.map((profile) =>
+      profile.id === activeProfile.id ? ({ ...profile, ...patch } as ApiProfile) : profile,
+    ),
+  })
 
   const updateActiveProfile = (patch: Partial<ApiProfile>, commit = false) => {
     const nextDraft = getDraftWithActiveProfilePatch(patch)
@@ -118,28 +133,61 @@ export default function SettingsModal() {
       timeoutInput.trim() === '' || Number.isNaN(nextTimeout)
         ? DEFAULT_SETTINGS.timeout
         : nextTimeout
-    const nextDraft = {
+    const nextDraft: AppSettings = {
       ...draft,
-      profiles: activeProfile.provider === 'openai'
-        ? draft.profiles.map((profile) =>
-            profile.id === activeProfile.id ? { ...profile, timeout: normalizedTimeout } : profile,
-          )
-        : draft.profiles,
+      profiles: draft.profiles.map((profile) =>
+        profile.id === activeProfile.id
+          ? ({ ...profile, timeout: normalizedTimeout } as ApiProfile)
+          : profile,
+      ),
     }
     commitSettings(nextDraft)
     setShowSettings(false)
   }
 
   const commitTimeout = useCallback(() => {
-    if (activeProfile.provider !== 'openai') return
     const nextTimeout = Number(timeoutInput)
     const normalizedTimeout =
       timeoutInput.trim() === '' ? DEFAULT_SETTINGS.timeout : Number.isNaN(nextTimeout) ? activeProfile.timeout : nextTimeout
     setTimeoutInput(String(normalizedTimeout))
     updateActiveProfile({ timeout: normalizedTimeout }, true)
-  }, [draft, activeProfile.id, activeProfile.provider, activeProfile.timeout, timeoutInput])
+  }, [draft, activeProfile.id, activeProfile.timeout, timeoutInput])
 
   useCloseOnEscape(showSettings, handleClose)
+
+  useEffect(() => {
+    setModelListOpen(false)
+    setModelList(null)
+    setModelListError(null)
+  }, [activeProfile.id, activeProfile.baseUrl, activeProfile.apiKey])
+
+  useEffect(() => {
+    if (!modelListOpen) return
+    const onMouseDown = (e: MouseEvent) => {
+      if (modelFieldRef.current && !modelFieldRef.current.contains(e.target as Node)) {
+        setModelListOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    return () => document.removeEventListener('mousedown', onMouseDown)
+  }, [modelListOpen])
+
+  const fetchModelList = useCallback(async () => {
+    if (activeProfile.provider !== 'openai') return
+    setModelListOpen(true)
+    setModelListLoading(true)
+    setModelListError(null)
+    try {
+      const ids = await listModels(activeProfile)
+      setModelList(ids)
+      if (ids.length === 0) setModelListError('接口返回为空')
+    } catch (err) {
+      setModelList(null)
+      setModelListError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setModelListLoading(false)
+    }
+  }, [activeProfile])
 
   if (!showSettings) return null
 
@@ -362,7 +410,7 @@ export default function SettingsModal() {
                 <Select
                   value={activeProfile.provider}
                   onChange={(value) => updateActiveProfile(switchApiProfileProvider(activeProfile, value as ApiProfile['provider']), true)}
-                  options={[{ label: 'OpenAI 兼容接口', value: 'openai' }, { label: 'fal.ai', value: 'fal' }]}
+                  options={[{ label: 'OpenAI 兼容接口', value: 'openai' }, { label: 'Google Gemini', value: 'gemini' }]}
                   className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                 />
               </label>
@@ -405,6 +453,23 @@ export default function SettingsModal() {
                 </label>
               )}
 
+              {activeProfile.provider === 'gemini' && (
+                <label className="block">
+                  <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API URL</span>
+                  <input
+                    value={activeProfile.baseUrl}
+                    onChange={(e) => updateActiveProfile({ baseUrl: e.target.value })}
+                    onBlur={(e) => commitActiveProfilePatch({ baseUrl: e.target.value })}
+                    type="text"
+                    placeholder={DEFAULT_GEMINI_BASE_URL}
+                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                  />
+                  <div data-selectable-text className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+                    默认走 Google AI Studio。如使用代理或第三方兼容服务，可在此处覆盖。
+                  </div>
+                </label>
+              )}
+
               {apiProxyAvailable && activeProfile.provider === 'openai' && (
                 <div className="block">
                   <div className="mb-1 flex items-center justify-between">
@@ -434,7 +499,7 @@ export default function SettingsModal() {
                     onChange={(e) => updateActiveProfile({ apiKey: e.target.value })}
                     onBlur={(e) => commitActiveProfilePatch({ apiKey: e.target.value })}
                     type={showApiKey ? 'text' : 'password'}
-                    placeholder={activeProfile.provider === 'fal' ? 'FAL_KEY' : 'sk-...'}
+                    placeholder={activeProfile.provider === 'gemini' ? 'AIza...' : 'sk-...'}
                     className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                   />
                   <button
@@ -492,17 +557,77 @@ export default function SettingsModal() {
                 <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
                   模型 ID
                 </span>
-                <input
-                  value={activeProfile.model}
-                  onChange={(e) => updateActiveProfile({ model: e.target.value })}
-                  onBlur={(e) => commitActiveProfilePatch({ model: e.target.value })}
-                  type="text"
-                  placeholder={activeProfile.provider === 'fal' ? DEFAULT_FAL_MODEL : getDefaultModelForMode(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode)}
-                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                />
+                <div ref={modelFieldRef} className="relative">
+                  <div className="flex items-stretch gap-2">
+                    <input
+                      value={activeProfile.model}
+                      onChange={(e) => updateActiveProfile({ model: e.target.value })}
+                      onBlur={(e) => commitActiveProfilePatch({ model: e.target.value })}
+                      type="text"
+                      placeholder={activeProfile.provider === 'gemini' ? DEFAULT_GEMINI_MODEL : getDefaultModelForMode(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode)}
+                      className="flex-1 min-w-0 rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                    />
+                    {activeProfile.provider === 'openai' && (
+                      <button
+                        type="button"
+                        onClick={fetchModelList}
+                        disabled={modelListLoading}
+                        title="从 API 拉取模型列表"
+                        aria-label="从 API 拉取模型列表"
+                        className="flex-shrink-0 rounded-xl border border-gray-200/70 bg-white/60 px-2.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+                      >
+                        <svg
+                          className={`w-4 h-4 ${modelListLoading ? 'animate-spin' : ''}`}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M21 12a9 9 0 0 1-15.5 6.36L3 21" />
+                          <path d="M3 12a9 9 0 0 1 15.5-6.36L21 3" />
+                          <path d="M21 3v6h-6" />
+                          <path d="M3 21v-6h6" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                  {modelListOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] py-1 max-h-60 overflow-y-auto ring-1 ring-black/5 dark:ring-white/10 animate-dropdown-down">
+                      {modelListLoading ? (
+                        <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">加载中…</div>
+                      ) : modelListError ? (
+                        <div className="px-3 py-2 text-xs text-red-500 dark:text-red-400 break-all">
+                          {modelListError}
+                          <div className="mt-1 text-gray-400 dark:text-gray-500">可继续手动填写模型 ID。</div>
+                        </div>
+                      ) : modelList && modelList.length > 0 ? (
+                        modelList.map((id) => (
+                          <div
+                            key={id}
+                            onClick={() => {
+                              commitActiveProfilePatch({ model: id })
+                              setModelListOpen(false)
+                            }}
+                            className={`px-3 py-2 text-xs cursor-pointer transition-colors break-all ${
+                              id === activeProfile.model
+                                ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium'
+                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/[0.06]'
+                            }`}
+                          >
+                            {id}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">暂无可用模型</div>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <div data-selectable-text className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
-                  {activeProfile.provider === 'fal' ? (
-                    <>当前适配 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_FAL_MODEL}</code>。</>
+                  {activeProfile.provider === 'gemini' ? (
+                    <>使用 Google 多模态图像模型，例如 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_GEMINI_MODEL}</code>。不支持遮罩与 quality 参数；多图生成会并发拆单。</>
                   ) : (activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode) === 'responses' ? (
                     <>Responses API 需要使用支持 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">image_generation</code> 工具的文本模型，例如 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_RESPONSES_MODEL}</code>。</>
                   ) : (
@@ -511,20 +636,18 @@ export default function SettingsModal() {
                 </div>
               </label>
 
-              {activeProfile.provider === 'openai' && (
-                <label className="block">
-                  <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">请求超时 (秒)</span>
-                  <input
-                    value={timeoutInput}
-                    onChange={(e) => setTimeoutInput(e.target.value)}
-                    onBlur={commitTimeout}
-                    type="number"
-                    min={10}
-                    max={600}
-                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                  />
-                </label>
-              )}
+              <label className="block">
+                <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">请求超时 (秒)</span>
+                <input
+                  value={timeoutInput}
+                  onChange={(e) => setTimeoutInput(e.target.value)}
+                  onBlur={commitTimeout}
+                  type="number"
+                  min={10}
+                  max={600}
+                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                />
+              </label>
             </div>
           </section>
 

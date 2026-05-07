@@ -1,6 +1,6 @@
 import type { TaskRecord, StoredImage } from '../types'
 
-const DB_NAME = 'gpt-image-playground'
+const DB_NAME = 'image-playground'
 const DB_VERSION = 1
 const STORE_TASKS = 'tasks'
 const STORE_IMAGES = 'images'

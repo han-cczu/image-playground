@@ -1,19 +1,32 @@
 // ===== 设置 =====
 
 export type ApiMode = 'images' | 'responses'
-export type ApiProvider = 'openai' | 'fal'
+export type ApiProvider = 'openai' | 'gemini'
 
-export interface ApiProfile {
+interface ApiProfileBase {
   id: string
   name: string
-  provider: ApiProvider
   baseUrl: string
   apiKey: string
   model: string
   timeout: number
+}
+
+export interface OpenAIProfile extends ApiProfileBase {
+  provider: 'openai'
   apiMode: ApiMode
   codexCli: boolean
   apiProxy: boolean
+}
+
+export interface GeminiProfile extends ApiProfileBase {
+  provider: 'gemini'
+}
+
+export type ApiProfile = OpenAIProfile | GeminiProfile
+
+export function isOpenAIProfile(p: ApiProfile): p is OpenAIProfile {
+  return p.provider === 'openai'
 }
 
 export interface AppSettings {
@@ -26,6 +39,7 @@ export interface AppSettings {
   codexCli: boolean
   apiProxy: boolean
   clearInputAfterSubmit: boolean
+  theme: 'light' | 'dark' | 'system'
   profiles: ApiProfile[]
   activeProfileId: string
 }
@@ -79,12 +93,6 @@ export interface TaskRecord {
   apiProfileName?: string
   /** 生成时使用的模型 ID */
   apiModel?: string
-  /** fal.ai 队列请求 ID，用于连接断开后的结果恢复 */
-  falRequestId?: string
-  /** fal.ai 队列 endpoint，用于连接断开后的状态和结果查询 */
-  falEndpoint?: string
-  /** fal.ai 任务连接断开后是否等待自动恢复 */
-  falRecoverable?: boolean
   /** API 返回的实际生效参数，用于标记与请求值不一致的情况 */
   actualParams?: Partial<TaskParams>
   /** 输出图片对应的实际生效参数，key 为 outputImages 中的图片 id */
@@ -105,6 +113,8 @@ export interface TaskRecord {
   elapsed: number | null
   /** 是否收藏 */
   isFavorite?: boolean
+  /** 自定义排序值（降序）。未设置时按 createdAt 排序。 */
+  sortOrder?: number
 }
 
 // ===== IndexedDB 存储的图片 =====
@@ -180,24 +190,6 @@ export interface ResponsesApiResponse {
     moderation?: string
     n?: number
   }>
-}
-
-export interface FalImageFile {
-  url?: string
-  content_type?: string
-  file_name?: string
-  width?: number
-  height?: number
-  b64_json?: string
-  base64?: string
-  data?: string
-}
-
-export interface FalApiResponse {
-  images?: FalImageFile[]
-  image?: FalImageFile | string
-  url?: string
-  seed?: number
 }
 
 // ===== 导出数据 =====

@@ -1,8 +1,17 @@
 import { useEffect, useState, useRef } from 'react'
+import type { DraggableAttributes } from '@dnd-kit/core'
+import type { SyntheticListenerMap } from '@dnd-kit/core/dist/hooks/utilities'
 import type { TaskRecord } from '../types'
 import { useStore, getCachedImage, ensureImageCached, updateTaskInStore, retryTask } from '../store'
-import { formatImageRatio } from '../lib/size'
+import { formatImageRatio } from '../lib/image/size'
 import { ParamValue } from '../lib/paramDisplay'
+
+interface DragHandle {
+  ref: (node: HTMLElement | null) => void
+  listeners: SyntheticListenerMap | undefined
+  attributes: DraggableAttributes
+  disabled: boolean
+}
 
 interface Props {
   task: TaskRecord
@@ -11,6 +20,7 @@ interface Props {
   onDelete: () => void
   onClick: (e: React.MouseEvent | React.TouchEvent) => void
   isSelected?: boolean
+  dragHandle?: DragHandle
 }
 
 export default function TaskCard({
@@ -20,6 +30,7 @@ export default function TaskCard({
   onDelete,
   onClick,
   isSelected,
+  dragHandle,
 }: Props) {
   const [thumbSrc, setThumbSrc] = useState<string>('')
   const [coverRatio, setCoverRatio] = useState<string>('')
@@ -103,11 +114,11 @@ export default function TaskCard({
 
   // 定时更新运行中任务的计时
   useEffect(() => {
-    if (task.status !== 'running' && !(task.status === 'error' && task.falRecoverable)) return
+    if (task.status !== 'running') return
     const id = setInterval(() => setNow(Date.now()), 1000)
     setNow(Date.now())
     return () => clearInterval(id)
-  }, [task.falRecoverable, task.status])
+  }, [task.status])
 
   // 加载缩略图
   useEffect(() => {
@@ -150,7 +161,7 @@ export default function TaskCard({
 
   const duration = (() => {
     let seconds: number
-    if (task.status === 'running' || task.falRecoverable) {
+    if (task.status === 'running') {
       seconds = Math.floor((now - task.createdAt) / 1000)
     } else if (task.elapsed != null) {
       seconds = Math.floor(task.elapsed / 1000)
@@ -166,8 +177,7 @@ export default function TaskCard({
     : task.actualParams
   const isSwipeReady = Math.abs(swipeOffset) >= 40
   const showSwipeAction = isSwipeReady || swipeActionActive
-  const isFalReconnecting = task.status === 'error' && task.falRecoverable
-  const showRunningTimer = task.status === 'running' || isFalReconnecting
+  const showRunningTimer = task.status === 'running'
   const swipeBgClass = showSwipeAction
     ? swipeStartedSelected
       ? 'bg-gray-500 dark:bg-gray-600'
@@ -194,7 +204,7 @@ export default function TaskCard({
       </div>
 
       <div
-        className={`relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer duration-200 hover:shadow-lg dark:hover:bg-gray-800/80 ${
+        className={`group relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer duration-200 hover:shadow-lg dark:hover:bg-gray-800/80 ${
           !isSwiping ? 'transition-[box-shadow,border-color,background-color,transform]' : 'transition-[box-shadow,border-color,background-color]'
         } ${
           task.status === 'running'
@@ -227,6 +237,35 @@ export default function TaskCard({
           </svg>
         </div>
       )}
+      {/* 拖拽手柄（仅桌面端） */}
+      {dragHandle && (
+        <button
+          type="button"
+          ref={dragHandle.ref}
+          {...(dragHandle.disabled ? {} : dragHandle.attributes)}
+          {...(dragHandle.disabled ? {} : dragHandle.listeners)}
+          onClick={(e) => e.stopPropagation()}
+          title={dragHandle.disabled ? '清除筛选后可调整顺序' : '拖动调整顺序'}
+          aria-label="拖动调整顺序"
+          className={`hidden sm:flex absolute top-2 z-10 w-5 h-5 items-center justify-center rounded-md transition-opacity ${
+            isSelected ? 'right-9' : 'right-2'
+          } ${
+            dragHandle.disabled
+              ? 'opacity-20 cursor-not-allowed text-gray-400 dark:text-gray-500'
+              : 'opacity-0 group-hover:opacity-60 hover:!opacity-100 cursor-grab active:cursor-grabbing text-gray-500 dark:text-gray-400 bg-white/70 dark:bg-gray-900/70 backdrop-blur'
+          }`}
+          style={{ touchAction: 'none' }}
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="9" cy="6" r="1.5" />
+            <circle cx="15" cy="6" r="1.5" />
+            <circle cx="9" cy="12" r="1.5" />
+            <circle cx="15" cy="12" r="1.5" />
+            <circle cx="9" cy="18" r="1.5" />
+            <circle cx="15" cy="18" r="1.5" />
+          </svg>
+        </button>
+      )}
       <div className="flex h-40">
         {/* 左侧图片区域 */}
         <div className="w-40 min-w-[10rem] h-full bg-gray-100 dark:bg-black/20 relative flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -254,27 +293,7 @@ export default function TaskCard({
               <span className="text-xs text-gray-400 dark:text-gray-500">生成中...</span>
             </div>
           )}
-          {task.status === 'error' && isFalReconnecting && (
-            <div className="flex flex-col items-center gap-1 px-2">
-              <svg
-                className="w-7 h-7 text-yellow-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                />
-              </svg>
-              <span className="text-xs text-yellow-500 text-center leading-tight">
-                重连中
-              </span>
-            </div>
-          )}
-          {task.status === 'error' && !isFalReconnecting && (
+          {task.status === 'error' && (
             <div className="flex flex-col items-center gap-1 px-2">
               <svg
                 className="w-7 h-7 text-red-400"
@@ -371,7 +390,7 @@ export default function TaskCard({
               className="flex gap-1 justify-end flex-shrink-0"
               onClick={(e) => e.stopPropagation()}
             >
-              {task.status === 'error' && !isFalReconnecting && (
+              {task.status === 'error' && (
                 <button
                   onClick={() => retryTask(task)}
                   className="p-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-gray-400 hover:text-blue-500 transition"

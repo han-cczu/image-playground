@@ -1,6 +1,72 @@
 import { useMemo, useRef, useState, useEffect } from 'react'
-import { useStore, reuseConfig, editOutputs, removeTask } from '../store'
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import type { TaskRecord } from '../types'
+import { useStore, reuseConfig, editOutputs, removeTask, reorderTask } from '../store'
 import TaskCard from './TaskCard'
+
+interface SortableTaskCardProps {
+  task: TaskRecord
+  isSelected: boolean
+  dragDisabled: boolean
+  onClick: (e: React.MouseEvent | React.TouchEvent) => void
+  onReuse: () => void
+  onEditOutputs: () => void
+  onDelete: () => void
+}
+
+function SortableTaskCard({ task, isSelected, dragDisabled, ...handlers }: SortableTaskCardProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: task.id, disabled: dragDisabled })
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : undefined,
+    zIndex: isDragging ? 20 : undefined,
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="task-card-wrapper"
+      data-task-id={task.id}
+    >
+      <TaskCard
+        task={task}
+        isSelected={isSelected}
+        dragHandle={{
+          ref: setActivatorNodeRef,
+          listeners,
+          attributes,
+          disabled: dragDisabled,
+        }}
+        {...handlers}
+      />
+    </div>
+  )
+}
 
 export default function TaskGrid() {
   const tasks = useStore((s) => s.tasks)
@@ -25,20 +91,45 @@ export default function TaskGrid() {
   const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
   const filteredTasks = useMemo(() => {
-    const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt)
+    const sorted = [...tasks].sort(
+      (a, b) => (b.sortOrder ?? b.createdAt) - (a.sortOrder ?? a.createdAt),
+    )
     const q = searchQuery.trim().toLowerCase()
-    
+
     return sorted.filter((t) => {
       if (filterFavorite && !t.isFavorite) return false
       const matchStatus = filterStatus === 'all' || t.status === filterStatus
       if (!matchStatus) return false
-      
+
       if (!q) return true
       const prompt = (t.prompt || '').toLowerCase()
       const paramStr = JSON.stringify(t.params).toLowerCase()
       return prompt.includes(q) || paramStr.includes(q)
     })
   }, [tasks, searchQuery, filterStatus, filterFavorite])
+
+  const dragDisabled =
+    searchQuery.trim() !== '' ||
+    filterStatus !== 'all' ||
+    filterFavorite ||
+    filteredTasks.length < 2
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  )
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = filteredTasks.findIndex((t) => t.id === active.id)
+    const newIndex = filteredTasks.findIndex((t) => t.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    const reordered = arrayMove(filteredTasks, oldIndex, newIndex)
+    const pos = reordered.findIndex((t) => t.id === active.id)
+    const prevId = pos > 0 ? reordered[pos - 1].id : null
+    const nextId = pos < reordered.length - 1 ? reordered[pos + 1].id : null
+    reorderTask(String(active.id), prevId, nextId)
+  }
 
   const handleDelete = (task: typeof tasks[0]) => {
     setConfirmDialog({
@@ -198,35 +289,39 @@ export default function TaskGrid() {
       data-task-grid-root
       className="relative min-h-[50vh]"
     >
-      <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
-        {filteredTasks.map((task) => (
-          <div key={task.id} className="task-card-wrapper" data-task-id={task.id}>
-            <TaskCard
-              task={task}
-              onClick={(e) => {
-                if (Date.now() < suppressClickUntil.current) {
-                  e.preventDefault()
-                  return
-                }
-                suppressClickUntil.current = 0
-                const isCtrl = isMac ? e.metaKey : e.ctrlKey
-                if (isCtrl) {
-                  useStore.getState().toggleTaskSelection(task.id)
-                } else if (selectedTaskIds.length > 0) {
-                  clearSelection()
-                  setDetailTaskId(task.id)
-                } else {
-                  setDetailTaskId(task.id)
-                }
-              }}
-              onReuse={() => reuseConfig(task)}
-              onEditOutputs={() => editOutputs(task)}
-              onDelete={() => handleDelete(task)}
-              isSelected={selectedTaskIds.includes(task.id)}
-            />
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={filteredTasks.map((t) => t.id)} strategy={rectSortingStrategy}>
+          <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
+            {filteredTasks.map((task) => (
+              <SortableTaskCard
+                key={task.id}
+                task={task}
+                isSelected={selectedTaskIds.includes(task.id)}
+                dragDisabled={dragDisabled}
+                onClick={(e) => {
+                  if (Date.now() < suppressClickUntil.current) {
+                    e.preventDefault()
+                    return
+                  }
+                  suppressClickUntil.current = 0
+                  const isCtrl = isMac ? (e as React.MouseEvent).metaKey : (e as React.MouseEvent).ctrlKey
+                  if (isCtrl) {
+                    useStore.getState().toggleTaskSelection(task.id)
+                  } else if (selectedTaskIds.length > 0) {
+                    clearSelection()
+                    setDetailTaskId(task.id)
+                  } else {
+                    setDetailTaskId(task.id)
+                  }
+                }}
+                onReuse={() => reuseConfig(task)}
+                onEditOutputs={() => editOutputs(task)}
+                onDelete={() => handleDelete(task)}
+              />
+            ))}
           </div>
-        ))}
-      </div>
+        </SortableContext>
+      </DndContext>
       {selectionBox && (
         <div
           className="fixed bg-blue-500/20 border border-blue-500/50 pointer-events-none z-[30]"

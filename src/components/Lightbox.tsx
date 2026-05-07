@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useStore, getCachedImage, ensureImageCached } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { createMaskPreviewDataUrl } from '../lib/canvasImage'
+import { createMaskPreviewDataUrl } from '../lib/image/canvasImage'
 
 const MIN_SCALE = 1
 const MAX_SCALE = 10

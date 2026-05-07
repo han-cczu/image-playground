@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useStore, addImageFromUrl } from '../store'
-import { copyBlobToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
+import { copyBlobToClipboard, getClipboardFailureMessage } from '../lib/image/clipboard'
 
 export default function ImageContextMenu() {
   const [menuInfo, setMenuInfo] = useState<{ src: string; x: number; y: number } | null>(null)

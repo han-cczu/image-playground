@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { ensureImageCached, useStore } from '../store'
-import { canvasToBlob, loadImage } from '../lib/canvasImage'
+import { canvasToBlob, loadImage } from '../lib/image/canvasImage'
 import { storeImage } from '../lib/db'
-import { prepareMaskTargetDataUrl, replaceMaskTargetImage } from '../lib/maskPreprocess'
+import { prepareMaskTargetDataUrl, replaceMaskTargetImage } from '../lib/image/maskPreprocess'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import {
   clampViewTransform,
@@ -14,7 +14,7 @@ import {
   zoomAtPoint,
   type Point,
   type ViewTransform,
-} from '../lib/viewportTransform'
+} from '../lib/image/viewportTransform'
 
 type Tool = 'brush' | 'eraser'
 

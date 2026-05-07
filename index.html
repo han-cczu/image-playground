@@ -11,6 +11,23 @@
     <link rel="apple-touch-icon" href="./pwa-icon.svg" />
     <link rel="icon" href="./pwa-icon.svg" type="image/svg+xml" />
     <title>GPT Image Playground</title>
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem('gpt-image-playground');
+          var theme = 'light';
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            var stored = parsed && parsed.state && parsed.state.settings && parsed.state.settings.theme;
+            if (stored === 'light' || stored === 'dark' || stored === 'system') theme = stored;
+          }
+          var isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (isDark) document.documentElement.classList.add('dark');
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', isDark ? '#09090b' : '#ffffff');
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body class="bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100 min-h-screen">
     <div id="root"></div>
