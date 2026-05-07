@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "审 SettingsModal 改动是否符合组件、按钮、确认对话框规范"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "审 draft 模式与 commit 时机调整是否符合状态管理约定"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "tsc / 测试 / 命名 / 不引入死代码等通用质量门槛"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "draft 操作需保持 ApiProfile 判别联合的类型收窄,不允许 as any 绕过"}
+{"file": ".trellis/tasks/05-07-settings-manual-save-button/prd.md", "reason": "对照 PRD 的 Acceptance Criteria 验收"}

@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "改动落在 SettingsModal.tsx 单文件,需要遵守组件结构与受控/非受控 input、确认对话框、按钮样式约定"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "core 是 draft 模式 + zustand commit 时机的调整,需要遵守状态管理约定"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "AppSettings 是判别联合(OpenAIProfile | GeminiProfile),draft 操作需保持类型收窄"}
+{"file": ".trellis/tasks/05-07-settings-manual-save-button/prd.md", "reason": "本任务的需求与验收标准"}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { normalizeBaseUrl } from '../lib/api'
 import { isApiProxyAvailable, readClientDevProxyConfig } from '../lib/api/devProxy'
 import { listModels } from '../lib/api/listModels'
@@ -34,8 +34,9 @@ export default function SettingsModal() {
   const settings = useStore((s) => s.settings)
   const setSettings = useStore((s) => s.setSettings)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
+  const showToast = useStore((s) => s.showToast)
   const importInputRef = useRef<HTMLInputElement>(null)
-  
+
   const [draft, setDraft] = useState<AppSettings>(normalizeSettings(settings))
   const [timeoutInput, setTimeoutInput] = useState(String(getActiveApiProfile(settings).timeout))
   const [showApiKey, setShowApiKey] = useState(false)
@@ -45,7 +46,7 @@ export default function SettingsModal() {
   const [modelList, setModelList] = useState<string[] | null>(null)
   const [modelListError, setModelListError] = useState<string | null>(null)
   const modelFieldRef = useRef<HTMLDivElement>(null)
-  
+
   const apiProxyAvailable = isApiProxyAvailable(readClientDevProxyConfig())
   const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
   const apiProxyEnabled = apiProxyAvailable && activeProfile.provider === 'openai' && activeProfile.apiProxy
@@ -54,6 +55,27 @@ export default function SettingsModal() {
     apiMode === 'responses' ? DEFAULT_RESPONSES_MODEL : DEFAULT_IMAGES_MODEL
 
   const wasSettingsOpenRef = useRef(false)
+
+  // 把 timeoutInput 折叠回 draft：在保存与 dirty 检测时用,确保 timeoutInput 中的改动也算数
+  const buildFlushedDraft = useCallback((): AppSettings => {
+    const nextTimeout = Number(timeoutInput)
+    const normalizedTimeout =
+      timeoutInput.trim() === '' || Number.isNaN(nextTimeout) ? activeProfile.timeout : nextTimeout
+    if (normalizedTimeout === activeProfile.timeout) return draft
+    return {
+      ...draft,
+      profiles: draft.profiles.map((profile) =>
+        profile.id === activeProfile.id
+          ? ({ ...profile, timeout: normalizedTimeout } as ApiProfile)
+          : profile,
+      ),
+    }
+  }, [draft, activeProfile.id, activeProfile.timeout, timeoutInput])
+
+  const isDirty = useMemo(
+    () => JSON.stringify(buildFlushedDraft()) !== JSON.stringify(settings),
+    [buildFlushedDraft, settings],
+  )
 
   useEffect(() => {
     if (!showSettings) {
@@ -109,39 +131,41 @@ export default function SettingsModal() {
     setSettings(normalizedDraft)
   }
 
-  const getDraftWithActiveProfilePatch = (patch: Partial<ApiProfile>): AppSettings => ({
-    ...draft,
-    profiles: draft.profiles.map((profile) =>
-      profile.id === activeProfile.id ? ({ ...profile, ...patch } as ApiProfile) : profile,
-    ),
-  })
-
-  const updateActiveProfile = (patch: Partial<ApiProfile>, commit = false) => {
-    const nextDraft = getDraftWithActiveProfilePatch(patch)
-    setDraft(nextDraft)
-    if (commit) commitSettings(nextDraft)
+  const updateActiveProfile = (patch: Partial<ApiProfile>) => {
+    setDraft((prev) => ({
+      ...prev,
+      profiles: prev.profiles.map((profile) =>
+        profile.id === activeProfile.id ? ({ ...profile, ...patch } as ApiProfile) : profile,
+      ),
+    }))
   }
 
-  const commitActiveProfilePatch = (patch: Partial<ApiProfile>) => {
-    const nextDraft = getDraftWithActiveProfilePatch(patch)
-    commitSettings(nextDraft)
-  }
+  const resetDraft = useCallback(() => {
+    const fresh = normalizeSettings(settings)
+    setDraft(fresh)
+    setTimeoutInput(String(getActiveApiProfile(fresh).timeout))
+  }, [settings])
 
   const handleClose = () => {
-    const nextTimeout = Number(timeoutInput)
-    const normalizedTimeout =
-      timeoutInput.trim() === '' || Number.isNaN(nextTimeout)
-        ? DEFAULT_SETTINGS.timeout
-        : nextTimeout
-    const nextDraft: AppSettings = {
-      ...draft,
-      profiles: draft.profiles.map((profile) =>
-        profile.id === activeProfile.id
-          ? ({ ...profile, timeout: normalizedTimeout } as ApiProfile)
-          : profile,
-      ),
+    if (!isDirty) {
+      setShowSettings(false)
+      return
     }
-    commitSettings(nextDraft)
+    setConfirmDialog({
+      title: '放弃未保存的改动?',
+      message: '设置面板有未保存的改动，关闭将丢失这些改动。是否继续?',
+      confirmText: '放弃改动',
+      tone: 'warning',
+      action: () => {
+        resetDraft()
+        setShowSettings(false)
+      },
+    })
+  }
+
+  const handleSave = () => {
+    commitSettings(buildFlushedDraft())
+    showToast('设置已保存', 'success')
     setShowSettings(false)
   }
 
@@ -150,8 +174,10 @@ export default function SettingsModal() {
     const normalizedTimeout =
       timeoutInput.trim() === '' ? DEFAULT_SETTINGS.timeout : Number.isNaN(nextTimeout) ? activeProfile.timeout : nextTimeout
     setTimeoutInput(String(normalizedTimeout))
-    updateActiveProfile({ timeout: normalizedTimeout }, true)
-  }, [draft, activeProfile.id, activeProfile.timeout, timeoutInput])
+    if (normalizedTimeout !== activeProfile.timeout) {
+      updateActiveProfile({ timeout: normalizedTimeout })
+    }
+  }, [activeProfile.id, activeProfile.timeout, timeoutInput])
 
   useCloseOnEscape(showSettings, handleClose)
 
@@ -215,30 +241,27 @@ export default function SettingsModal() {
 
   const createNewProfile = () => {
     const profile = createDefaultOpenAIProfile({ id: newId('openai'), name: '新配置' })
-    const nextDraft = normalizeSettings({ 
-        ...draft, 
-        profiles: [...draft.profiles, profile],
-        activeProfileId: profile.id
-    })
-    commitSettings(nextDraft)
+    setDraft(normalizeSettings({
+      ...draft,
+      profiles: [...draft.profiles, profile],
+      activeProfileId: profile.id,
+    }))
     setShowProfileMenu(false)
   }
 
   const switchProfile = (id: string) => {
-    const nextDraft = normalizeSettings({ ...draft, activeProfileId: id })
-    setDraft(nextDraft)
+    setDraft(normalizeSettings({ ...draft, activeProfileId: id }))
     setShowProfileMenu(false)
   }
-  
+
   const deleteProfile = (id: string) => {
     if (draft.profiles.length <= 1) return
     const nextProfiles = draft.profiles.filter((item) => item.id !== id)
-    const nextDraft = normalizeSettings({
+    setDraft(normalizeSettings({
       ...draft,
       profiles: nextProfiles,
       activeProfileId: draft.activeProfileId === id ? nextProfiles[0].id : draft.activeProfileId,
-    })
-    commitSettings(nextDraft)
+    }))
   }
 
   return (
@@ -288,7 +311,7 @@ export default function SettingsModal() {
                   <span className="block text-xs text-gray-500 dark:text-gray-400">提交任务后清空输入框</span>
                   <button
                     type="button"
-                    onClick={() => commitSettings({ ...draft, clearInputAfterSubmit: !draft.clearInputAfterSubmit })}
+                    onClick={() => setDraft({ ...draft, clearInputAfterSubmit: !draft.clearInputAfterSubmit })}
                     className={`relative inline-flex h-3.5 w-6 items-center rounded-full transition-colors ${draft.clearInputAfterSubmit ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
                     role="switch"
                     aria-checked={draft.clearInputAfterSubmit}
@@ -312,7 +335,7 @@ export default function SettingsModal() {
                 </svg>
                 API 配置
               </h4>
-              
+
               <div className="relative w-44 sm:w-48">
                 <button
                   type="button"
@@ -330,7 +353,7 @@ export default function SettingsModal() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
-                
+
                 {showProfileMenu && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setShowProfileMenu(false)} />
@@ -364,7 +387,7 @@ export default function SettingsModal() {
                                 {providerLabel(profile.provider)}
                               </span>
                             </button>
-                            
+
                             {draft.profiles.length > 1 && (
                               <button
                                 type="button"
@@ -399,7 +422,6 @@ export default function SettingsModal() {
                 <input
                   value={activeProfile.name}
                   onChange={(e) => updateActiveProfile({ name: e.target.value })}
-                  onBlur={(e) => commitActiveProfilePatch({ name: e.target.value })}
                   type="text"
                   className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                 />
@@ -409,7 +431,7 @@ export default function SettingsModal() {
                 <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">服务商类型</span>
                 <Select
                   value={activeProfile.provider}
-                  onChange={(value) => updateActiveProfile(switchApiProfileProvider(activeProfile, value as ApiProfile['provider']), true)}
+                  onChange={(value) => updateActiveProfile(switchApiProfileProvider(activeProfile, value as ApiProfile['provider']))}
                   options={[{ label: 'OpenAI 兼容接口', value: 'openai' }, { label: 'Google Gemini', value: 'gemini' }]}
                   className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                 />
@@ -422,7 +444,7 @@ export default function SettingsModal() {
                     <div
                       onClick={(e) => {
                         e.preventDefault()
-                        updateActiveProfile({ codexCli: !activeProfile.codexCli }, true)
+                        updateActiveProfile({ codexCli: !activeProfile.codexCli })
                       }}
                       className="flex cursor-pointer items-center gap-1.5"
                       role="switch"
@@ -437,7 +459,6 @@ export default function SettingsModal() {
                   <input
                     value={activeProfile.baseUrl}
                     onChange={(e) => updateActiveProfile({ baseUrl: e.target.value })}
-                    onBlur={(e) => commitActiveProfilePatch({ baseUrl: e.target.value })}
                     type="text"
                     disabled={apiProxyEnabled}
                     placeholder={DEFAULT_SETTINGS.baseUrl}
@@ -459,7 +480,6 @@ export default function SettingsModal() {
                   <input
                     value={activeProfile.baseUrl}
                     onChange={(e) => updateActiveProfile({ baseUrl: e.target.value })}
-                    onBlur={(e) => commitActiveProfilePatch({ baseUrl: e.target.value })}
                     type="text"
                     placeholder={DEFAULT_GEMINI_BASE_URL}
                     className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
@@ -476,7 +496,7 @@ export default function SettingsModal() {
                     <span className="block text-xs text-gray-500 dark:text-gray-400">API 代理</span>
                     <button
                       type="button"
-                      onClick={() => updateActiveProfile({ apiProxy: !activeProfile.apiProxy }, true)}
+                      onClick={() => updateActiveProfile({ apiProxy: !activeProfile.apiProxy })}
                       className={`relative inline-flex h-3.5 w-6 items-center rounded-full transition-colors ${activeProfile.apiProxy ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
                       role="switch"
                       aria-checked={activeProfile.apiProxy}
@@ -497,7 +517,6 @@ export default function SettingsModal() {
                   <input
                     value={activeProfile.apiKey}
                     onChange={(e) => updateActiveProfile({ apiKey: e.target.value })}
-                    onBlur={(e) => commitActiveProfilePatch({ apiKey: e.target.value })}
                     type={showApiKey ? 'text' : 'password'}
                     placeholder={activeProfile.provider === 'gemini' ? 'AIza...' : 'sk-...'}
                     className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
@@ -539,7 +558,7 @@ export default function SettingsModal() {
                         activeProfile.model === DEFAULT_IMAGES_MODEL || activeProfile.model === DEFAULT_RESPONSES_MODEL
                           ? getDefaultModelForMode(apiMode)
                           : activeProfile.model
-                      updateActiveProfile({ apiMode, model: nextModel }, true)
+                      updateActiveProfile({ apiMode, model: nextModel })
                     }}
                     options={[
                       { label: 'Images API (/v1/images)', value: 'images' },
@@ -562,7 +581,6 @@ export default function SettingsModal() {
                     <input
                       value={activeProfile.model}
                       onChange={(e) => updateActiveProfile({ model: e.target.value })}
-                      onBlur={(e) => commitActiveProfilePatch({ model: e.target.value })}
                       type="text"
                       placeholder={activeProfile.provider === 'gemini' ? DEFAULT_GEMINI_MODEL : getDefaultModelForMode(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode)}
                       className="flex-1 min-w-0 rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
@@ -607,7 +625,7 @@ export default function SettingsModal() {
                           <div
                             key={id}
                             onClick={() => {
-                              commitActiveProfilePatch({ model: id })
+                              updateActiveProfile({ model: id })
                               setModelListOpen(false)
                             }}
                             className={`px-3 py-2 text-xs cursor-pointer transition-colors break-all ${
@@ -700,6 +718,24 @@ export default function SettingsModal() {
               </button>
             </div>
           </section>
+
+          <div className="pt-5 border-t border-gray-100 dark:border-white/[0.08] flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={handleClose}
+              className="rounded-xl px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06]"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!isDirty}
+              className="rounded-xl bg-blue-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-blue-500 dark:hover:bg-blue-600"
+            >
+              保存
+            </button>
+          </div>
         </div>
       </div>
     </div>
