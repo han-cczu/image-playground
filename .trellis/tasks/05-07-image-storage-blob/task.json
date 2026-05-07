@@ -1,9 +1,9 @@
 {
-  "id": "settings-manual-save-button",
-  "name": "settings-manual-save-button",
-  "title": "settings-manual-save-button",
+  "id": "image-storage-blob",
+  "name": "image-storage-blob",
+  "title": "图片存储改为 Blob",
   "description": "",
-  "status": "in_progress",
+  "status": "planning",
   "dev_type": null,
   "scope": null,
   "package": null,
