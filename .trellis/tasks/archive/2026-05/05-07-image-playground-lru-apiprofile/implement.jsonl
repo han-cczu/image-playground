@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "LRU cache + store re-export 涉及 zustand store 相关约定"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "ApiProfile 判别联合改造的类型设计参考"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "通用代码质量规范"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "新增 lib/imageCache.test.ts 时确认放置位置"}
