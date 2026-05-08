@@ -58,7 +58,7 @@ export default function Header() {
       <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between">
         <div className="flex items-start gap-1">
           <h1 className="text-lg font-bold tracking-tight text-gray-800 dark:text-gray-100">
-            GPT Image Playground
+            Image Playground
           </h1>
         </div>
         <div className="flex items-center gap-1">

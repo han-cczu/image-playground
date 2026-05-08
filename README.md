@@ -1,4 +1,4 @@
-# GPT Image Playground
+# Image Playground
 
 基于 OpenAI 与 Google Gemini 图像接口的图片生成与编辑工作台。简洁的 Web UI，支持文本生图、最多 16 张参考图融合与遮罩编辑，所有数据存浏览器本地。
 
