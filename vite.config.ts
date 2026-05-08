@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react'
 import { readFileSync } from 'fs'
 import { normalizeDevProxyConfig } from './src/lib/api/devProxy'
 
+import { cloudflare } from "@cloudflare/vite-plugin";
+
 const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'))
 
 function loadDevProxyConfig() {
@@ -21,7 +23,7 @@ export default defineConfig(({ command }) => {
   const devProxyConfig = command === 'serve' ? loadDevProxyConfig() : null
 
   return {
-    plugins: [react()],
+    plugins: [react(), cloudflare()],
     base: './',
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version),
@@ -45,5 +47,5 @@ export default defineConfig(({ command }) => {
             }
           : undefined,
     },
-  }
+  };
 })
