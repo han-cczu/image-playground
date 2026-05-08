@@ -12,6 +12,16 @@ import {
 
 vi.mock('./db', () => ({
   getImage: vi.fn(),
+  storedImageToDataUrl: vi.fn((image: { dataUrl?: string; blob?: Blob; mime?: string }) => {
+    if (image.dataUrl) return Promise.resolve(image.dataUrl)
+    if (!image.blob) return Promise.resolve(undefined)
+    return image.blob.arrayBuffer().then((buffer) => {
+      const bytes = new Uint8Array(buffer)
+      let binary = ''
+      for (const byte of bytes) binary += String.fromCharCode(byte)
+      return `data:${image.blob?.type || image.mime || 'application/octet-stream'};base64,${btoa(binary)}`
+    })
+  }),
 }))
 
 import { getImage } from './db'
@@ -123,5 +133,18 @@ describe('imageCache', () => {
     expect(_getCacheSizeForTesting()).toBe(_MAX_ENTRIES_FOR_TESTING)
     expect(getCachedImage('k0')).toBeUndefined()
     expect(getCachedImage('fresh')).toBe('data:fresh')
+  })
+
+  it('ensureImageCached converts DB blob records to data URLs', async () => {
+    mockedGetImage.mockResolvedValueOnce({
+      id: 'blob-image',
+      blob: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }),
+      mime: 'image/png',
+    })
+
+    const result = await ensureImageCached('blob-image')
+
+    expect(result).toBe('data:image/png;base64,AQID')
+    expect(getCachedImage('blob-image')).toBe('data:image/png;base64,AQID')
   })
 })

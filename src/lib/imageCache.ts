@@ -1,4 +1,4 @@
-import { getImage } from './db'
+import { getImage, storedImageToDataUrl } from './db'
 
 /**
  * 图片 dataUrl 内存缓存。LRU 策略：超过 MAX_ENTRIES 时驱逐最久未访问项。
@@ -33,9 +33,11 @@ export async function ensureImageCached(id: string): Promise<string | undefined>
   if (cached !== undefined) return cached
   const rec = await getImage(id)
   if (rec) {
-    imageCache.set(id, rec.dataUrl)
+    const dataUrl = await storedImageToDataUrl(rec)
+    if (!dataUrl) return undefined
+    imageCache.set(id, dataUrl)
     evictIfOverflow()
-    return rec.dataUrl
+    return dataUrl
   }
   return undefined
 }

@@ -67,8 +67,9 @@ export function getAllImages(): Promise<StoredImage[]> {
   return dbTransaction(STORE_IMAGES, 'readonly', (s) => s.getAll())
 }
 
-export function putImage(image: StoredImage): Promise<IDBValidKey> {
-  return dbTransaction(STORE_IMAGES, 'readwrite', (s) => s.put(image))
+export async function putImage(image: StoredImage): Promise<IDBValidKey> {
+  const normalized = await normalizeImageForStorage(image)
+  return dbTransaction(STORE_IMAGES, 'readwrite', (s) => s.put(normalized))
 }
 
 export function deleteImage(id: string): Promise<undefined> {
@@ -80,6 +81,91 @@ export function clearImages(): Promise<undefined> {
 }
 
 // ===== Image hashing & dedup =====
+
+function createBytesFromBinary(binary: string): Uint8Array {
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
+function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(buffer).set(bytes)
+  return buffer
+}
+
+function getDataUrlMeta(dataUrl: string): { mime: string; isBase64: boolean; payload: string } {
+  const commaIndex = dataUrl.indexOf(',')
+  if (!dataUrl.startsWith('data:') || commaIndex < 0) {
+    throw new Error('图片 data URL 格式无效')
+  }
+
+  const meta = dataUrl.slice('data:'.length, commaIndex)
+  const parts = meta.split(';').filter(Boolean)
+  return {
+    mime: parts[0] || 'application/octet-stream',
+    isBase64: parts.some((part) => part.toLowerCase() === 'base64'),
+    payload: dataUrl.slice(commaIndex + 1),
+  }
+}
+
+export function dataUrlToImageBlob(dataUrl: string): { blob: Blob; mime: string } {
+  const { mime, isBase64, payload } = getDataUrlMeta(dataUrl)
+  const bytes = isBase64
+    ? createBytesFromBinary(atob(payload.replace(/\s/g, '')))
+    : new TextEncoder().encode(decodeURIComponent(payload))
+
+  return { blob: new Blob([copyBytesToArrayBuffer(bytes)], { type: mime }), mime }
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    const chunk = bytes.subarray(i, i + 0x8000)
+    binary += String.fromCharCode(...chunk)
+  }
+  return btoa(binary)
+}
+
+export async function blobToDataUrl(blob: Blob, fallbackMime = 'application/octet-stream'): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  return `data:${blob.type || fallbackMime};base64,${bytesToBase64(bytes)}`
+}
+
+export async function storedImageToDataUrl(image: StoredImage): Promise<string | undefined> {
+  if (image.dataUrl) return image.dataUrl
+  if (!image.blob) return undefined
+  return blobToDataUrl(image.blob, image.mime)
+}
+
+export async function storedImageToBytes(image: StoredImage): Promise<{ bytes: Uint8Array; mime: string } | undefined> {
+  if (image.blob) {
+    return {
+      bytes: new Uint8Array(await image.blob.arrayBuffer()),
+      mime: image.blob.type || image.mime || 'application/octet-stream',
+    }
+  }
+
+  if (!image.dataUrl) return undefined
+  const { blob, mime } = dataUrlToImageBlob(image.dataUrl)
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), mime }
+}
+
+async function normalizeImageForStorage(image: StoredImage): Promise<StoredImage> {
+  const source = image.blob
+    ? { blob: image.blob, mime: image.blob.type || image.mime || 'application/octet-stream' }
+    : image.dataUrl
+      ? dataUrlToImageBlob(image.dataUrl)
+      : { blob: undefined, mime: image.mime }
+
+  return {
+    id: image.id,
+    ...(source.blob ? { blob: source.blob } : {}),
+    ...(source.mime ? { mime: source.mime } : {}),
+    ...(image.createdAt !== undefined ? { createdAt: image.createdAt } : {}),
+    ...(image.source !== undefined ? { source: image.source } : {}),
+  }
+}
 
 export async function hashDataUrl(dataUrl: string): Promise<string> {
   if (!globalThis.crypto?.subtle) {
@@ -116,7 +202,8 @@ export async function storeImage(dataUrl: string, source: NonNullable<StoredImag
   const id = await hashDataUrl(dataUrl)
   const existing = await getImage(id)
   if (!existing) {
-    await putImage({ id, dataUrl, createdAt: Date.now(), source })
+    const { blob, mime } = dataUrlToImageBlob(dataUrl)
+    await putImage({ id, blob, mime, createdAt: Date.now(), source })
   }
   return id
 }

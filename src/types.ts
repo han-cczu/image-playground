@@ -121,7 +121,10 @@ export interface TaskRecord {
 
 export interface StoredImage {
   id: string
-  dataUrl: string
+  blob?: Blob
+  mime?: string
+  /** 旧版图片主体字段：仅用于读取历史 IndexedDB 记录，新写入会转为 blob */
+  dataUrl?: string
   /** 图片首次存储时间（ms） */
   createdAt?: number
   /** 图片来源：用户上传 / API 生成 / 遮罩 */

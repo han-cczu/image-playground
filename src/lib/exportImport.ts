@@ -10,28 +10,27 @@ import {
   getAllImages,
   putImage,
   clearImages,
+  storedImageToBytes,
 } from './db'
-import { clearImageCache, setCachedImage } from './imageCache'
+import { clearImageCache } from './imageCache'
 
-/** 从 dataUrl 解析出 MIME 扩展名和二进制数据 */
-function dataUrlToBytes(dataUrl: string): { ext: string; bytes: Uint8Array } {
-  const match = dataUrl.match(/^data:image\/(\w+);base64,/)
-  const ext = match?.[1] ?? 'png'
-  const b64 = dataUrl.replace(/^data:[^;]+;base64,/, '')
-  const binary = atob(b64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return { ext, bytes }
+function getImageExt(mime: string): string {
+  const ext = mime.split('/')[1]?.toLowerCase()
+  if (ext === 'jpeg') return 'jpg'
+  if (ext === 'png' || ext === 'jpg' || ext === 'webp') return ext
+  return 'png'
 }
 
-/** 将二进制数据还原为 dataUrl */
-function bytesToDataUrl(bytes: Uint8Array, filePath: string): string {
+function getMimeFromPath(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase() ?? 'png'
   const mimeMap: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }
-  const mime = mimeMap[ext] ?? 'image/png'
-  let binary = ''
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-  return `data:${mime};base64,${btoa(binary)}`
+  return mimeMap[ext] ?? 'image/png'
+}
+
+function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(buffer).set(bytes)
+  return buffer
 }
 
 /** 清空所有数据（含配置重置） */
@@ -75,7 +74,10 @@ export async function exportData() {
     const zipFiles: Record<string, Uint8Array | [Uint8Array, { mtime: Date }]> = {}
 
     for (const img of images) {
-      const { ext, bytes } = dataUrlToBytes(img.dataUrl)
+      const imageBytes = await storedImageToBytes(img)
+      if (!imageBytes) continue
+      const { bytes, mime } = imageBytes
+      const ext = getImageExt(mime)
       const path = `images/${img.id}.${ext}`
       const createdAt = img.createdAt ?? imageCreatedAtFallback.get(img.id) ?? exportedAt
       imageFiles[img.id] = { path, createdAt, source: img.source }
@@ -127,9 +129,9 @@ export async function importData(file: File): Promise<boolean> {
     for (const [id, info] of Object.entries(data.imageFiles)) {
       const bytes = unzipped[info.path]
       if (!bytes) continue
-      const dataUrl = bytesToDataUrl(bytes, info.path)
-      await putImage({ id, dataUrl, createdAt: info.createdAt, source: info.source })
-      setCachedImage(id, dataUrl)
+      const mime = getMimeFromPath(info.path)
+      const blob = new Blob([copyBytesToArrayBuffer(bytes)], { type: mime })
+      await putImage({ id, blob, mime, createdAt: info.createdAt, source: info.source })
     }
 
     for (const task of data.tasks) {

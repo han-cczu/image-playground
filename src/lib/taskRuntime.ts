@@ -8,6 +8,7 @@ import {
   getAllImages,
   deleteImage,
   storeImage,
+  storedImageToDataUrl,
 } from './db'
 import { callImageApi } from './api'
 import { validateMaskMatchesImage } from './image/canvasImage'
@@ -145,9 +146,16 @@ export async function initStore() {
     }
   }
   // 输入图片需要立即可用（用于显示在输入栏），仍然缓存这部分
-  const restoredInputImages = persistedInputImages
-    .map((img) => ({ ...img, dataUrl: img.dataUrl || imageById.get(img.id)?.dataUrl || '' }))
-    .filter((img) => img.dataUrl)
+  const restoredInputImages = (
+    await Promise.all(
+      persistedInputImages.map(async (img) => {
+        if (img.dataUrl) return img
+        const storedImage = imageById.get(img.id)
+        const dataUrl = storedImage ? await storedImageToDataUrl(storedImage) : ''
+        return { ...img, dataUrl: dataUrl ?? '' }
+      }),
+    )
+  ).filter((img) => img.dataUrl)
   for (const img of restoredInputImages) {
     setCachedImage(img.id, img.dataUrl)
   }
