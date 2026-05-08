@@ -2,6 +2,8 @@
 
 基于 OpenAI 与 Google Gemini 图像接口的图片生成与编辑工作台。简洁的 Web UI，支持文本生图、最多 16 张参考图融合与遮罩编辑，所有数据存浏览器本地。
 
+在线访问：[https://image-playground.diaohan111.workers.dev/](https://image-playground.diaohan111.workers.dev/)
+
 ---
 
 ## ✨ 核心特性
@@ -102,7 +104,7 @@ npm run build
 集成示例（如 New API 等聊天系统中以 URL 形式跳转）：
 
 ```text
-https://你的部署地址?apiUrl={address}&apiKey={key}
+https://image-playground.diaohan111.workers.dev/?apiUrl={address}&apiKey={key}
 ```
 
 ---
