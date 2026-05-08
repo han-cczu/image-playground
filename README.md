@@ -32,7 +32,7 @@
 - **智能诊断提示**：检测到接口返回提示词被改写或缺少标准字段时，主动提示是否开启 Codex CLI 模式。
 
 ### 🔒 隐私与本地优先
-- 任务记录、生成图片、API 配置全部存浏览器（IndexedDB + localStorage），**不经过任何第三方服务器**。
+- 任务记录、生成图片、API 配置全部存浏览器（IndexedDB Blob 存储 + localStorage），**不经过任何第三方服务器**。
 - 图片按 SHA-256 哈希去重，多任务引用同一张图只占一份空间。
 - 支持作为 PWA 安装到桌面 / 主屏，离线可打开应用外壳。
 
@@ -114,4 +114,4 @@ https://你的部署地址?apiUrl={address}&apiKey={key}
 - **样式方案**：[Tailwind CSS 3](https://tailwindcss.com/)
 - **状态管理**：[Zustand](https://zustand.docs.pmnd.rs/)
 - **拖拽交互**：[dnd-kit](https://dndkit.com/)
-- **本地数据**：IndexedDB + localStorage
+- **本地数据**：IndexedDB Blob 存储 + localStorage
