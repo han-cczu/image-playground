@@ -36,7 +36,9 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
       confirmText: newFavoriteState ? '确认收藏' : '确认取消',
       action: () => {
         selectedTaskIds.forEach((id) => {
-          updateTaskInStore(id, { isFavorite: newFavoriteState })
+          void updateTaskInStore(id, { isFavorite: newFavoriteState }).catch(() => {
+            /* updateTaskInStore already surfaced the persistence error */
+          })
         })
         clearSelection()
       },

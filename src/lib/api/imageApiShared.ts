@@ -16,6 +16,7 @@ export interface CallApiOptions {
   /** 输入图片的 data URL 列表 */
   inputImageDataUrls: string[]
   maskDataUrl?: string
+  signal?: AbortSignal
 }
 
 export interface CallApiResult {
@@ -27,6 +28,42 @@ export interface CallApiResult {
   actualParamsList?: Array<Partial<TaskParams> | undefined>
   /** 每张图片对应的 API 改写提示词 */
   revisedPrompts?: Array<string | undefined>
+  /** 并发生成时失败的子请求数量 */
+  partialFailureCount?: number
+  /** 并发生成时的代表性失败信息 */
+  partialFailureMessage?: string
+}
+
+export function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+export function mergeAbortSignals(...signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
+  const activeSignals = signals.filter((signal): signal is AbortSignal => Boolean(signal))
+  if (activeSignals.length === 0) return undefined
+  if (activeSignals.length === 1) return activeSignals[0]
+
+  const controller = new AbortController()
+  const cleanup = () => {
+    for (const signal of activeSignals) {
+      signal.removeEventListener('abort', abort)
+    }
+  }
+  const abort = () => {
+    if (!controller.signal.aborted) {
+      controller.abort()
+      cleanup()
+    }
+  }
+  if (activeSignals.some((signal) => signal.aborted)) {
+    abort()
+    return controller.signal
+  }
+
+  for (const signal of activeSignals) {
+    signal.addEventListener('abort', abort, { once: true })
+  }
+  return controller.signal
 }
 
 export function isHttpUrl(value: unknown): value is string {
@@ -145,4 +182,22 @@ export function pickActualParams(source: unknown): Partial<TaskParams> {
 export function mergeActualParams(...sources: Array<Partial<TaskParams> | undefined>): Partial<TaskParams> | undefined {
   const merged = Object.assign({}, ...sources.filter((source) => source && Object.keys(source).length))
   return Object.keys(merged).length ? merged : undefined
+}
+
+export function summarizeConcurrentFailures(results: PromiseSettledResult<CallApiResult>[]): {
+  successfulResults: CallApiResult[]
+  partialFailureCount?: number
+  partialFailureMessage?: string
+} {
+  const successfulResults = results
+    .filter((r): r is PromiseFulfilledResult<CallApiResult> => r.status === 'fulfilled')
+    .map((r) => r.value)
+  const failedResults = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+  if (!failedResults.length) return { successfulResults }
+
+  return {
+    successfulResults,
+    partialFailureCount: failedResults.length,
+    partialFailureMessage: getErrorMessage(failedResults[0].reason),
+  }
 }

@@ -1,8 +1,8 @@
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
-import type { ExportData } from '../types'
+import type { AppSettings, ExportData } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { useStore } from '../store'
-import { mergeImportedSettings, DEFAULT_SETTINGS } from './api/apiProfiles'
+import { mergeImportedSettings, DEFAULT_SETTINGS, normalizeSettings } from './api/apiProfiles'
 import {
   getAllTasks,
   putTask,
@@ -13,6 +13,12 @@ import {
   storedImageToBytes,
 } from './db'
 import { clearImageCache } from './imageCache'
+
+export type ImportMode = 'merge' | 'replace'
+
+interface ImportDataOptions {
+  mode?: ImportMode
+}
 
 function getImageExt(mime: string): string {
   const ext = mime.split('/')[1]?.toLowerCase()
@@ -31,6 +37,18 @@ function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const buffer = new ArrayBuffer(bytes.byteLength)
   new Uint8Array(buffer).set(bytes)
   return buffer
+}
+
+export function redactSettingsForExport(settings: AppSettings): AppSettings {
+  const normalized = normalizeSettings(settings)
+  return {
+    ...normalized,
+    apiKey: '',
+    profiles: normalized.profiles.map((profile) => ({
+      ...profile,
+      apiKey: '',
+    })),
+  }
 }
 
 /** 清空所有数据（含配置重置） */
@@ -87,7 +105,7 @@ export async function exportData() {
     const manifest: ExportData = {
       version: 2,
       exportedAt: new Date(exportedAt).toISOString(),
-      settings,
+      settings: redactSettingsForExport(settings),
       tasks,
       imageFiles,
     }
@@ -114,7 +132,7 @@ export async function exportData() {
 }
 
 /** 导入 ZIP 数据 */
-export async function importData(file: File): Promise<boolean> {
+export async function importData(file: File, options: ImportDataOptions = {}): Promise<boolean> {
   try {
     const buffer = await file.arrayBuffer()
     const unzipped = unzipSync(new Uint8Array(buffer))
@@ -125,8 +143,23 @@ export async function importData(file: File): Promise<boolean> {
     const data: ExportData = JSON.parse(strFromU8(manifestBytes))
     if (!data.tasks || !data.imageFiles) throw new Error('无效的数据格式')
 
+    if ((options.mode ?? 'merge') === 'replace') {
+      await dbClearTasks()
+      await clearImages()
+      clearImageCache()
+      const state = useStore.getState()
+      state.setTasks([])
+      state.clearInputImages()
+      state.clearMaskDraft()
+    }
+
+    const isReplaceMode = (options.mode ?? 'merge') === 'replace'
+    const existingTaskIds = isReplaceMode ? new Set<string>() : new Set((await getAllTasks()).map((task) => task.id))
+    const existingImageIds = isReplaceMode ? new Set<string>() : new Set((await getAllImages()).map((image) => image.id))
+
     // 还原图片
     for (const [id, info] of Object.entries(data.imageFiles)) {
+      if (existingImageIds.has(id)) continue
       const bytes = unzipped[info.path]
       if (!bytes) continue
       const mime = getMimeFromPath(info.path)
@@ -135,6 +168,7 @@ export async function importData(file: File): Promise<boolean> {
     }
 
     for (const task of data.tasks) {
+      if (existingTaskIds.has(task.id)) continue
       await putTask(task)
     }
 

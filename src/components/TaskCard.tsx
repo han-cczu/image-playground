@@ -402,9 +402,11 @@ export default function TaskCard({
                 </button>
               )}
               <button
-                onClick={() =>
-                  updateTaskInStore(task.id, { isFavorite: !task.isFavorite })
-                }
+                onClick={() => {
+                  void updateTaskInStore(task.id, { isFavorite: !task.isFavorite }).catch(() => {
+                    /* updateTaskInStore already surfaced the persistence error */
+                  })
+                }}
                 className={`p-1.5 rounded-md transition ${
                   task.isFavorite
                     ? 'text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-500/10'

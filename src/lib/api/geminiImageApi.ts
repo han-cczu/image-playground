@@ -6,6 +6,8 @@ import {
   getApiErrorMessage,
   getDataUrlEncodedByteSize,
   mergeActualParams,
+  mergeAbortSignals,
+  summarizeConcurrentFailures,
 } from './imageApiShared'
 
 const ASPECT_RATIO_PRESETS: Array<{ ratio: string; value: number }> = [
@@ -126,6 +128,7 @@ async function callGeminiSingle(opts: CallApiOptions, profile: GeminiProfile): P
   }
 
   const controller = new AbortController()
+  const requestSignal = mergeAbortSignals(opts.signal, controller.signal)
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
 
   try {
@@ -139,7 +142,7 @@ async function callGeminiSingle(opts: CallApiOptions, profile: GeminiProfile): P
       },
       cache: 'no-store',
       body: JSON.stringify(body),
-      signal: controller.signal,
+      signal: requestSignal,
     })
 
     if (!response.ok) {
@@ -180,9 +183,7 @@ export async function callGeminiImageApi(opts: CallApiOptions, profile: GeminiPr
   const results = await Promise.allSettled(
     Array.from({ length: n }).map(() => callGeminiSingle(opts, profile)),
   )
-  const successful = results
-    .filter((r): r is PromiseFulfilledResult<CallApiResult> => r.status === 'fulfilled')
-    .map((r) => r.value)
+  const { successfulResults: successful, partialFailureCount, partialFailureMessage } = summarizeConcurrentFailures(results)
 
   if (!successful.length) {
     const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
@@ -198,5 +199,5 @@ export async function callGeminiImageApi(opts: CallApiOptions, profile: GeminiPr
     r.revisedPrompts?.length ? r.revisedPrompts : r.images.map(() => undefined),
   )
   const actualParams = mergeActualParams(successful[0]?.actualParams ?? {}, { n: images.length })
-  return { images, actualParams, actualParamsList, revisedPrompts }
+  return { images, actualParams, actualParamsList, revisedPrompts, partialFailureCount, partialFailureMessage }
 }

@@ -151,4 +151,127 @@ describe('callImageApi', () => {
       expect.objectContaining({ method: 'POST' }),
     )
   })
+
+  it('reports partial failures for concurrent OpenAI Images API requests', async () => {
+    let callIndex = 0
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      callIndex += 1
+      if (callIndex === 2) {
+        return new Response(JSON.stringify({
+          error: { message: 'second request failed' },
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+
+      return new Response(JSON.stringify({
+        data: [{ b64_json: `aW1hZ2Ut${callIndex}` }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const result = await callImageApi({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', codexCli: true },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS, n: 3 },
+      inputImageDataUrls: [],
+    })
+
+    expect(result.images).toHaveLength(2)
+    expect(result.partialFailureCount).toBe(1)
+    expect(result.partialFailureMessage).toContain('second request failed')
+    expect(result.actualParams).toMatchObject({ n: 2 })
+  })
+
+  it('reports partial failures for concurrent OpenAI Responses API requests', async () => {
+    let callIndex = 0
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      callIndex += 1
+      if (callIndex === 1) {
+        return new Response(JSON.stringify({
+          error: { message: 'first responses request failed' },
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+
+      return new Response(JSON.stringify({
+        output: [{
+          type: 'image_generation_call',
+          result: `aW1hZ2Ut${callIndex}`,
+        }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const result = await callImageApi({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', apiMode: 'responses' },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS, n: 3 },
+      inputImageDataUrls: [],
+    })
+
+    expect(result.images).toHaveLength(2)
+    expect(result.partialFailureCount).toBe(1)
+    expect(result.partialFailureMessage).toContain('first responses request failed')
+    expect(result.actualParams).toMatchObject({ n: 2 })
+  })
+
+  it('passes a cancellable caller abort signal through OpenAI requests', async () => {
+    const controller = new AbortController()
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: 'aW1hZ2U=' }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    await callImageApi({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+      signal: controller.signal,
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const requestSignal = (init as RequestInit).signal as AbortSignal
+    expect(requestSignal).toBeDefined()
+    expect(requestSignal.aborted).toBe(false)
+
+    controller.abort()
+
+    expect(requestSignal.aborted).toBe(true)
+  })
+
+  it('keeps provider timeout active when a caller abort signal is provided', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      (_input, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = (init as RequestInit).signal as AbortSignal
+          signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+        }),
+    )
+
+    const request = callImageApi({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', timeout: 1 },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+      signal: new AbortController().signal,
+    })
+    const rejection = expect(request).rejects.toThrow()
+
+    await vi.advanceTimersByTimeAsync(1000)
+
+    await rejection
+    vi.useRealTimers()
+  })
 })

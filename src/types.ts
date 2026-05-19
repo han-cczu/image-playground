@@ -99,6 +99,12 @@ export interface TaskRecord {
   actualParamsByImage?: Record<string, Partial<TaskParams>>
   /** 输出图片对应的 API 改写提示词，key 为 outputImages 中的图片 id */
   revisedPromptByImage?: Record<string, string>
+  /** 并发生成时失败的子请求数量 */
+  partialFailureCount?: number
+  /** 并发生成时的代表性失败信息 */
+  partialFailureMessage?: string
+  /** 任务记录写入 IndexedDB 失败时的可见错误 */
+  persistenceError?: string
   /** 输入图片的 image store id 列表 */
   inputImageIds: string[]
   maskTargetImageId?: string | null

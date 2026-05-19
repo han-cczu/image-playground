@@ -216,7 +216,9 @@ export default function DetailModal() {
   }
 
   const handleToggleFavorite = () => {
-    updateTaskInStore(task.id, { isFavorite: !task.isFavorite })
+    void updateTaskInStore(task.id, { isFavorite: !task.isFavorite }).catch(() => {
+      /* updateTaskInStore already surfaced the persistence error */
+    })
   }
 
   const handleCopyError = async () => {

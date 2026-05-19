@@ -21,6 +21,7 @@ import {
 } from './imageCache'
 
 const syncHttpWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const taskAbortControllers = new Map<string, AbortController>()
 const SYNC_HTTP_INTERRUPTED_ERROR = '请求中断'
 
 function createSyncHttpTimeoutError(timeoutSeconds: number) {
@@ -71,11 +72,28 @@ function clearSyncHttpWatchdogTimer(taskId: string) {
   syncHttpWatchdogTimers.delete(taskId)
 }
 
+function clearTaskAbortController(taskId: string) {
+  taskAbortControllers.delete(taskId)
+}
+
+function abortTaskRequest(taskId: string) {
+  const controller = taskAbortControllers.get(taskId)
+  if (controller && !controller.signal.aborted) controller.abort()
+}
+
+function updateTaskInStoreSilently(taskId: string, patch: Partial<TaskRecord>) {
+  void updateTaskInStore(taskId, patch).catch(() => {
+    /* updateTaskInStore already surfaced the persistence error */
+  })
+}
+
 function failSyncHttpTaskIfStillRunning(taskId: string, error: string, now = Date.now()) {
   const task = useStore.getState().tasks.find((item) => item.id === taskId)
   if (!task || !isRunningSyncHttpTask(task)) return false
 
-  updateTaskInStore(taskId, {
+  abortTaskRequest(taskId)
+
+  updateTaskInStoreSilently(taskId, {
     status: 'error',
     error,
     finishedAt: now,
@@ -264,6 +282,7 @@ async function executeTask(taskId: string) {
   const taskProvider = task.apiProvider ?? activeProfile.provider
 
   if (taskProvider === 'openai' || taskProvider === 'gemini') {
+    taskAbortControllers.set(taskId, new AbortController())
     scheduleSyncHttpWatchdog(taskId, activeProfile.timeout)
   }
 
@@ -287,6 +306,7 @@ async function executeTask(taskId: string) {
       params: task.params,
       inputImageDataUrls: inputDataUrls,
       maskDataUrl,
+      signal: taskAbortControllers.get(taskId)?.signal,
     })
 
     const latestBeforeSuccess = useStore.getState().tasks.find((t) => t.id === taskId)
@@ -325,17 +345,25 @@ async function executeTask(taskId: string) {
     const latestBeforeUpdate = useStore.getState().tasks.find((t) => t.id === taskId)
     if (!latestBeforeUpdate || latestBeforeUpdate.status !== 'running') return
     clearSyncHttpWatchdogTimer(taskId)
-    updateTaskInStore(taskId, {
+    await updateTaskInStore(taskId, {
       outputImages: outputIds,
       actualParams: { ...result.actualParams, n: outputIds.length },
       actualParamsByImage: actualParamsByImage && Object.keys(actualParamsByImage).length > 0 ? actualParamsByImage : undefined,
       revisedPromptByImage: revisedPromptByImage && Object.keys(revisedPromptByImage).length > 0 ? revisedPromptByImage : undefined,
+      partialFailureCount: result.partialFailureCount,
+      partialFailureMessage: result.partialFailureMessage,
       status: 'done',
       finishedAt: Date.now(),
       elapsed: Date.now() - task.createdAt,
     })
 
-    useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
+    if (result.partialFailureCount) {
+      useStore
+        .getState()
+        .showToast(`部分完成：成功 ${outputIds.length} 张，失败 ${result.partialFailureCount} 个请求`, 'error')
+    } else {
+      useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
+    }
     const currentMask = useStore.getState().maskDraft
     if (
       maskDataUrl &&
@@ -349,7 +377,7 @@ async function executeTask(taskId: string) {
     clearSyncHttpWatchdogTimer(taskId)
     const latestTask = useStore.getState().tasks.find((t) => t.id === taskId) ?? task
     if (latestTask.status !== 'running') return
-    updateTaskInStore(taskId, {
+    await updateTaskInStore(taskId, {
       status: 'error',
       error: err instanceof Error ? err.message : String(err),
       finishedAt: Date.now(),
@@ -357,6 +385,7 @@ async function executeTask(taskId: string) {
     })
     useStore.getState().setDetailTaskId(taskId)
   } finally {
+    clearTaskAbortController(taskId)
     // 释放输入图片的内存缓存（已持久化到 IndexedDB，后续按需从 DB 加载）
     for (const imgId of task.inputImageIds) {
       deleteCachedImage(imgId)
@@ -364,14 +393,26 @@ async function executeTask(taskId: string) {
   }
 }
 
-export function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
+export async function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>): Promise<void> {
   const { tasks, setTasks } = useStore.getState()
   const updated = tasks.map((t) =>
     t.id === taskId ? { ...t, ...patch } : t,
   )
   setTasks(updated)
   const task = updated.find((t) => t.id === taskId)
-  if (task) putTask(task)
+  if (!task) return
+
+  try {
+    await putTask(task)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const state = useStore.getState()
+    state.setTasks(state.tasks.map((item) =>
+      item.id === taskId ? { ...item, persistenceError: message } : item,
+    ))
+    state.showToast(`保存任务失败：${message}`, 'error')
+    throw err
+  }
 }
 
 export function getTaskSortKey(task: TaskRecord): number {
@@ -402,7 +443,7 @@ export function reorderTask(
     return
   }
 
-  updateTaskInStore(taskId, { sortOrder: newSortOrder })
+  updateTaskInStoreSilently(taskId, { sortOrder: newSortOrder })
 }
 
 /** 重试失败的任务：创建新任务并执行 */

@@ -3,6 +3,7 @@ import { normalizeBaseUrl } from '../lib/api'
 import { isApiProxyAvailable, readClientDevProxyConfig } from '../lib/api/devProxy'
 import { listModels } from '../lib/api/listModels'
 import { useStore, exportData, importData, clearAllData } from '../store'
+import type { ImportMode } from '../lib/exportImport'
 import {
   createDefaultOpenAIProfile,
   DEFAULT_GEMINI_BASE_URL,
@@ -45,6 +46,7 @@ export default function SettingsModal() {
   const [modelListLoading, setModelListLoading] = useState(false)
   const [modelList, setModelList] = useState<string[] | null>(null)
   const [modelListError, setModelListError] = useState<string | null>(null)
+  const [pendingImportMode, setPendingImportMode] = useState<ImportMode>('merge')
   const modelFieldRef = useRef<HTMLDivElement>(null)
 
   const apiProxyAvailable = isApiProxyAvailable(readClientDevProxyConfig())
@@ -217,18 +219,28 @@ export default function SettingsModal() {
 
   if (!showSettings) return null
 
+  const runImport = async (file: File, mode: ImportMode) => {
+    const imported = await importData(file, { mode })
+    if (imported) {
+      const nextDraft = normalizeSettings(useStore.getState().settings)
+      setDraft(nextDraft)
+      setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
+      setShowProfileMenu(false)
+    }
+  }
+
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      const imported = await importData(file)
-      if (imported) {
-        const nextDraft = normalizeSettings(useStore.getState().settings)
-        setDraft(nextDraft)
-        setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
-        setShowProfileMenu(false)
-      }
+      await runImport(file, pendingImportMode)
     }
     e.target.value = ''
+    setPendingImportMode('merge')
+  }
+
+  const selectImportFile = (mode: ImportMode) => {
+    setPendingImportMode(mode)
+    importInputRef.current?.click()
   }
 
   const handleClearAllData = async () => {
@@ -543,7 +555,7 @@ export default function SettingsModal() {
                   </button>
                 </div>
                 <div data-selectable-text className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
-                  支持通过查询参数覆盖：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiKey=</code>
+                  URL 临时传入密钥请使用 hash：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">#apiKey=</code>，读取后会自动清除。
                 </div>
               </div>
 
@@ -688,13 +700,30 @@ export default function SettingsModal() {
                   导出
                 </button>
                 <button
-                  onClick={() => importInputRef.current?.click()}
+                  onClick={() => selectImportFile('merge')}
                   className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                   </svg>
-                  导入
+                  合并导入
+                </button>
+                <button
+                  onClick={() =>
+                    setConfirmDialog({
+                      title: '替换导入',
+                      message: '替换导入会先清空本地任务记录和图片，再导入备份。设置会按安全规则合并，已有密钥不会被空密钥覆盖。',
+                      confirmText: '选择备份',
+                      tone: 'warning',
+                      action: () => selectImportFile('replace'),
+                    })
+                  }
+                  className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 006.34 4.34L4 6.68M4 15a8 8 0 0013.66 4.66L20 17.32" />
+                  </svg>
+                  替换导入
                 </button>
                 <input
                   ref={importInputRef}

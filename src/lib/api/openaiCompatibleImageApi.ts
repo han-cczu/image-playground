@@ -13,9 +13,11 @@ import {
   isDataUrl,
   isHttpUrl,
   mergeActualParams,
+  mergeAbortSignals,
   MIME_MAP,
   normalizeBase64Image,
   pickActualParams,
+  summarizeConcurrentFailures,
 } from './imageApiShared'
 
 const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:'
@@ -129,9 +131,7 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: OpenAIProf
     Array.from({ length: n }).map(() => callImagesApiSingle(singleOpts, profile)),
   )
 
-  const successfulResults = results
-    .filter((r): r is PromiseFulfilledResult<CallApiResult> => r.status === 'fulfilled')
-    .map((r) => r.value)
+  const { successfulResults, partialFailureCount, partialFailureMessage } = summarizeConcurrentFailures(results)
 
   if (successfulResults.length === 0) {
     const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
@@ -151,7 +151,7 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: OpenAIProf
     { n: images.length },
   )
 
-  return { images, actualParams, actualParamsList, revisedPrompts }
+  return { images, actualParams, actualParamsList, revisedPrompts, partialFailureCount, partialFailureMessage }
 }
 
 async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile): Promise<CallApiResult> {
@@ -166,6 +166,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
   const requestHeaders = createRequestHeaders(profile)
 
   const controller = new AbortController()
+  const requestSignal = mergeAbortSignals(opts.signal, controller.signal)
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
 
   try {
@@ -223,7 +224,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
         headers: requestHeaders,
         cache: 'no-store',
         body: formData,
-        signal: controller.signal,
+        signal: requestSignal,
       })
     } else {
       const body: Record<string, unknown> = {
@@ -253,7 +254,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
         },
         cache: 'no-store',
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal: requestSignal,
       })
     }
 
@@ -278,7 +279,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
       }
 
       if (isHttpUrl(item.url) || isDataUrl(item.url)) {
-        images.push(await fetchImageUrlAsDataUrl(item.url, mime, controller.signal))
+        images.push(await fetchImageUrlAsDataUrl(item.url, mime, requestSignal))
         revisedPrompts.push(typeof item.revised_prompt === 'string' ? item.revised_prompt : undefined)
       }
     }
@@ -309,10 +310,7 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: OpenAIProfil
 
   const promises = Array.from({ length: n }).map(() => callResponsesImageApiSingle(opts, profile))
   const results = await Promise.allSettled(promises)
-  
-  const successfulResults = results
-    .filter((r): r is PromiseFulfilledResult<CallApiResult> => r.status === 'fulfilled')
-    .map((r) => r.value)
+  const { successfulResults, partialFailureCount, partialFailureMessage } = summarizeConcurrentFailures(results)
 
   if (successfulResults.length === 0) {
     const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
@@ -332,7 +330,7 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: OpenAIProfil
     images.length === opts.params.n ? { n: opts.params.n } : { n: images.length },
   )
 
-  return { images, actualParams, actualParamsList, revisedPrompts }
+  return { images, actualParams, actualParamsList, revisedPrompts, partialFailureCount, partialFailureMessage }
 }
 
 async function callResponsesImageApiSingle(opts: CallApiOptions, profile: OpenAIProfile): Promise<CallApiResult> {
@@ -342,6 +340,7 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: OpenAI
   const useApiProxy = profile.apiProxy && isApiProxyAvailable(proxyConfig)
   const requestHeaders = createRequestHeaders(profile)
   const controller = new AbortController()
+  const requestSignal = mergeAbortSignals(opts.signal, controller.signal)
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
 
   try {
@@ -369,7 +368,7 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: OpenAI
       },
       cache: 'no-store',
       body: JSON.stringify(body),
-      signal: controller.signal,
+      signal: requestSignal,
     })
 
     if (!response.ok) {

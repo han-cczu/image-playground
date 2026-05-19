@@ -89,14 +89,14 @@ npm run build
 | OpenAI 兼容（Responses API） | `/v1/responses` | 使用支持 `image_generation` 工具的文本模型，如 `gpt-5.5` |
 | Google Gemini | `generativelanguage.googleapis.com/v1beta` | 多模态图像模型，如 `gemini-2.5-flash-image`。不支持遮罩与 quality 参数；多图并发拆单 |
 
-### URL 查询参数快速填充
+### URL 快速填充
 
-适合创建书签或外部系统集成：
+适合创建书签或外部系统集成。密钥请放在 hash 中一次性传入，应用读取后会立即从地址栏清除。
 
 | 参数 | 示例 | 作用 |
 |---|---|---|
 | `apiUrl` | `?apiUrl=https://example.com/v1` | 覆盖当前激活 profile 的 API URL |
-| `apiKey` | `?apiKey=sk-xxxx` | 覆盖当前激活 profile 的 API Key |
+| `apiKey` | `#apiKey=sk-xxxx` | 一次性写入当前激活 profile 的 API Key |
 | `apiMode` | `?apiMode=images` 或 `?apiMode=responses` | 切换 OpenAI 接口模式（默认 `images`） |
 | `codexCli` | `?codexCli=true` | 强制开启 Codex CLI 兼容模式 |
 | `provider` | `?provider=openai` 或 `?provider=gemini` | 切换 Provider 类型 |
@@ -104,7 +104,7 @@ npm run build
 集成示例（如 New API 等聊天系统中以 URL 形式跳转）：
 
 ```text
-https://image-playground.diaohan111.workers.dev/?apiUrl={address}&apiKey={key}
+https://image-playground.diaohan111.workers.dev/?apiUrl={address}#apiKey={key}
 ```
 
 ---
