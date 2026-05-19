@@ -16,6 +16,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import type { TaskRecord } from '../types'
 import { useStore, reuseConfig, editOutputs, removeTask, reorderTask } from '../store'
+import { filterAndSortTasks } from '../lib/taskFilters'
 import TaskCard from './TaskCard'
 
 interface SortableTaskCardProps {
@@ -73,6 +74,7 @@ export default function TaskGrid() {
   const searchQuery = useStore((s) => s.searchQuery)
   const filterStatus = useStore((s) => s.filterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
+  const filterFavoriteCategoryId = useStore((s) => s.filterFavoriteCategoryId)
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const selectedTaskIds = useStore((s) => s.selectedTaskIds)
@@ -91,27 +93,19 @@ export default function TaskGrid() {
   const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
   const filteredTasks = useMemo(() => {
-    const sorted = [...tasks].sort(
-      (a, b) => (b.sortOrder ?? b.createdAt) - (a.sortOrder ?? a.createdAt),
-    )
-    const q = searchQuery.trim().toLowerCase()
-
-    return sorted.filter((t) => {
-      if (filterFavorite && !t.isFavorite) return false
-      const matchStatus = filterStatus === 'all' || t.status === filterStatus
-      if (!matchStatus) return false
-
-      if (!q) return true
-      const prompt = (t.prompt || '').toLowerCase()
-      const paramStr = JSON.stringify(t.params).toLowerCase()
-      return prompt.includes(q) || paramStr.includes(q)
+    return filterAndSortTasks(tasks, {
+      searchQuery,
+      filterStatus,
+      filterFavorite,
+      filterFavoriteCategoryId,
     })
-  }, [tasks, searchQuery, filterStatus, filterFavorite])
+  }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId])
 
   const dragDisabled =
     searchQuery.trim() !== '' ||
     filterStatus !== 'all' ||
     filterFavorite ||
+    Boolean(filterFavoriteCategoryId) ||
     filteredTasks.length < 2
 
   const sensors = useSensors(
@@ -259,7 +253,7 @@ export default function TaskGrid() {
   if (!filteredTasks.length) {
     return (
       <div className="text-center py-20 text-gray-400 dark:text-gray-500">
-        {searchQuery || filterFavorite ? (
+        {searchQuery || filterFavorite || filterFavoriteCategoryId ? (
           <p className="text-sm">没有找到匹配的记录</p>
         ) : (
           <>

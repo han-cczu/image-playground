@@ -1,8 +1,9 @@
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
-import type { AppSettings, ExportData } from '../types'
+import type { AppSettings, ExportData, TaskRecord } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { useStore } from '../store'
 import { mergeImportedSettings, DEFAULT_SETTINGS, normalizeSettings } from './api/apiProfiles'
+import { mergeFavoriteCategories, normalizeFavoriteCategories } from './favoriteCategories'
 import {
   getAllTasks,
   putTask,
@@ -51,13 +52,38 @@ export function redactSettingsForExport(settings: AppSettings): AppSettings {
   }
 }
 
+function sanitizeImportedTasksForFavoriteCategories(
+  tasks: TaskRecord[],
+  validCategoryIds: Set<string>,
+): TaskRecord[] {
+  /*
+   * ========================================================================
+   * 步骤1：校验导入任务分类引用
+   * ========================================================================
+   * 数据源：
+   *   1) 备份 manifest 中的任务记录
+   *   2) 本地已有分类和备份分类合并后的有效 id
+   * 操作要点：
+   *   1) 保留能找到元数据的收藏分类 id
+   *   2) 清理非收藏或缺失元数据的悬空分类引用
+   */
+  // 1.1 清理悬空分类引用
+  return tasks.map((task) => {
+    const categoryId = task.favoriteCategoryId?.trim() || null
+    if (!categoryId) return task
+    if (task.isFavorite && validCategoryIds.has(categoryId)) return task
+    return { ...task, favoriteCategoryId: null }
+  })
+}
+
 /** 清空所有数据（含配置重置） */
 export async function clearAllData() {
   await dbClearTasks()
   await clearImages()
   clearImageCache()
-  const { setTasks, clearInputImages, clearMaskDraft, setSettings, setParams, showToast } = useStore.getState()
+  const { setTasks, clearInputImages, clearMaskDraft, setSettings, setParams, setFavoriteCategories, showToast } = useStore.getState()
   setTasks([])
+  setFavoriteCategories([])
   clearInputImages()
   useStore.setState({ dismissedCodexCliPrompts: [] })
   clearMaskDraft()
@@ -71,7 +97,7 @@ export async function exportData() {
   try {
     const tasks = await getAllTasks()
     const images = await getAllImages()
-    const { settings } = useStore.getState()
+    const { settings, favoriteCategories } = useStore.getState()
     const exportedAt = Date.now()
     const imageCreatedAtFallback = new Map<string, number>()
 
@@ -103,9 +129,10 @@ export async function exportData() {
     }
 
     const manifest: ExportData = {
-      version: 2,
+      version: 3,
       exportedAt: new Date(exportedAt).toISOString(),
       settings: redactSettingsForExport(settings),
+      favoriteCategories: normalizeFavoriteCategories(favoriteCategories),
       tasks,
       imageFiles,
     }
@@ -156,6 +183,15 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
     const isReplaceMode = (options.mode ?? 'merge') === 'replace'
     const existingTaskIds = isReplaceMode ? new Set<string>() : new Set((await getAllTasks()).map((task) => task.id))
     const existingImageIds = isReplaceMode ? new Set<string>() : new Set((await getAllImages()).map((image) => image.id))
+    const importedCategories = normalizeFavoriteCategories(data.favoriteCategories ?? [])
+    const localCategoryIds = isReplaceMode
+      ? new Set<string>()
+      : new Set(useStore.getState().favoriteCategories.map((category) => category.id))
+    const validCategoryIds = new Set([
+      ...localCategoryIds,
+      ...importedCategories.map((category) => category.id),
+    ])
+    const importedTasks = sanitizeImportedTasksForFavoriteCategories(data.tasks, validCategoryIds)
 
     // 还原图片
     for (const [id, info] of Object.entries(data.imageFiles)) {
@@ -167,7 +203,7 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
       await putImage({ id, blob, mime, createdAt: info.createdAt, source: info.source })
     }
 
-    for (const task of data.tasks) {
+    for (const task of importedTasks) {
       if (existingTaskIds.has(task.id)) continue
       await putTask(task)
     }
@@ -175,6 +211,13 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
     if (data.settings) {
       const state = useStore.getState()
       state.setSettings(mergeImportedSettings(state.settings, data.settings))
+    }
+
+    if (isReplaceMode) {
+      useStore.getState().setFavoriteCategories(importedCategories)
+    } else if (importedCategories.length) {
+      const state = useStore.getState()
+      state.setFavoriteCategories(mergeFavoriteCategories(state.favoriteCategories, importedCategories))
     }
 
     const tasks = await getAllTasks()

@@ -41,6 +41,7 @@ export default function TaskCard({
   const [swipeStartedSelected, setSwipeStartedSelected] = useState(false)
   const [swipeActionActive, setSwipeActionActive] = useState(false)
   const toggleTaskSelection = useStore((s) => s.toggleTaskSelection)
+  const favoriteCategories = useStore((s) => s.favoriteCategories)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const swipeResetTimerRef = useRef<number | null>(null)
   const suppressClickUntilRef = useRef(0)
@@ -178,6 +179,9 @@ export default function TaskCard({
   const isSwipeReady = Math.abs(swipeOffset) >= 40
   const showSwipeAction = isSwipeReady || swipeActionActive
   const showRunningTimer = task.status === 'running'
+  const favoriteCategory = task.favoriteCategoryId
+    ? favoriteCategories.find((category) => category.id === task.favoriteCategoryId)
+    : null
   const swipeBgClass = showSwipeAction
     ? swipeStartedSelected
       ? 'bg-gray-500 dark:bg-gray-600'
@@ -384,6 +388,18 @@ export default function TaskCard({
                   mask
                 </span>
               )}
+              {favoriteCategory && task.isFavorite && (
+                <span
+                  className="min-w-0 max-w-28 text-xs px-1.5 py-0.5 rounded bg-gray-50 dark:bg-white/[0.04] text-gray-600 dark:text-gray-300 flex items-center gap-1 flex-shrink-0"
+                  title={favoriteCategory.name}
+                >
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: favoriteCategory.color }}
+                  />
+                  <span className="min-w-0 truncate">{favoriteCategory.name.trim() || '未命名分类'}</span>
+                </span>
+              )}
               </div>
             {/* 操作按钮 */}
             <div
@@ -403,7 +419,10 @@ export default function TaskCard({
               )}
               <button
                 onClick={() => {
-                  void updateTaskInStore(task.id, { isFavorite: !task.isFavorite }).catch(() => {
+                  void updateTaskInStore(task.id, {
+                    isFavorite: !task.isFavorite,
+                    ...(!task.isFavorite ? {} : { favoriteCategoryId: null }),
+                  }).catch(() => {
                     /* updateTaskInStore already surfaced the persistence error */
                   })
                 }}

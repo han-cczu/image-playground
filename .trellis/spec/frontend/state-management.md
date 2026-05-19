@@ -91,6 +91,64 @@ return { images, partialFailureCount, partialFailureMessage }
 
 ---
 
+### Favorite category contracts
+
+1. Scope / Trigger
+   - Applies when UI code creates, renames, deletes, reorders, recolors, filters, imports, exports, or assigns a favorite category.
+   - Category metadata is app-level local state; task assignments are durable task-record fields.
+
+2. Signatures
+   - `FavoriteCategory`: `{ id: string; name: string; color: string; sortOrder: number; createdAt: number }`
+   - `TaskRecord.favoriteCategoryId?: string | null`
+   - `createFavoriteCategory(input: { name: string; color?: string }): string`
+   - `updateFavoriteCategory(id: string, patch: Partial<Pick<FavoriteCategory, 'name' | 'color'>>): void`
+   - `deleteFavoriteCategory(id: string): Promise<void>`
+   - `moveFavoriteCategory(id: string, direction: -1 | 1): void`
+   - `filterAndSortTasks(tasks, { searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId })`
+
+3. Contracts
+   - Store task assignment by category id, not category name.
+   - A task may have zero or one `favoriteCategoryId`; category filtering only shows favorite tasks with that id.
+   - Renaming, recoloring, or reordering a category must not rewrite task records.
+   - Deleting a category must clear matching `TaskRecord.favoriteCategoryId` values and persist affected tasks.
+   - Persisted and imported category arrays must be normalized: invalid ids skipped, colors defaulted, and `sortOrder` compacted.
+   - Export manifest must include `favoriteCategories` when category metadata exists.
+
+4. Validation & Error Matrix
+   - Missing category metadata during import -> clear imported task `favoriteCategoryId`.
+   - Non-favorite task with category id during import -> clear `favoriteCategoryId`.
+   - Deleted active filter category -> reset `filterFavoriteCategoryId` to `null`.
+   - Invalid category color -> replace with default category color.
+   - Duplicate category id in imported/persisted metadata -> keep one normalized category.
+
+5. Good/Base/Bad Cases
+   - Good: import backup with category metadata and favorite task assignment, then filter by category id.
+   - Base: legacy task without `favoriteCategoryId` renders and exports normally.
+   - Bad: rename category by rewriting every task's category name.
+
+6. Tests Required
+   - Store tests for create/update/reorder/delete actions.
+   - Store test that delete clears task assignments and persists only changed tasks.
+   - Export/import tests for category metadata round-trip.
+   - Import test for dangling task category references.
+   - Filter tests for category filters excluding non-favorites and preserving uncategorized favorites in all-favorites view.
+
+7. Wrong vs Correct
+
+Wrong:
+
+```typescript
+task.favoriteCategoryName = category.name
+```
+
+Correct:
+
+```typescript
+task.favoriteCategoryId = category.id
+```
+
+---
+
 ## Common Mistakes
 
 <!-- State management mistakes your team has made -->

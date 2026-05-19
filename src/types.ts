@@ -83,6 +83,14 @@ export interface MaskDraft {
 
 export type TaskStatus = 'running' | 'done' | 'error'
 
+export interface FavoriteCategory {
+  id: string
+  name: string
+  color: string
+  sortOrder: number
+  createdAt: number
+}
+
 export interface TaskRecord {
   id: string
   prompt: string
@@ -119,6 +127,8 @@ export interface TaskRecord {
   elapsed: number | null
   /** 是否收藏 */
   isFavorite?: boolean
+  /** 收藏分类 id；仅在收藏记录上生效 */
+  favoriteCategoryId?: string | null
   /** 自定义排序值（降序）。未设置时按 createdAt 排序。 */
   sortOrder?: number
 }
@@ -208,6 +218,7 @@ export interface ExportData {
   version: number
   exportedAt: string
   settings: AppSettings
+  favoriteCategories?: FavoriteCategory[]
   tasks: TaskRecord[]
   /** imageId → 图片信息 */
   imageFiles: Record<string, {

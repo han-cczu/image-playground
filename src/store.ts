@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type {
   AppSettings,
+  FavoriteCategory,
   TaskParams,
   InputImage,
   MaskDraft,
@@ -9,6 +10,8 @@ import type {
 } from './types'
 import { DEFAULT_PARAMS } from './types'
 import { DEFAULT_SETTINGS, normalizeSettings } from './lib/api/apiProfiles'
+import { DEFAULT_FAVORITE_CATEGORY_COLOR, normalizeFavoriteCategories } from './lib/favoriteCategories'
+import { putTask } from './lib/db'
 
 function orderImagesWithMaskFirst(images: InputImage[], maskTargetImageId: string | null | undefined) {
   if (!maskTargetImageId) return images
@@ -18,6 +21,40 @@ function orderImagesWithMaskFirst(images: InputImage[], maskTargetImageId: strin
   const [maskImage] = next.splice(maskIdx, 1)
   next.unshift(maskImage)
   return next
+}
+
+let categoryUid = 0
+function genCategoryId(): string {
+  return `cat-${Date.now().toString(36)}-${(++categoryUid).toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+}
+
+function reorderCategories(categories: FavoriteCategory[]): FavoriteCategory[] {
+  return normalizeFavoriteCategories(categories)
+}
+
+function createCategoryStatePatch(
+  categories: FavoriteCategory[],
+  filterFavoriteCategoryId: string | null,
+) {
+  /*
+   * ========================================================================
+   * 步骤1：归一化分类状态
+   * ========================================================================
+   * 目标：
+   *   1) 保持分类顺序连续，避免删除或导入后 sortOrder 断档
+   *   2) 清理已经不存在的分类筛选条件
+   */
+  // 1.1 归一化分类排序
+  const favoriteCategories = reorderCategories(categories)
+
+  // 1.2 校验当前筛选分类是否仍存在
+  const categoryIds = new Set(favoriteCategories.map((category) => category.id))
+  return {
+    favoriteCategories,
+    filterFavoriteCategoryId: filterFavoriteCategoryId && categoryIds.has(filterFavoriteCategoryId)
+      ? filterFavoriteCategoryId
+      : null,
+  }
 }
 
 // ===== Store 类型 =====
@@ -52,6 +89,14 @@ interface AppState {
   tasks: TaskRecord[]
   setTasks: (t: TaskRecord[]) => void
 
+  // 收藏分类
+  favoriteCategories: FavoriteCategory[]
+  setFavoriteCategories: (categories: FavoriteCategory[]) => void
+  createFavoriteCategory: (input: { name: string; color?: string }) => string
+  updateFavoriteCategory: (id: string, patch: Partial<Pick<FavoriteCategory, 'name' | 'color'>>) => void
+  deleteFavoriteCategory: (id: string) => Promise<void>
+  moveFavoriteCategory: (id: string, direction: -1 | 1) => void
+
   // 搜索和筛选
   searchQuery: string
   setSearchQuery: (q: string) => void
@@ -59,6 +104,8 @@ interface AppState {
   setFilterStatus: (status: AppState['filterStatus']) => void
   filterFavorite: boolean
   setFilterFavorite: (f: boolean) => void
+  filterFavoriteCategoryId: string | null
+  setFilterFavoriteCategoryId: (id: string | null) => void
 
   // 多选
   selectedTaskIds: string[]
@@ -204,13 +251,95 @@ export const useStore = create<AppState>()(
       tasks: [],
       setTasks: (tasks) => set({ tasks }),
 
+      // Favorite categories
+      favoriteCategories: [],
+      setFavoriteCategories: (favoriteCategories) =>
+        set((state) => createCategoryStatePatch(favoriteCategories, state.filterFavoriteCategoryId)),
+      createFavoriteCategory: ({ name, color }) => {
+        const id = genCategoryId()
+        set((state) => createCategoryStatePatch([
+          ...state.favoriteCategories,
+          {
+            id,
+            name: name.trim() || '未命名分类',
+            color: color || DEFAULT_FAVORITE_CATEGORY_COLOR,
+            sortOrder: state.favoriteCategories.length,
+            createdAt: Date.now(),
+          },
+        ], state.filterFavoriteCategoryId))
+        return id
+      },
+      updateFavoriteCategory: (id, patch) =>
+        set((state) => createCategoryStatePatch(state.favoriteCategories.map((category) =>
+          category.id === id
+            ? {
+                ...category,
+                ...(patch.name !== undefined ? { name: patch.name } : {}),
+                ...(patch.color !== undefined ? { color: patch.color } : {}),
+              }
+            : category,
+        ), state.filterFavoriteCategoryId)),
+      deleteFavoriteCategory: async (id) => {
+        const state = get()
+
+        /*
+         * ========================================================================
+         * 步骤1：清理分类引用
+         * ========================================================================
+         * 数据源：
+         *   1) 当前 Zustand 任务列表
+         *   2) 待删除的收藏分类 id
+         * 操作要点：
+         *   1) UI 状态先同步清空引用
+         *   2) 只持久化实际受影响的任务
+         */
+        // 1.1 清空使用该分类的任务引用
+        const nextTasks = state.tasks.map((task) =>
+          task.favoriteCategoryId === id ? { ...task, favoriteCategoryId: null } : task,
+        )
+
+        // 1.2 更新分类列表、筛选条件和任务列表
+        set({
+          ...createCategoryStatePatch(
+            state.favoriteCategories.filter((category) => category.id !== id),
+            state.filterFavoriteCategoryId,
+          ),
+          tasks: nextTasks,
+        })
+
+        // 1.3 持久化受影响任务
+        await Promise.all(nextTasks
+          .filter((task, index) => state.tasks[index]?.favoriteCategoryId !== task.favoriteCategoryId)
+          .map((task) => putTask(task)))
+      },
+      moveFavoriteCategory: (id, direction) =>
+        set((state) => {
+          const categories = reorderCategories(state.favoriteCategories)
+          const index = categories.findIndex((category) => category.id === id)
+          const nextIndex = index + direction
+          if (index < 0 || nextIndex < 0 || nextIndex >= categories.length) return state
+
+          const next = [...categories]
+          const [moved] = next.splice(index, 1)
+          next.splice(nextIndex, 0, moved)
+          return { favoriteCategories: next.map((category, sortOrder) => ({ ...category, sortOrder })) }
+        }),
+
       // Search & filter
       searchQuery: '',
       setSearchQuery: (q) => set({ searchQuery: q }),
       filterStatus: 'all',
       setFilterStatus: (status) => set({ filterStatus: status }),
       filterFavorite: false,
-      setFilterFavorite: (f) => set({ filterFavorite: f }),
+      setFilterFavorite: (f) => set({
+        filterFavorite: f,
+        ...(f ? { filterFavoriteCategoryId: null } : {}),
+      }),
+      filterFavoriteCategoryId: null,
+      setFilterFavoriteCategoryId: (id) => set({
+        filterFavoriteCategoryId: id,
+        ...(id ? { filterFavorite: false } : {}),
+      }),
 
       // Selection
       selectedTaskIds: [],
@@ -254,8 +383,19 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'image-playground',
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as Partial<AppState> | undefined
+        return {
+          ...currentState,
+          ...persisted,
+          favoriteCategories: normalizeFavoriteCategories(persisted?.favoriteCategories ?? []),
+          filterFavoriteCategoryId: null,
+          filterFavorite: false,
+        }
+      },
       partialize: (state) => ({
         settings: state.settings,
+        favoriteCategories: state.favoriteCategories,
         params: state.params,
         prompt: state.prompt,
         inputImages: state.inputImages.map((img) => ({ id: img.id, dataUrl: '' })),

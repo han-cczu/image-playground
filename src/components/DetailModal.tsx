@@ -5,6 +5,7 @@ import { formatImageRatio } from '../lib/image/size'
 import { ActualValueBadge, DetailParamValue } from '../lib/paramDisplay'
 import { copyBlobToClipboard, copyTextToClipboard, getClipboardFailureMessage } from '../lib/image/clipboard'
 import { createMaskPreviewDataUrl } from '../lib/image/canvasImage'
+import Select from './Select'
 
 export default function DetailModal() {
   const tasks = useStore((s) => s.tasks)
@@ -16,6 +17,7 @@ export default function DetailModal() {
   const showToast = useStore((s) => s.showToast)
   const settings = useStore((s) => s.settings)
   const dismissedCodexCliPrompts = useStore((s) => s.dismissedCodexCliPrompts)
+  const favoriteCategories = useStore((s) => s.favoriteCategories)
 
   const [imageIndex, setImageIndex] = useState(0)
   const [imageSrcs, setImageSrcs] = useState<Record<string, string>>({})
@@ -169,6 +171,9 @@ export default function DetailModal() {
   const taskProfileName = task.apiProfileName || '未知'
   const taskModel = task.apiModel || '未知'
   const showSourceInfo = Boolean(task.apiProvider || task.apiProfileName || task.apiModel)
+  const currentCategory = task.favoriteCategoryId
+    ? favoriteCategories.find((category) => category.id === task.favoriteCategoryId)
+    : null
 
   const formatTime = (ts: number | null) => {
     if (!ts) return ''
@@ -216,7 +221,20 @@ export default function DetailModal() {
   }
 
   const handleToggleFavorite = () => {
-    void updateTaskInStore(task.id, { isFavorite: !task.isFavorite }).catch(() => {
+    void updateTaskInStore(task.id, {
+      isFavorite: !task.isFavorite,
+      ...(!task.isFavorite ? {} : { favoriteCategoryId: null }),
+    }).catch(() => {
+      /* updateTaskInStore already surfaced the persistence error */
+    })
+  }
+
+  const handleCategoryChange = (value: string | number) => {
+    const categoryId = String(value)
+    void updateTaskInStore(task.id, {
+      isFavorite: categoryId ? true : task.isFavorite,
+      favoriteCategoryId: categoryId || null,
+    }).catch(() => {
       /* updateTaskInStore already surfaced the persistence error */
     })
   }
@@ -578,6 +596,41 @@ export default function DetailModal() {
             <div className="text-xs text-gray-400 dark:text-gray-500 mb-4">
               <span>创建于 {formatTime(task.createdAt)}</span>
               {formatDuration() && <span> · 耗时 {formatDuration()}</span>}
+            </div>
+
+            <div className="mb-4">
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                  收藏分类
+                </span>
+                {currentCategory && task.isFavorite && (
+                  <span
+                    className="flex min-w-0 max-w-[55%] items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500"
+                    title={currentCategory.name}
+                  >
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: currentCategory.color }} />
+                    <span className="min-w-0 truncate">{currentCategory.name.trim() || '未命名分类'}</span>
+                  </span>
+                )}
+              </div>
+              {favoriteCategories.length > 0 ? (
+                <Select
+                  value={task.favoriteCategoryId ?? ''}
+                  onChange={handleCategoryChange}
+                  options={[
+                    { label: '不分组', value: '' },
+                    ...favoriteCategories.map((category) => ({
+                      label: category.name.trim() || '未命名分类',
+                      value: category.id,
+                    })),
+                  ]}
+                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                />
+              ) : (
+                <div className="rounded-xl border border-dashed border-gray-200/70 px-3 py-2 text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
+                  在设置中创建分类后可分组收藏。
+                </div>
+              )}
             </div>
           </div>
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from './types'
 import { DEFAULT_SETTINGS } from './lib/api/apiProfiles'
-import type { TaskRecord } from './types'
+import type { FavoriteCategory, TaskRecord } from './types'
 import { editOutputs, markInterruptedSyncHttpTasks, submitTask, updateTaskInStore, useStore } from './store'
 
 vi.mock('./lib/db', async (importOriginal) => {
@@ -25,6 +25,20 @@ import { putTask, storeImage } from './lib/db'
 import { callImageApi } from './lib/api'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
+const categoryA: FavoriteCategory = {
+  id: 'cat-a',
+  name: '角色',
+  color: '#f59e0b',
+  sortOrder: 0,
+  createdAt: 1,
+}
+const categoryB: FavoriteCategory = {
+  id: 'cat-b',
+  name: '场景',
+  color: '#14b8a6',
+  sortOrder: 1,
+  createdAt: 2,
+}
 
 function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
@@ -222,5 +236,67 @@ describe('task runtime reliability', () => {
       status: 'error',
       error: expect.stringContaining('请求超时'),
     })
+  })
+})
+
+describe('favorite category store actions', () => {
+  beforeEach(() => {
+    vi.mocked(putTask).mockReset()
+    vi.mocked(putTask).mockResolvedValue('task-id')
+    useStore.setState({
+      favoriteCategories: [],
+      filterFavoriteCategoryId: null,
+      tasks: [],
+      showToast: vi.fn(),
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('creates, updates, and reorders favorite categories', () => {
+    const firstId = useStore.getState().createFavoriteCategory({ name: '角色', color: '#f59e0b' })
+    const secondId = useStore.getState().createFavoriteCategory({ name: '场景', color: '#14b8a6' })
+
+    useStore.getState().updateFavoriteCategory(firstId, { name: '主角', color: '#ef4444' })
+    useStore.getState().moveFavoriteCategory(secondId, -1)
+
+    expect(useStore.getState().favoriteCategories).toEqual([
+      expect.objectContaining({ id: secondId, name: '场景', color: '#14b8a6', sortOrder: 0 }),
+      expect.objectContaining({ id: firstId, name: '主角', color: '#ef4444', sortOrder: 1 }),
+    ])
+  })
+
+  it('clears task assignments when a favorite category is deleted', async () => {
+    const assignedTask = task({
+      id: 'assigned',
+      isFavorite: true,
+      favoriteCategoryId: categoryA.id,
+    })
+    const otherTask = task({
+      id: 'other',
+      isFavorite: true,
+      favoriteCategoryId: categoryB.id,
+    })
+    useStore.setState({
+      favoriteCategories: [categoryA, categoryB],
+      filterFavoriteCategoryId: categoryA.id,
+      tasks: [assignedTask, otherTask],
+    })
+
+    await useStore.getState().deleteFavoriteCategory(categoryA.id)
+
+    expect(useStore.getState().favoriteCategories).toEqual([{ ...categoryB, sortOrder: 0 }])
+    expect(useStore.getState().filterFavoriteCategoryId).toBeNull()
+    expect(useStore.getState().tasks).toEqual([
+      expect.objectContaining({ id: 'assigned', favoriteCategoryId: null }),
+      otherTask,
+    ])
+    expect(putTask).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'assigned',
+      favoriteCategoryId: null,
+    }))
+    expect(putTask).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'other' }))
   })
 })

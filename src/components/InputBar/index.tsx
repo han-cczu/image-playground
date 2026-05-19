@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useStore, submitTask, addImageFromFile } from '../../store'
 import { getChangedParams, normalizeParamsForSettings } from '../../lib/api/paramCompatibility'
 import { createMaskPreviewDataUrl } from '../../lib/image/canvasImage'
+import { filterAndSortTasks } from '../../lib/taskFilters'
 import SelectionActionBar from './SelectionActionBar'
 import ParamRow from './ParamRow'
 import SizePickerModal from '../SizePickerModal'
@@ -46,26 +47,20 @@ export default function InputBar() {
   const tasks = useStore((s) => s.tasks)
   const filterStatus = useStore((s) => s.filterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
+  const filterFavoriteCategoryId = useStore((s) => s.filterFavoriteCategoryId)
   const searchQuery = useStore((s) => s.searchQuery)
   const maskDraft = useStore((s) => s.maskDraft)
   const setMaskEditorImageId = useStore((s) => s.setMaskEditorImageId)
   const moveInputImage = useStore((s) => s.moveInputImage)
 
   const filteredTasks = useMemo(() => {
-    const sorted = [...tasks].sort((a, b) => (b.sortOrder ?? b.createdAt) - (a.sortOrder ?? a.createdAt))
-    const q = searchQuery.trim().toLowerCase()
-
-    return sorted.filter((t) => {
-      if (filterFavorite && !t.isFavorite) return false
-      const matchStatus = filterStatus === 'all' || t.status === filterStatus
-      if (!matchStatus) return false
-
-      if (!q) return true
-      const prompt = (t.prompt || '').toLowerCase()
-      const paramStr = JSON.stringify(t.params).toLowerCase()
-      return prompt.includes(q) || paramStr.includes(q)
+    return filterAndSortTasks(tasks, {
+      searchQuery,
+      filterStatus,
+      filterFavorite,
+      filterFavoriteCategoryId,
     })
-  }, [tasks, searchQuery, filterStatus, filterFavorite])
+  }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)

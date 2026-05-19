@@ -1,10 +1,10 @@
-import { strToU8, zipSync } from 'fflate'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_SETTINGS } from './api/apiProfiles'
 import type { ExportData, TaskRecord } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { useStore } from '../store'
-import { importData, redactSettingsForExport } from './exportImport'
+import { exportData, importData, redactSettingsForExport } from './exportImport'
 import {
   clearImages,
   clearTasks,
@@ -88,10 +88,15 @@ describe('export/import reliability', () => {
           },
         ],
       },
+      favoriteCategories: [],
       tasks: [],
       toast: null,
       showToast: vi.fn(),
     })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('redacts every API key from exported settings', () => {
@@ -164,6 +169,103 @@ describe('export/import reliability', () => {
     await importData(file, { mode: 'merge' })
 
     expect(dbCalls).toEqual([])
+  })
+
+  it('imports favorite category metadata and task assignments', async () => {
+    const task = createTask('categorized-task')
+    task.isFavorite = true
+    task.favoriteCategoryId = 'cat-a'
+    const file = createImportFile({
+      version: 3,
+      exportedAt: new Date(0).toISOString(),
+      settings: DEFAULT_SETTINGS,
+      favoriteCategories: [{
+        id: 'cat-a',
+        name: '角色',
+        color: '#f59e0b',
+        sortOrder: 0,
+        createdAt: 1,
+      }],
+      tasks: [task],
+      imageFiles: {},
+    })
+
+    await importData(file, { mode: 'merge' })
+
+    expect(useStore.getState().favoriteCategories).toEqual([{
+      id: 'cat-a',
+      name: '角色',
+      color: '#f59e0b',
+      sortOrder: 0,
+      createdAt: 1,
+    }])
+    expect(putTask).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'categorized-task',
+      favoriteCategoryId: 'cat-a',
+    }))
+  })
+
+  it('clears imported task assignments when category metadata is missing', async () => {
+    const task = createTask('dangling-category-task')
+    task.isFavorite = true
+    task.favoriteCategoryId = 'missing-category'
+    const file = createImportFile({
+      version: 3,
+      exportedAt: new Date(0).toISOString(),
+      settings: DEFAULT_SETTINGS,
+      tasks: [task],
+      imageFiles: {},
+    })
+
+    await importData(file, { mode: 'merge' })
+
+    expect(putTask).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'dangling-category-task',
+      favoriteCategoryId: null,
+    }))
+  })
+
+  it('exports favorite category metadata in the manifest', async () => {
+    let exportedBlob: Blob | null = null
+    const click = vi.fn()
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn((blob: Blob) => {
+        exportedBlob = blob
+        return 'blob:test'
+      }),
+      revokeObjectURL: vi.fn(),
+    })
+    vi.stubGlobal('document', {
+      createElement: vi.fn(() => ({
+        href: '',
+        download: '',
+        click,
+      })),
+    })
+    useStore.setState({
+      favoriteCategories: [{
+        id: 'cat-a',
+        name: '角色',
+        color: '#f59e0b',
+        sortOrder: 0,
+        createdAt: 1,
+      }],
+      showToast: vi.fn(),
+    })
+
+    await exportData()
+
+    expect(click).toHaveBeenCalled()
+    expect(exportedBlob).not.toBeNull()
+    const unzipped = unzipSync(new Uint8Array(await exportedBlob!.arrayBuffer()))
+    const manifest = JSON.parse(strFromU8(unzipped['manifest.json'])) as ExportData
+    expect(manifest.favoriteCategories).toEqual([{
+      id: 'cat-a',
+      name: '角色',
+      color: '#f59e0b',
+      sortOrder: 0,
+      createdAt: 1,
+    }])
   })
 
   it('clears local records before importing in replace mode', async () => {

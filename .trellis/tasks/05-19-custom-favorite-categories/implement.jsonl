@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index for the affected single-repo frontend task."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Category metadata, task assignments, persistence, and export/import touch local app state."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Detail modal, settings modal, search bar, and task grid UI changes need component conventions."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Feature touches local-first data safety and requires relevant tests."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "New category and task fields need safe TypeScript modeling."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Feature spans types, Zustand, IndexedDB task records, export/import, and components."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Avoid duplicating category lookup and filtering logic across UI surfaces."}
