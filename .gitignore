@@ -8,3 +8,6 @@ dev-proxy.config.json
 !.dev.vars.example
 .env*
 !.env.example
+
+# Claude Code local permission cache (per-machine)
+.claude/settings.local.json
