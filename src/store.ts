@@ -10,8 +10,12 @@ import type {
 } from './types'
 import { DEFAULT_PARAMS } from './types'
 import { DEFAULT_SETTINGS, normalizeSettings } from './lib/api/apiProfiles'
-import { DEFAULT_FAVORITE_CATEGORY_COLOR, normalizeFavoriteCategories } from './lib/favoriteCategories'
+import { DEFAULT_FAVORITE_CATEGORY_COLOR, createDefaultFavoriteCategory, normalizeFavoriteCategories } from './lib/favoriteCategories'
 import { putTask } from './lib/db'
+
+type PersistedStoreState = Partial<AppState> & {
+  favoriteCategoriesInitialized?: boolean
+}
 
 function orderImagesWithMaskFirst(images: InputImage[], maskTargetImageId: string | null | undefined) {
   if (!maskTargetImageId) return images
@@ -57,9 +61,29 @@ function createCategoryStatePatch(
   }
 }
 
+export function mergePersistedStoreState(
+  persistedState: unknown,
+  currentState: AppState,
+): AppState {
+  const persisted = persistedState as PersistedStoreState | undefined
+  const normalizedCategories = normalizeFavoriteCategories(persisted?.favoriteCategories)
+  const shouldSeedDefaultCategory =
+    persisted?.favoriteCategoriesInitialized !== true &&
+    normalizedCategories.length === 0
+
+  return {
+    ...currentState,
+    ...persisted,
+    favoriteCategories: shouldSeedDefaultCategory ? [createDefaultFavoriteCategory()] : normalizedCategories,
+    favoriteCategoriesInitialized: true,
+    filterFavoriteCategoryId: null,
+    filterFavorite: false,
+  }
+}
+
 // ===== Store 类型 =====
 
-interface AppState {
+export interface AppState {
   // 设置
   settings: AppSettings
   setSettings: (s: Partial<AppSettings>) => void
@@ -91,6 +115,7 @@ interface AppState {
 
   // 收藏分类
   favoriteCategories: FavoriteCategory[]
+  favoriteCategoriesInitialized: boolean
   setFavoriteCategories: (categories: FavoriteCategory[]) => void
   createFavoriteCategory: (input: { name: string; color?: string }) => string
   updateFavoriteCategory: (id: string, patch: Partial<Pick<FavoriteCategory, 'name' | 'color'>>) => void
@@ -252,7 +277,8 @@ export const useStore = create<AppState>()(
       setTasks: (tasks) => set({ tasks }),
 
       // Favorite categories
-      favoriteCategories: [],
+      favoriteCategories: [createDefaultFavoriteCategory()],
+      favoriteCategoriesInitialized: true,
       setFavoriteCategories: (favoriteCategories) =>
         set((state) => createCategoryStatePatch(favoriteCategories, state.filterFavoriteCategoryId)),
       createFavoriteCategory: ({ name, color }) => {
@@ -383,19 +409,11 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'image-playground',
-      merge: (persistedState, currentState) => {
-        const persisted = persistedState as Partial<AppState> | undefined
-        return {
-          ...currentState,
-          ...persisted,
-          favoriteCategories: normalizeFavoriteCategories(persisted?.favoriteCategories ?? []),
-          filterFavoriteCategoryId: null,
-          filterFavorite: false,
-        }
-      },
+      merge: mergePersistedStoreState,
       partialize: (state) => ({
         settings: state.settings,
         favoriteCategories: state.favoriteCategories,
+        favoriteCategoriesInitialized: state.favoriteCategoriesInitialized,
         params: state.params,
         prompt: state.prompt,
         inputImages: state.inputImages.map((img) => ({ id: img.id, dataUrl: '' })),

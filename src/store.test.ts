@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from './types'
 import { DEFAULT_SETTINGS } from './lib/api/apiProfiles'
 import type { FavoriteCategory, TaskRecord } from './types'
-import { editOutputs, markInterruptedSyncHttpTasks, submitTask, updateTaskInStore, useStore } from './store'
+import { editOutputs, markInterruptedSyncHttpTasks, mergePersistedStoreState, submitTask, updateTaskInStore, useStore } from './store'
+import { DEFAULT_FAVORITE_CATEGORY_COLOR } from './lib/favoriteCategories'
 
 vi.mock('./lib/db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./lib/db')>()
@@ -266,6 +267,71 @@ describe('favorite category store actions', () => {
       expect.objectContaining({ id: secondId, name: '场景', color: '#14b8a6', sortOrder: 0 }),
       expect.objectContaining({ id: firstId, name: '主角', color: '#ef4444', sortOrder: 1 }),
     ])
+  })
+
+  it('starts fresh local state with one default favorite category', () => {
+    expect(useStore.getInitialState().favoriteCategories).toEqual([
+      expect.objectContaining({
+        name: '默认分类',
+        color: DEFAULT_FAVORITE_CATEGORY_COLOR,
+        sortOrder: 0,
+      }),
+    ])
+  })
+
+  it('adds one default favorite category when legacy persisted state has no category metadata', () => {
+    const merged = mergePersistedStoreState({ settings: DEFAULT_SETTINGS }, useStore.getInitialState())
+
+    expect(merged.favoriteCategories).toEqual([
+      expect.objectContaining({
+        name: '默认分类',
+        color: DEFAULT_FAVORITE_CATEGORY_COLOR,
+        sortOrder: 0,
+      }),
+    ])
+  })
+
+  it('adds one default favorite category when legacy persisted state has an empty category array', () => {
+    const merged = mergePersistedStoreState({
+      settings: DEFAULT_SETTINGS,
+      favoriteCategories: [],
+    }, useStore.getInitialState())
+
+    expect(merged.favoriteCategories).toEqual([
+      expect.objectContaining({
+        name: '默认分类',
+        color: DEFAULT_FAVORITE_CATEGORY_COLOR,
+        sortOrder: 0,
+      }),
+    ])
+  })
+
+  it('allows the seeded default favorite category to be updated and deleted', async () => {
+    const [defaultCategory] = useStore.getInitialState().favoriteCategories
+    useStore.setState({
+      favoriteCategories: [defaultCategory],
+      filterFavoriteCategoryId: defaultCategory.id,
+      tasks: [],
+    })
+
+    useStore.getState().updateFavoriteCategory(defaultCategory.id, {
+      name: '我的默认',
+      color: '#14b8a6',
+    })
+    await useStore.getState().deleteFavoriteCategory(defaultCategory.id)
+
+    expect(useStore.getState().favoriteCategories).toEqual([])
+    expect(useStore.getState().filterFavoriteCategoryId).toBeNull()
+  })
+
+  it('keeps an initialized empty category list empty after the user deletes all categories', () => {
+    const merged = mergePersistedStoreState({
+      settings: DEFAULT_SETTINGS,
+      favoriteCategories: [],
+      favoriteCategoriesInitialized: true,
+    }, useStore.getInitialState())
+
+    expect(merged.favoriteCategories).toEqual([])
   })
 
   it('clears task assignments when a favorite category is deleted', async () => {

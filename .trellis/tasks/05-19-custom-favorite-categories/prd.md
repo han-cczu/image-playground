@@ -33,6 +33,8 @@ Add user-defined categories for favorite image generation records so users can o
 * Users can delete categories; deleting a category clears it from assigned tasks.
 * Users can reorder categories for display in selectors and filters.
 * Users can choose a color for each category.
+* New users get one default category immediately so category controls are visible without manual setup.
+* Users with old persisted category state, including an old empty category array, are migrated to one default category.
 * Users manage categories from the settings modal.
 * Users can keep using the existing favorite toggle without being forced to categorize.
 * Existing records remain compatible when the new field is missing.
@@ -45,6 +47,7 @@ Add user-defined categories for favorite image generation records so users can o
 * [ ] Category assignment for a single record is available in the detail modal.
 * [ ] The task grid can show records filtered by a selected favorite category.
 * [ ] Categories can be renamed, deleted, reordered, and recolored.
+* [ ] A default category exists on first load, in fresh local state, and after loading old persisted category state.
 * [ ] Category management is available in the settings modal.
 * [ ] Deleting a category clears that category from records that used it.
 * [ ] Uncategorized favorites still appear when filtering by all favorites.
@@ -95,9 +98,16 @@ Add user-defined categories for favorite image generation records so users can o
 
 **Consequences**: Category management stays centralized. The detail modal remains focused on assigning the current record to one category.
 
+**Context**: If the category list starts empty, the main category filter is hidden and users may think the deployed feature is missing.
+
+**Decision**: Seed a default favorite category in fresh local state and when legacy persisted state has no initialized category metadata.
+
+**Consequences**: Category controls are visible immediately. Users can rename, recolor, reorder, or delete the default category like any other category. Persisted stores use an initialization marker so an old empty category array is migrated once, while a user-deleted empty list stays empty afterward.
+
 ## Technical Approach
 
 * Add a `FavoriteCategory` type with `id`, `name`, `color`, `sortOrder`, and `createdAt`.
+* Provide a deterministic default category for fresh stores and legacy persisted stores with no initialized category metadata.
 * Add `favoriteCategoryId?: string | null` to `TaskRecord`.
 * Persist categories in Zustand state because category metadata is small app-level local configuration.
 * Store task assignments in IndexedDB with each task record.

@@ -3,7 +3,7 @@ import type { AppSettings, ExportData, TaskRecord } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { useStore } from '../store'
 import { mergeImportedSettings, DEFAULT_SETTINGS, normalizeSettings } from './api/apiProfiles'
-import { mergeFavoriteCategories, normalizeFavoriteCategories } from './favoriteCategories'
+import { createDefaultFavoriteCategory, mergeFavoriteCategories, normalizeFavoriteCategories } from './favoriteCategories'
 import {
   getAllTasks,
   putTask,
@@ -62,7 +62,7 @@ function sanitizeImportedTasksForFavoriteCategories(
    * ========================================================================
    * 数据源：
    *   1) 备份 manifest 中的任务记录
-   *   2) 本地已有分类和备份分类合并后的有效 id
+   *   2) 同一份备份 manifest 中的分类元数据 id
    * 操作要点：
    *   1) 保留能找到元数据的收藏分类 id
    *   2) 清理非收藏或缺失元数据的悬空分类引用
@@ -83,7 +83,7 @@ export async function clearAllData() {
   clearImageCache()
   const { setTasks, clearInputImages, clearMaskDraft, setSettings, setParams, setFavoriteCategories, showToast } = useStore.getState()
   setTasks([])
-  setFavoriteCategories([])
+  setFavoriteCategories([createDefaultFavoriteCategory()])
   clearInputImages()
   useStore.setState({ dismissedCodexCliPrompts: [] })
   clearMaskDraft()
@@ -183,15 +183,12 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
     const isReplaceMode = (options.mode ?? 'merge') === 'replace'
     const existingTaskIds = isReplaceMode ? new Set<string>() : new Set((await getAllTasks()).map((task) => task.id))
     const existingImageIds = isReplaceMode ? new Set<string>() : new Set((await getAllImages()).map((image) => image.id))
-    const importedCategories = normalizeFavoriteCategories(data.favoriteCategories ?? [])
-    const localCategoryIds = isReplaceMode
-      ? new Set<string>()
-      : new Set(useStore.getState().favoriteCategories.map((category) => category.id))
-    const validCategoryIds = new Set([
-      ...localCategoryIds,
-      ...importedCategories.map((category) => category.id),
-    ])
-    const importedTasks = sanitizeImportedTasksForFavoriteCategories(data.tasks, validCategoryIds)
+    const hasFavoriteCategoryMetadata = Array.isArray(data.favoriteCategories)
+    const importedCategories = hasFavoriteCategoryMetadata
+      ? normalizeFavoriteCategories(data.favoriteCategories)
+      : []
+    const importedCategoryIds = new Set(importedCategories.map((category) => category.id))
+    const importedTasks = sanitizeImportedTasksForFavoriteCategories(data.tasks, importedCategoryIds)
 
     // 还原图片
     for (const [id, info] of Object.entries(data.imageFiles)) {
@@ -214,7 +211,9 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
     }
 
     if (isReplaceMode) {
-      useStore.getState().setFavoriteCategories(importedCategories)
+      useStore.getState().setFavoriteCategories(
+        hasFavoriteCategoryMetadata ? importedCategories : [createDefaultFavoriteCategory()],
+      )
     } else if (importedCategories.length) {
       const state = useStore.getState()
       state.setFavoriteCategories(mergeFavoriteCategories(state.favoriteCategories, importedCategories))

@@ -12,13 +12,25 @@ export const FAVORITE_CATEGORY_COLORS = [
 ]
 
 export const DEFAULT_FAVORITE_CATEGORY_COLOR = FAVORITE_CATEGORY_COLORS[0]
+export const DEFAULT_FAVORITE_CATEGORY_ID = 'default-favorite-category'
+export const DEFAULT_FAVORITE_CATEGORY_NAME = '默认分类'
+
+export function createDefaultFavoriteCategory(now = 0): FavoriteCategory {
+  return {
+    id: DEFAULT_FAVORITE_CATEGORY_ID,
+    name: DEFAULT_FAVORITE_CATEGORY_NAME,
+    color: DEFAULT_FAVORITE_CATEGORY_COLOR,
+    sortOrder: 0,
+    createdAt: now,
+  }
+}
 
 function isValidColor(color: unknown): color is string {
   return typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)
 }
 
 export function normalizeFavoriteCategories(categories: unknown, now = Date.now()): FavoriteCategory[] {
-  if (!Array.isArray(categories)) return []
+  if (!Array.isArray(categories)) return [createDefaultFavoriteCategory()]
 
   /*
    * ========================================================================

@@ -108,6 +108,9 @@ return { images, partialFailureCount, partialFailureMessage }
 
 3. Contracts
    - Store task assignment by category id, not category name.
+   - Fresh local state and legacy persisted state without initialized category metadata must seed one default favorite category.
+   - Persisted stores use `favoriteCategoriesInitialized` to distinguish legacy empty arrays from users who deleted all categories after initialization.
+   - An initialized empty category list is valid after the user deletes all categories; do not recreate the default in that path.
    - A task may have zero or one `favoriteCategoryId`; category filtering only shows favorite tasks with that id.
    - Renaming, recoloring, or reordering a category must not rewrite task records.
    - Deleting a category must clear matching `TaskRecord.favoriteCategoryId` values and persist affected tasks.
@@ -117,6 +120,7 @@ return { images, partialFailureCount, partialFailureMessage }
 4. Validation & Error Matrix
    - Missing category metadata during import -> clear imported task `favoriteCategoryId`.
    - Non-favorite task with category id during import -> clear `favoriteCategoryId`.
+   - Legacy replace import with no category metadata -> keep one default category for UI visibility, with no task assignments.
    - Deleted active filter category -> reset `filterFavoriteCategoryId` to `null`.
    - Invalid category color -> replace with default category color.
    - Duplicate category id in imported/persisted metadata -> keep one normalized category.
@@ -128,6 +132,7 @@ return { images, partialFailureCount, partialFailureMessage }
 
 6. Tests Required
    - Store tests for create/update/reorder/delete actions.
+   - Store tests for fresh default category, legacy persisted state without category metadata, and legacy empty category arrays.
    - Store test that delete clears task assignments and persists only changed tasks.
    - Export/import tests for category metadata round-trip.
    - Import test for dangling task category references.

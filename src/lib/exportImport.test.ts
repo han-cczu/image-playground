@@ -4,7 +4,8 @@ import { DEFAULT_SETTINGS } from './api/apiProfiles'
 import type { ExportData, TaskRecord } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { useStore } from '../store'
-import { exportData, importData, redactSettingsForExport } from './exportImport'
+import { clearAllData, exportData, importData, redactSettingsForExport } from './exportImport'
+import { DEFAULT_FAVORITE_CATEGORY_COLOR } from './favoriteCategories'
 import {
   clearImages,
   clearTasks,
@@ -225,6 +226,48 @@ describe('export/import reliability', () => {
     }))
   })
 
+  it('does not use local category metadata to validate imported task assignments', async () => {
+    const task = createTask('local-id-task')
+    task.isFavorite = true
+    task.favoriteCategoryId = 'cat-local'
+    useStore.setState({
+      favoriteCategories: [{
+        id: 'cat-local',
+        name: '本地分类',
+        color: '#14b8a6',
+        sortOrder: 0,
+        createdAt: 1,
+      }],
+      showToast: vi.fn(),
+    })
+    const file = createImportFile({
+      version: 3,
+      exportedAt: new Date(0).toISOString(),
+      settings: DEFAULT_SETTINGS,
+      tasks: [task],
+      imageFiles: {},
+    })
+
+    await importData(file, { mode: 'merge' })
+
+    expect(putTask).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'local-id-task',
+      favoriteCategoryId: null,
+    }))
+  })
+
+  it('resets cleared app data with the default favorite category', async () => {
+    await clearAllData()
+
+    expect(useStore.getState().favoriteCategories).toEqual([
+      expect.objectContaining({
+        name: '默认分类',
+        color: DEFAULT_FAVORITE_CATEGORY_COLOR,
+        sortOrder: 0,
+      }),
+    ])
+  })
+
   it('exports favorite category metadata in the manifest', async () => {
     let exportedBlob: Blob | null = null
     const click = vi.fn()
@@ -281,5 +324,26 @@ describe('export/import reliability', () => {
     await importData(file, { mode: 'replace' })
 
     expect(dbCalls).toEqual(['clearTasks', 'clearImages', 'putTask'])
+  })
+
+  it('keeps the default favorite category after replacing with a legacy backup', async () => {
+    const task = createTask('legacy-task')
+    const file = createImportFile({
+      version: 2,
+      exportedAt: new Date(0).toISOString(),
+      settings: DEFAULT_SETTINGS,
+      tasks: [task],
+      imageFiles: {},
+    })
+
+    await importData(file, { mode: 'replace' })
+
+    expect(useStore.getState().favoriteCategories).toEqual([
+      expect.objectContaining({
+        name: '默认分类',
+        color: DEFAULT_FAVORITE_CATEGORY_COLOR,
+        sortOrder: 0,
+      }),
+    ])
   })
 })
