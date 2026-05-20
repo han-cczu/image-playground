@@ -71,3 +71,36 @@ Hardened local data export/import, URL bootstrap secrets, concurrent generation 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: 已收藏多选批量挪类菜单
+
+**Date**: 2026-05-20
+**Task**: 已收藏多选批量挪类菜单
+**Branch**: `main`
+
+### Summary
+
+上一个任务遗留的 UX 闭环：SelectionActionBar 已收藏多选时统一用 FavoriteCategoryMenu 渲染收藏槽，trigger 星通过 fill 切换实心/外框；FavoriteCategoryMenu 新增可选 props includeClearFavorite / clearFavoriteLabel / onClearFavorite，菜单顶部条件渲染红色取消收藏项。已收藏多选下可点星直接挪到任意分类或一键取消收藏，store / taskRuntime 零改动，复用上一个任务修正的 allInTarget 短路与 Promise.allSettled 契约。build + test 90/90 全绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `993372b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
