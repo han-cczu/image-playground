@@ -21,6 +21,9 @@ interface FavoriteCategoryMenuProps {
   includeUnassigned?: boolean
   unassignedLabel?: string
   includeDefaultFallback?: boolean
+  includeClearFavorite?: boolean
+  clearFavoriteLabel?: string
+  onClearFavorite?: () => void
   createPlaceholder?: string
   align?: 'left' | 'right'
   menuClassName?: string
@@ -36,6 +39,9 @@ export default function FavoriteCategoryMenu({
   includeUnassigned = false,
   unassignedLabel = '不分组',
   includeDefaultFallback = false,
+  includeClearFavorite = false,
+  clearFavoriteLabel = '取消收藏',
+  onClearFavorite,
   createPlaceholder = '分类名称',
   align = 'left',
   menuClassName = 'w-44',
@@ -163,6 +169,26 @@ export default function FavoriteCategoryMenu({
       style={menuPosition}
       onClick={(e) => e.stopPropagation()}
     >
+      {includeClearFavorite && onClearFavorite && (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              onClearFavorite()
+              closeMenu()
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
+          >
+            <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              <line x1="4" y1="4" x2="20" y2="20" />
+            </svg>
+            <span className="min-w-0 truncate">{clearFavoriteLabel}</span>
+          </button>
+          <div className="my-1 h-px bg-gray-100 dark:bg-white/[0.08]" />
+        </>
+      )}
+
       {includeAll && (
         <button
           type="button"
