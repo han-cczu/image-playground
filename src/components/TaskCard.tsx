@@ -2,9 +2,10 @@ import { useEffect, useState, useRef } from 'react'
 import type { DraggableAttributes } from '@dnd-kit/core'
 import type { SyntheticListenerMap } from '@dnd-kit/core/dist/hooks/utilities'
 import type { TaskRecord } from '../types'
-import { useStore, getCachedImage, ensureImageCached, updateTaskInStore, retryTask } from '../store'
+import { useStore, getCachedImage, ensureImageCached, setTaskFavoriteCategory, clearTaskFavorite, retryTask } from '../store'
 import { formatImageRatio } from '../lib/image/size'
 import { ParamValue } from '../lib/paramDisplay'
+import FavoriteCategoryMenu from './FavoriteCategoryMenu'
 
 interface DragHandle {
   ref: (node: HTMLElement | null) => void
@@ -417,36 +418,66 @@ export default function TaskCard({
                   </svg>
                 </button>
               )}
-              <button
-                onClick={() => {
-                  void updateTaskInStore(task.id, {
-                    isFavorite: !task.isFavorite,
-                    ...(!task.isFavorite ? {} : { favoriteCategoryId: null }),
-                  }).catch(() => {
-                    /* updateTaskInStore already surfaced the persistence error */
-                  })
-                }}
-                className={`p-1.5 rounded-md transition ${
-                  task.isFavorite
-                    ? 'text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-500/10'
-                    : 'text-gray-400 hover:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-500/10'
-                }`}
-                title={task.isFavorite ? '取消收藏' : '收藏记录'}
-              >
-                <svg
-                  className="w-4 h-4"
-                  fill={task.isFavorite ? 'currentColor' : 'none'}
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+              {task.isFavorite ? (
+                <button
+                  onClick={() => {
+                    void clearTaskFavorite(task.id).catch(() => {
+                      /* updateTaskInStore already surfaced the persistence error */
+                    })
+                  }}
+                  className="p-1.5 rounded-md text-yellow-400 transition hover:bg-yellow-50 dark:hover:bg-yellow-500/10"
+                  title="取消收藏"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                  <svg
+                    className="w-4 h-4"
+                    fill="currentColor"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                    />
+                  </svg>
+                </button>
+              ) : (
+                <div className="relative">
+                  <FavoriteCategoryMenu
+                    includeDefaultFallback
+                    align="right"
+                    onSelect={(categoryId) => {
+                      if (!categoryId) return
+                      void setTaskFavoriteCategory(task.id, categoryId).catch(() => {
+                        /* updateTaskInStore already surfaced the persistence error */
+                      })
+                    }}
+                    renderTrigger={({ toggle }) => (
+                      <button
+                        type="button"
+                        onClick={toggle}
+                        className="p-1.5 rounded-md text-gray-400 transition hover:bg-yellow-50 hover:text-yellow-400 dark:hover:bg-yellow-500/10"
+                        title="收藏记录"
+                      >
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                          />
+                        </svg>
+                      </button>
+                    )}
                   />
-                </svg>
-              </button>
+                </div>
+              )}
               <button
                 onClick={onReuse}
                 className="p-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-gray-400 hover:text-blue-500 transition"

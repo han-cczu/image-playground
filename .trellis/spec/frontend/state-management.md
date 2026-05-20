@@ -101,16 +101,24 @@ return { images, partialFailureCount, partialFailureMessage }
    - `FavoriteCategory`: `{ id: string; name: string; color: string; sortOrder: number; createdAt: number }`
    - `TaskRecord.favoriteCategoryId?: string | null`
    - `createFavoriteCategory(input: { name: string; color?: string }): string`
+   - `ensureDefaultFavoriteCategory(): string`
    - `updateFavoriteCategory(id: string, patch: Partial<Pick<FavoriteCategory, 'name' | 'color'>>): void`
    - `deleteFavoriteCategory(id: string): Promise<void>`
    - `moveFavoriteCategory(id: string, direction: -1 | 1): void`
+   - `setTaskFavoriteCategory(taskId: string, categoryId: string): Promise<void>`
+   - `clearTaskFavorite(taskId: string): Promise<void>`
    - `filterAndSortTasks(tasks, { searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId })`
 
 3. Contracts
    - Store task assignment by category id, not category name.
+   - Favoriting from a record star or bulk action must first select a category; canceling the category menu must not change `TaskRecord`.
+   - Selecting a category through the favorite flow must set both `isFavorite: true` and `favoriteCategoryId`.
+   - Canceling favorite must set `isFavorite: false` and `favoriteCategoryId: null`.
+   - Category creation is available from the top category entry and favorite category menu; settings only manages existing categories.
    - Fresh local state and legacy persisted state without initialized category metadata must seed one default favorite category.
    - Persisted stores use `favoriteCategoriesInitialized` to distinguish legacy empty arrays from users who deleted all categories after initialization.
    - An initialized empty category list is valid after the user deletes all categories; do not recreate the default in that path.
+   - If the user explicitly chooses the default category from the favorite flow after deleting all categories, `ensureDefaultFavoriteCategory()` may restore that single default category.
    - A task may have zero or one `favoriteCategoryId`; category filtering only shows favorite tasks with that id.
    - Renaming, recoloring, or reordering a category must not rewrite task records.
    - Deleting a category must clear matching `TaskRecord.favoriteCategoryId` values and persist affected tasks.
@@ -121,19 +129,24 @@ return { images, partialFailureCount, partialFailureMessage }
    - Missing category metadata during import -> clear imported task `favoriteCategoryId`.
    - Non-favorite task with category id during import -> clear `favoriteCategoryId`.
    - Legacy replace import with no category metadata -> keep one default category for UI visibility, with no task assignments.
+   - Favorite category menu closed without selection -> no task update and no persistence write.
+   - Explicit default category selection with initialized empty categories -> restore default category, then assign the task.
    - Deleted active filter category -> reset `filterFavoriteCategoryId` to `null`.
    - Invalid category color -> replace with default category color.
    - Duplicate category id in imported/persisted metadata -> keep one normalized category.
 
 5. Good/Base/Bad Cases
    - Good: import backup with category metadata and favorite task assignment, then filter by category id.
+   - Good: click an un-favorited star, choose a category, and persist `isFavorite: true` plus that `favoriteCategoryId`.
    - Base: legacy task without `favoriteCategoryId` renders and exports normally.
-   - Bad: rename category by rewriting every task's category name.
+   - Bad: click an un-favorited star and immediately persist `isFavorite: true` before the user chooses a category.
 
 6. Tests Required
    - Store tests for create/update/reorder/delete actions.
    - Store tests for fresh default category, legacy persisted state without category metadata, and legacy empty category arrays.
    - Store test that delete clears task assignments and persists only changed tasks.
+   - Runtime tests for `setTaskFavoriteCategory` and `clearTaskFavorite`.
+   - Runtime test that explicit default restore can be assigned to a task after initialized empty categories.
    - Export/import tests for category metadata round-trip.
    - Import test for dangling task category references.
    - Filter tests for category filters excluding non-favorites and preserving uncategorized favorites in all-favorites view.
@@ -143,13 +156,13 @@ return { images, partialFailureCount, partialFailureMessage }
 Wrong:
 
 ```typescript
-task.favoriteCategoryName = category.name
+updateTaskInStore(task.id, { isFavorite: true })
 ```
 
 Correct:
 
 ```typescript
-task.favoriteCategoryId = category.id
+setTaskFavoriteCategory(task.id, category.id)
 ```
 
 ---

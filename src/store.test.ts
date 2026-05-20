@@ -2,8 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from './types'
 import { DEFAULT_SETTINGS } from './lib/api/apiProfiles'
 import type { FavoriteCategory, TaskRecord } from './types'
-import { editOutputs, markInterruptedSyncHttpTasks, mergePersistedStoreState, submitTask, updateTaskInStore, useStore } from './store'
-import { DEFAULT_FAVORITE_CATEGORY_COLOR } from './lib/favoriteCategories'
+import {
+  clearTaskFavorite,
+  editOutputs,
+  markInterruptedSyncHttpTasks,
+  mergePersistedStoreState,
+  setTaskFavoriteCategory,
+  submitTask,
+  updateTaskInStore,
+  useStore,
+} from './store'
+import { DEFAULT_FAVORITE_CATEGORY_COLOR, DEFAULT_FAVORITE_CATEGORY_ID } from './lib/favoriteCategories'
 
 vi.mock('./lib/db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./lib/db')>()
@@ -196,6 +205,60 @@ describe('task runtime reliability', () => {
     )
   })
 
+  it('favorites a task in the selected category and clears the category when unfavorited', async () => {
+    useStore.setState({
+      tasks: [task({ id: 'task-a' })],
+      showToast: vi.fn(),
+    })
+
+    await setTaskFavoriteCategory('task-a', categoryA.id)
+    await clearTaskFavorite('task-a')
+
+    expect(useStore.getState().tasks[0]).toMatchObject({
+      isFavorite: false,
+      favoriteCategoryId: null,
+    })
+    expect(putTask).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      id: 'task-a',
+      isFavorite: true,
+      favoriteCategoryId: categoryA.id,
+    }))
+    expect(putTask).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      id: 'task-a',
+      isFavorite: false,
+      favoriteCategoryId: null,
+    }))
+  })
+
+  it('favorites a task after the default category is explicitly restored', async () => {
+    useStore.setState({
+      favoriteCategories: [],
+      favoriteCategoriesInitialized: true,
+      tasks: [task({ id: 'task-a' })],
+      showToast: vi.fn(),
+    })
+
+    const categoryId = useStore.getState().ensureDefaultFavoriteCategory()
+    await setTaskFavoriteCategory('task-a', categoryId)
+
+    expect(useStore.getState().favoriteCategories).toEqual([
+      expect.objectContaining({
+        id: DEFAULT_FAVORITE_CATEGORY_ID,
+        name: '默认分类',
+        sortOrder: 0,
+      }),
+    ])
+    expect(useStore.getState().tasks[0]).toMatchObject({
+      isFavorite: true,
+      favoriteCategoryId: DEFAULT_FAVORITE_CATEGORY_ID,
+    })
+    expect(putTask).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'task-a',
+      isFavorite: true,
+      favoriteCategoryId: DEFAULT_FAVORITE_CATEGORY_ID,
+    }))
+  })
+
   it('stores partial success metadata from API results on the task', async () => {
     vi.mocked(callImageApi).mockResolvedValue({
       images: ['data:image/png;base64,AQID'],
@@ -332,6 +395,25 @@ describe('favorite category store actions', () => {
     }, useStore.getInitialState())
 
     expect(merged.favoriteCategories).toEqual([])
+  })
+
+  it('restores the default category only when the favorite flow explicitly selects it', () => {
+    useStore.setState({
+      favoriteCategories: [],
+      favoriteCategoriesInitialized: true,
+      filterFavoriteCategoryId: null,
+    })
+
+    const restoredId = useStore.getState().ensureDefaultFavoriteCategory()
+
+    expect(restoredId).toBe(DEFAULT_FAVORITE_CATEGORY_ID)
+    expect(useStore.getState().favoriteCategories).toEqual([
+      expect.objectContaining({
+        id: DEFAULT_FAVORITE_CATEGORY_ID,
+        name: '默认分类',
+        sortOrder: 0,
+      }),
+    ])
   })
 
   it('clears task assignments when a favorite category is deleted', async () => {

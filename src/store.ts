@@ -10,7 +10,12 @@ import type {
 } from './types'
 import { DEFAULT_PARAMS } from './types'
 import { DEFAULT_SETTINGS, normalizeSettings } from './lib/api/apiProfiles'
-import { DEFAULT_FAVORITE_CATEGORY_COLOR, createDefaultFavoriteCategory, normalizeFavoriteCategories } from './lib/favoriteCategories'
+import {
+  DEFAULT_FAVORITE_CATEGORY_COLOR,
+  DEFAULT_FAVORITE_CATEGORY_ID,
+  createDefaultFavoriteCategory,
+  normalizeFavoriteCategories,
+} from './lib/favoriteCategories'
 import { putTask } from './lib/db'
 
 type PersistedStoreState = Partial<AppState> & {
@@ -118,6 +123,7 @@ export interface AppState {
   favoriteCategoriesInitialized: boolean
   setFavoriteCategories: (categories: FavoriteCategory[]) => void
   createFavoriteCategory: (input: { name: string; color?: string }) => string
+  ensureDefaultFavoriteCategory: () => string
   updateFavoriteCategory: (id: string, patch: Partial<Pick<FavoriteCategory, 'name' | 'color'>>) => void
   deleteFavoriteCategory: (id: string) => Promise<void>
   moveFavoriteCategory: (id: string, direction: -1 | 1) => void
@@ -295,6 +301,19 @@ export const useStore = create<AppState>()(
         ], state.filterFavoriteCategoryId))
         return id
       },
+      ensureDefaultFavoriteCategory: () => {
+        const existing = get().favoriteCategories.find((category) => category.id === DEFAULT_FAVORITE_CATEGORY_ID)
+        if (existing) return existing.id
+
+        set((state) => createCategoryStatePatch([
+          ...state.favoriteCategories,
+          {
+            ...createDefaultFavoriteCategory(Date.now()),
+            sortOrder: -1,
+          },
+        ], state.filterFavoriteCategoryId))
+        return DEFAULT_FAVORITE_CATEGORY_ID
+      },
       updateFavoriteCategory: (id, patch) =>
         set((state) => createCategoryStatePatch(state.favoriteCategories.map((category) =>
           category.id === id
@@ -438,6 +457,8 @@ export {
   initStore,
   submitTask,
   retryTask,
+  setTaskFavoriteCategory,
+  clearTaskFavorite,
   reuseConfig,
   editOutputs,
   removeTask,

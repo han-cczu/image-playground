@@ -1,5 +1,6 @@
 import { useStore } from '../store'
 import Select from './Select'
+import FavoriteCategoryMenu from './FavoriteCategoryMenu'
 
 export default function SearchBar() {
   const searchQuery = useStore((s) => s.searchQuery)
@@ -8,13 +9,12 @@ export default function SearchBar() {
   const setFilterStatus = useStore((s) => s.setFilterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const setFilterFavorite = useStore((s) => s.setFilterFavorite)
-  const favoriteCategories = useStore((s) => s.favoriteCategories)
   const filterFavoriteCategoryId = useStore((s) => s.filterFavoriteCategoryId)
   const setFilterFavoriteCategoryId = useStore((s) => s.setFilterFavoriteCategoryId)
 
   return (
     <div data-no-drag-select className="mt-6 mb-4 flex flex-col gap-3 sm:flex-row">
-      <div className="grid grid-cols-[auto_minmax(0,7rem)_minmax(0,8rem)] gap-2 flex-shrink-0 z-20 sm:flex">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] gap-2 flex-shrink-0 z-20 sm:flex">
         <button
           onClick={() => setFilterFavorite(!filterFavorite)}
           className={`p-2.5 rounded-xl border transition-all ${
@@ -41,22 +41,38 @@ export default function SearchBar() {
             className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
           />
         </div>
-        {favoriteCategories.length > 0 && (
-          <div className="relative min-w-0 sm:w-32">
-            <Select
-              value={filterFavoriteCategoryId ?? ''}
-              onChange={(val) => setFilterFavoriteCategoryId(String(val) || null)}
-              options={[
-                { label: '全部分类', value: '' },
-                ...favoriteCategories.map((category) => ({
-                  label: category.name.trim() || '未命名分类',
-                  value: category.id,
-                })),
-              ]}
-              className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
-            />
-          </div>
-        )}
+        <div className="relative min-w-0 sm:w-32">
+          <FavoriteCategoryMenu
+            value={filterFavoriteCategoryId}
+            includeAll
+            onSelect={setFilterFavoriteCategoryId}
+            menuClassName="w-48"
+            matchTriggerWidth
+            renderTrigger={({ isOpen, label, selectedCategory, toggle }) => (
+              <button
+                type="button"
+                onClick={toggle}
+                className="flex w-full items-center justify-between gap-1 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-900 dark:hover:bg-white/[0.06]"
+                title={label}
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {selectedCategory && (
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: selectedCategory.color }} />
+                  )}
+                  <span className="min-w-0 truncate">{label}</span>
+                </span>
+                <svg
+                  className={`h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform duration-200 dark:text-gray-500 ${isOpen ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+            )}
+          />
+        </div>
       </div>
       <div className="relative flex-1 z-10">
         <svg

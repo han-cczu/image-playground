@@ -38,7 +38,6 @@ export default function SettingsModal() {
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const showToast = useStore((s) => s.showToast)
   const favoriteCategories = useStore((s) => s.favoriteCategories)
-  const createFavoriteCategory = useStore((s) => s.createFavoriteCategory)
   const updateFavoriteCategory = useStore((s) => s.updateFavoriteCategory)
   const deleteFavoriteCategory = useStore((s) => s.deleteFavoriteCategory)
   const moveFavoriteCategory = useStore((s) => s.moveFavoriteCategory)
@@ -53,7 +52,6 @@ export default function SettingsModal() {
   const [modelList, setModelList] = useState<string[] | null>(null)
   const [modelListError, setModelListError] = useState<string | null>(null)
   const [pendingImportMode, setPendingImportMode] = useState<ImportMode>('merge')
-  const [newCategoryName, setNewCategoryName] = useState('')
   const modelFieldRef = useRef<HTMLDivElement>(null)
 
   const apiProxyAvailable = isApiProxyAvailable(readClientDevProxyConfig())
@@ -281,13 +279,6 @@ export default function SettingsModal() {
       profiles: nextProfiles,
       activeProfileId: draft.activeProfileId === id ? nextProfiles[0].id : draft.activeProfileId,
     }))
-  }
-
-  const handleCreateCategory = () => {
-    const name = newCategoryName.trim()
-    if (!name) return
-    createFavoriteCategory({ name })
-    setNewCategoryName('')
   }
 
   const handleDeleteCategory = (categoryId: string, categoryName: string) => {
@@ -717,37 +708,9 @@ export default function SettingsModal() {
               收藏分类
             </h4>
             <div className="space-y-3">
-              <div className="flex gap-2">
-                <input
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      handleCreateCategory()
-                    }
-                  }}
-                  type="text"
-                  placeholder="新分类名称"
-                  className="min-w-0 flex-1 rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                />
-                <button
-                  type="button"
-                  onClick={handleCreateCategory}
-                  disabled={!newCategoryName.trim()}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500 text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
-                  aria-label="创建分类"
-                  title="创建分类"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                </button>
-              </div>
-
               {favoriteCategories.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-gray-200/70 px-3 py-3 text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
-                  暂无分类。创建后可在详情页给收藏记录分组。
+                  暂无分类。可从顶部分类入口或收藏记录时新建。
                 </div>
               ) : (
                 <div className="space-y-2">

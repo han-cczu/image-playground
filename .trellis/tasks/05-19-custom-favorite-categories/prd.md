@@ -23,6 +23,20 @@ Add user-defined categories for favorite image generation records so users can o
 
 * None.
 
+## Confirmed UX Update (2026-05-20)
+
+* Category creation moves to the category entry point near the top filter.
+* The top category control always exposes `全部分类` and `+ 新建分类`.
+* Settings is no longer the primary creation entry; it keeps management controls only: rename, color, reorder, delete.
+* Clicking the star on an un-favorited record opens a category menu instead of immediately favoriting.
+* The favorite menu includes `默认分类`, existing categories, and `+ 新建分类`.
+* Selecting a category sets `isFavorite = true` and writes `favoriteCategoryId`.
+* Closing the menu without a selection leaves the task un-favorited.
+* Clicking the star on an already-favorited record clears both `isFavorite` and `favoriteCategoryId`.
+* A category created from the favorite menu is assigned to the task immediately.
+* Detail modal category editing remains as secondary editing and uses the same category semantics.
+* Default category migration remains unchanged: fresh or legacy category state gets `默认分类`; initialized empty category lists stay empty after users delete all categories. The favorite flow may explicitly restore `默认分类` when the user chooses it.
+
 ## Requirements (evolving)
 
 * Users can assign a custom category to a favorite record.
@@ -33,9 +47,13 @@ Add user-defined categories for favorite image generation records so users can o
 * Users can delete categories; deleting a category clears it from assigned tasks.
 * Users can reorder categories for display in selectors and filters.
 * Users can choose a color for each category.
+* Users can create a category from the top category filter entry.
+* Users can create a category while favoriting a record.
+* Favoriting an un-favorited record requires choosing a category first.
+* Canceling or closing the favorite category menu does not favorite the record.
 * New users get one default category immediately so category controls are visible without manual setup.
 * Users with old persisted category state, including an old empty category array, are migrated to one default category.
-* Users manage categories from the settings modal.
+* Users manage existing categories from the settings modal.
 * Users can keep using the existing favorite toggle without being forced to categorize.
 * Existing records remain compatible when the new field is missing.
 * Category data persists in IndexedDB and survives export/import.
@@ -46,9 +64,15 @@ Add user-defined categories for favorite image generation records so users can o
 * [ ] Each favorite has at most one category.
 * [ ] Category assignment for a single record is available in the detail modal.
 * [ ] The task grid can show records filtered by a selected favorite category.
+* [ ] A category can be created from the top category filter.
+* [ ] Settings does not expose primary category creation controls.
+* [ ] Clicking star on an un-favorited card opens category choice and does not favorite on cancel.
+* [ ] Choosing `默认分类` favorites the record into the default category.
+* [ ] Choosing `+ 新建分类` from the favorite flow creates the category and assigns the record immediately.
+* [ ] Clicking star on an already-favorited record cancels favorite and clears `favoriteCategoryId`.
 * [ ] Categories can be renamed, deleted, reordered, and recolored.
 * [ ] A default category exists on first load, in fresh local state, and after loading old persisted category state.
-* [ ] Category management is available in the settings modal.
+* [ ] Category management remains available in the settings modal.
 * [ ] Deleting a category clears that category from records that used it.
 * [ ] Uncategorized favorites still appear when filtering by all favorites.
 * [ ] Existing records without category data still render without errors.

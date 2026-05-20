@@ -415,6 +415,20 @@ export async function updateTaskInStore(taskId: string, patch: Partial<TaskRecor
   }
 }
 
+export function setTaskFavoriteCategory(taskId: string, categoryId: string): Promise<void> {
+  return updateTaskInStore(taskId, {
+    isFavorite: true,
+    favoriteCategoryId: categoryId,
+  })
+}
+
+export function clearTaskFavorite(taskId: string): Promise<void> {
+  return updateTaskInStore(taskId, {
+    isFavorite: false,
+    favoriteCategoryId: null,
+  })
+}
+
 export function getTaskSortKey(task: TaskRecord): number {
   return task.sortOrder ?? task.createdAt
 }
