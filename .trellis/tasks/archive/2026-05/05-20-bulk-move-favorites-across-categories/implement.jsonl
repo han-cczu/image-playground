@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index — single-repo frontend task."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Favorite category contracts: bulk action short-circuit semantics (allInTarget), setTaskFavoriteCategory / clearTaskFavorite contracts, and the Common Mistakes section on bulk async + clearSelection ordering. New UX must not break these."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "FavoriteCategoryMenu gets new props (includeClearFavorite / onClearFavorite); SelectionActionBar trigger toggling. Follow project component conventions."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "New optional props on FavoriteCategoryMenu need safe TypeScript modeling — guard against passing onClearFavorite without includeClearFavorite or vice versa."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse FavoriteCategoryMenu rather than forking the trigger / menu for already-favorited multi-select; extend via props."}
