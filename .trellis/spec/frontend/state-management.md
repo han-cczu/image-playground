@@ -121,7 +121,9 @@ return { images, partialFailureCount, partialFailureMessage }
    - If the user explicitly chooses the default category from the favorite flow after deleting all categories, `ensureDefaultFavoriteCategory()` may restore that single default category.
    - A task may have zero or one `favoriteCategoryId`; category filtering only shows favorite tasks with that id.
    - Renaming, recoloring, or reordering a category must not rewrite task records.
-   - Deleting a category must clear matching `TaskRecord.favoriteCategoryId` values and persist affected tasks.
+   - Deleting a category must clear matching `TaskRecord.favoriteCategoryId` values and persist affected tasks. Dirty tasks must be identified by `task.favoriteCategoryId === deletedId` against the pre-delete `state.tasks` snapshot, not by index-aligned diffing against the post-delete list — index alignment silently breaks the moment any upstream `filter/sort/map` is reordered.
+   - Bulk category assignment must only short-circuit when every selected task is already favorited **into the target category**. Short-circuiting on "every selected task is favorited" alone silently drops cross-category bulk moves.
+   - Bulk store actions over `selectedTaskIds` (favorite, unfavorite, assign category, delete) must `await Promise.allSettled(...)` before clearing the selection / closing the confirm dialog. `forEach` + bare `void promise.catch(...)` clears the selection while writes are still in flight and leaves the user unable to retry the failed subset.
    - Persisted and imported category arrays must be normalized: invalid ids skipped, colors defaulted, and `sortOrder` compacted.
    - Export manifest must include `favoriteCategories` when category metadata exists.
 
@@ -134,6 +136,8 @@ return { images, partialFailureCount, partialFailureMessage }
    - Deleted active filter category -> reset `filterFavoriteCategoryId` to `null`.
    - Invalid category color -> replace with default category color.
    - Duplicate category id in imported/persisted metadata -> keep one normalized category.
+   - Bulk assign to category X with all selected tasks already in X -> short-circuit; no confirm dialog.
+   - Bulk assign to category X with any selected task not yet in X (including already-favorited tasks in a different category) -> show confirm dialog; on confirm, write all and only clear selection after `Promise.allSettled`.
 
 5. Good/Base/Bad Cases
    - Good: import backup with category metadata and favorite task assignment, then filter by category id.
@@ -144,16 +148,17 @@ return { images, partialFailureCount, partialFailureMessage }
 6. Tests Required
    - Store tests for create/update/reorder/delete actions.
    - Store tests for fresh default category, legacy persisted state without category metadata, and legacy empty category arrays.
-   - Store test that delete clears task assignments and persists only changed tasks.
+   - Store test that delete clears task assignments and persists only changed tasks (assert `putTask` is called for affected tasks and **not** called for unaffected tasks).
    - Runtime tests for `setTaskFavoriteCategory` and `clearTaskFavorite`.
    - Runtime test that explicit default restore can be assigned to a task after initialized empty categories.
    - Export/import tests for category metadata round-trip.
    - Import test for dangling task category references.
    - Filter tests for category filters excluding non-favorites and preserving uncategorized favorites in all-favorites view.
+   - Bulk-action coverage (test or manual verification, depending on available test infrastructure): cross-category bulk-move is not short-circuited; bulk action clears selection only after all writes settle.
 
 7. Wrong vs Correct
 
-Wrong:
+Wrong (raw favorite without category):
 
 ```typescript
 updateTaskInStore(task.id, { isFavorite: true })
@@ -165,10 +170,84 @@ Correct:
 setTaskFavoriteCategory(task.id, category.id)
 ```
 
+Wrong (bulk action short-circuits on "all favorited"):
+
+```typescript
+const allFavorite = selectedTasks.every((t) => t.isFavorite)
+if (allFavorite) return // silently drops cross-category bulk moves
+```
+
+Correct:
+
+```typescript
+const allInTarget = selectedTasks.every(
+  (t) => t.isFavorite && t.favoriteCategoryId === categoryId,
+)
+if (allInTarget) return
+```
+
+Wrong (delete-category persistence via index-aligned diff):
+
+```typescript
+const nextTasks = state.tasks.map((t) =>
+  t.favoriteCategoryId === id ? { ...t, favoriteCategoryId: null } : t,
+)
+await Promise.all(
+  nextTasks
+    .filter((t, i) => state.tasks[i]?.favoriteCategoryId !== t.favoriteCategoryId)
+    .map((t) => putTask(t)),
+)
+```
+
+Correct (locate dirty rows by the deleted id directly):
+
+```typescript
+const dirtyTasks = state.tasks
+  .filter((t) => t.favoriteCategoryId === id)
+  .map((t) => ({ ...t, favoriteCategoryId: null }))
+await Promise.all(dirtyTasks.map((t) => putTask(t)))
+```
+
+Wrong (bulk action clears selection before writes settle):
+
+```typescript
+selectedTaskIds.forEach((id) => {
+  void setTaskFavoriteCategory(id, categoryId).catch(() => {})
+})
+clearSelection() // selection gone while writes are still in flight
+```
+
+Correct:
+
+```typescript
+void (async () => {
+  await Promise.allSettled(
+    selectedTaskIds.map((id) => setTaskFavoriteCategory(id, categoryId)),
+  )
+  clearSelection()
+})()
+```
+
 ---
 
 ## Common Mistakes
 
-<!-- State management mistakes your team has made -->
+### Bulk store actions that clear UI selection before writes settle
 
-(To be filled by the team)
+**Symptom**: After a bulk favorite / unfavorite / assign-category action over `selectedTaskIds`, the multi-select toolbar disappears immediately. If some tasks fail to persist, the user has no selection left to retry and only sees per-task error toasts arriving asynchronously.
+
+**Cause**: The action handler dispatches per-task store actions with `forEach` + `void promise.catch(...)` and calls `clearSelection()` synchronously on the next line. `clearSelection()` runs before any `putTask` resolves.
+
+**Fix**: Wrap the batch in an async IIFE, `await Promise.allSettled(...)`, then `clearSelection()`. Per-task failure toasts emitted by `updateTaskInStore` continue to surface; no aggregate toast is required.
+
+**Prevention**: When `selectedTaskIds.length > 0` and the action mutates each selected task, treat selection state as load-bearing — never clear it before writes finish.
+
+### Persisting "diff" via index-aligned arrays
+
+**Symptom**: After refactoring a store action that "mutates many records and persists only the changed ones", the wrong records are persisted (or correct records are skipped) even though the in-memory state looks right.
+
+**Cause**: The persistence loop diffs two arrays by shared index (`nextTasks[i]` vs `state.tasks[i]`). This is only correct when `nextTasks` is produced by `state.tasks.map(...)` with no reorder/filter — a constraint that is invisible to future readers and silently broken by trivial refactors (e.g. moving a `.filter` upstream).
+
+**Fix**: Identify dirty records by domain identity (e.g. `task.favoriteCategoryId === deletedId`) against the pre-mutation snapshot, then construct the post-mutation copies for persistence. No index arithmetic.
+
+**Prevention**: When you find yourself writing `arr1.filter((x, i) => arr2[i]?.field !== x.field)`, stop. If the two arrays share an implicit shape contract, encode it as a domain predicate instead.

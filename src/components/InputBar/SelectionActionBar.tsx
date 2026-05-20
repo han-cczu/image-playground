@@ -28,20 +28,22 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
   const handleSetFavoriteCategory = useCallback((categoryId: string | null) => {
     if (!categoryId) return
     const selectedTasks = tasks.filter((t) => selectedTaskIds.includes(t.id))
-    const allFavorite = selectedTasks.length > 0 && selectedTasks.every((t) => t.isFavorite)
-    if (allFavorite) return
+    const allInTarget =
+      selectedTasks.length > 0 &&
+      selectedTasks.every((t) => t.isFavorite && t.favoriteCategoryId === categoryId)
+    if (allInTarget) return
 
     setConfirmDialog({
       title: '批量收藏',
       message: `确定要把选中的 ${selectedTaskIds.length} 条记录收藏到此分类吗？`,
       confirmText: '确认收藏',
       action: () => {
-        selectedTaskIds.forEach((id) => {
-          void setTaskFavoriteCategory(id, categoryId).catch(() => {
-            /* updateTaskInStore already surfaced the persistence error */
-          })
-        })
-        clearSelection()
+        void (async () => {
+          await Promise.allSettled(
+            selectedTaskIds.map((id) => setTaskFavoriteCategory(id, categoryId)),
+          )
+          clearSelection()
+        })()
       },
     })
   }, [tasks, selectedTaskIds, clearSelection, setConfirmDialog])
@@ -52,12 +54,12 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
       message: `确定要取消收藏选中的 ${selectedTaskIds.length} 条记录吗？`,
       confirmText: '确认取消',
       action: () => {
-        selectedTaskIds.forEach((id) => {
-          void clearTaskFavorite(id).catch(() => {
-            /* updateTaskInStore already surfaced the persistence error */
-          })
-        })
-        clearSelection()
+        void (async () => {
+          await Promise.allSettled(
+            selectedTaskIds.map((id) => clearTaskFavorite(id)),
+          )
+          clearSelection()
+        })()
       },
     })
   }, [selectedTaskIds, clearSelection, setConfirmDialog])

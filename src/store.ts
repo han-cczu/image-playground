@@ -352,10 +352,11 @@ export const useStore = create<AppState>()(
           tasks: nextTasks,
         })
 
-        // 1.3 持久化受影响任务
-        await Promise.all(nextTasks
-          .filter((task, index) => state.tasks[index]?.favoriteCategoryId !== task.favoriteCategoryId)
-          .map((task) => putTask(task)))
+        // 1.3 持久化受影响任务（基于原 categoryId 直接定位 dirty，去掉对列表同序的依赖）
+        const dirtyTasks = state.tasks
+          .filter((task) => task.favoriteCategoryId === id)
+          .map((task) => ({ ...task, favoriteCategoryId: null }))
+        await Promise.all(dirtyTasks.map((task) => putTask(task)))
       },
       moveFavoriteCategory: (id, direction) =>
         set((state) => {
