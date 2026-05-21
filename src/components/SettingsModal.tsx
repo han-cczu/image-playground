@@ -10,13 +10,15 @@ import {
   DEFAULT_GEMINI_MODEL,
   DEFAULT_IMAGES_MODEL,
   DEFAULT_OPENAI_PROFILE_ID,
+  DEFAULT_OPTIMIZER_SYSTEM_PROMPT,
   DEFAULT_RESPONSES_MODEL,
   DEFAULT_SETTINGS,
   getActiveApiProfile,
+  normalizePromptOptimizer,
   normalizeSettings,
   switchApiProfileProvider,
 } from '../lib/api/apiProfiles'
-import type { ApiProfile, AppSettings } from '../types'
+import type { ApiProfile, AppSettings, OpenAIProfile } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { FAVORITE_CATEGORY_COLORS } from '../lib/favoriteCategories'
 import Select from './Select'
@@ -54,6 +56,17 @@ export default function SettingsModal() {
   const [pendingImportMode, setPendingImportMode] = useState<ImportMode>('merge')
   const modelFieldRef = useRef<HTMLDivElement>(null)
 
+  // 提示词优化 API 相关 state
+  const [showOptimizerApiKey, setShowOptimizerApiKey] = useState(false)
+  const [optimizerTimeoutInput, setOptimizerTimeoutInput] = useState(
+    String(normalizeSettings(settings).promptOptimizer.timeout),
+  )
+  const [optimizerModelListOpen, setOptimizerModelListOpen] = useState(false)
+  const [optimizerModelListLoading, setOptimizerModelListLoading] = useState(false)
+  const [optimizerModelList, setOptimizerModelList] = useState<string[] | null>(null)
+  const [optimizerModelListError, setOptimizerModelListError] = useState<string | null>(null)
+  const optimizerModelFieldRef = useRef<HTMLDivElement>(null)
+
   const apiProxyAvailable = isApiProxyAvailable(readClientDevProxyConfig())
   const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
   const apiProxyEnabled = apiProxyAvailable && activeProfile.provider === 'openai' && activeProfile.apiProxy
@@ -65,19 +78,36 @@ export default function SettingsModal() {
 
   // 把 timeoutInput 折叠回 draft：在保存与 dirty 检测时用,确保 timeoutInput 中的改动也算数
   const buildFlushedDraft = useCallback((): AppSettings => {
+    let next = draft
+
     const nextTimeout = Number(timeoutInput)
     const normalizedTimeout =
       timeoutInput.trim() === '' || Number.isNaN(nextTimeout) ? activeProfile.timeout : nextTimeout
-    if (normalizedTimeout === activeProfile.timeout) return draft
-    return {
-      ...draft,
-      profiles: draft.profiles.map((profile) =>
-        profile.id === activeProfile.id
-          ? ({ ...profile, timeout: normalizedTimeout } as ApiProfile)
-          : profile,
-      ),
+    if (normalizedTimeout !== activeProfile.timeout) {
+      next = {
+        ...next,
+        profiles: next.profiles.map((profile) =>
+          profile.id === activeProfile.id
+            ? ({ ...profile, timeout: normalizedTimeout } as ApiProfile)
+            : profile,
+        ),
+      }
     }
-  }, [draft, activeProfile.id, activeProfile.timeout, timeoutInput])
+
+    const optimizerTimeoutRaw = Number(optimizerTimeoutInput)
+    const normalizedOptimizerTimeout =
+      optimizerTimeoutInput.trim() === '' || Number.isNaN(optimizerTimeoutRaw) || optimizerTimeoutRaw <= 0
+        ? next.promptOptimizer.timeout
+        : optimizerTimeoutRaw
+    if (normalizedOptimizerTimeout !== next.promptOptimizer.timeout) {
+      next = {
+        ...next,
+        promptOptimizer: { ...next.promptOptimizer, timeout: normalizedOptimizerTimeout },
+      }
+    }
+
+    return next
+  }, [draft, activeProfile.id, activeProfile.timeout, timeoutInput, optimizerTimeoutInput])
 
   const isDirty = useMemo(
     () => JSON.stringify(buildFlushedDraft()) !== JSON.stringify(settings),
@@ -98,6 +128,7 @@ export default function SettingsModal() {
     })
     setDraft(nextDraft)
     setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
+    setOptimizerTimeoutInput(String(nextDraft.promptOptimizer.timeout))
   }, [apiProxyAvailable, showSettings, settings])
 
   useEffect(() => {
@@ -127,14 +158,22 @@ export default function SettingsModal() {
       }
     })
     const fallbackProfile = createDefaultOpenAIProfile({ id: newId('openai') })
+    const normalizedOptimizer = normalizePromptOptimizer({
+      ...nextDraft.promptOptimizer,
+      baseUrl: nextDraft.promptOptimizer.baseUrl.trim(),
+      apiKey: nextDraft.promptOptimizer.apiKey.trim(),
+      model: nextDraft.promptOptimizer.model.trim(),
+    })
     const normalizedDraft = normalizeSettings({
       ...nextDraft,
       profiles: normalizedProfiles.length ? normalizedProfiles : [fallbackProfile],
       activeProfileId: normalizedProfiles.some((profile) => profile.id === nextDraft.activeProfileId)
         ? nextDraft.activeProfileId
         : (normalizedProfiles[0]?.id ?? fallbackProfile.id),
+      promptOptimizer: normalizedOptimizer,
     })
     setDraft(normalizedDraft)
+    setOptimizerTimeoutInput(String(normalizedDraft.promptOptimizer.timeout))
     setSettings(normalizedDraft)
   }
 
@@ -151,6 +190,7 @@ export default function SettingsModal() {
     const fresh = normalizeSettings(settings)
     setDraft(fresh)
     setTimeoutInput(String(getActiveApiProfile(fresh).timeout))
+    setOptimizerTimeoutInput(String(fresh.promptOptimizer.timeout))
   }, [settings])
 
   const handleClose = () => {
@@ -222,6 +262,59 @@ export default function SettingsModal() {
     }
   }, [activeProfile])
 
+  // 提示词优化 API 模型列表副作用：配置变化时关闭并清空缓存
+  useEffect(() => {
+    setOptimizerModelListOpen(false)
+    setOptimizerModelList(null)
+    setOptimizerModelListError(null)
+  }, [draft.promptOptimizer.baseUrl, draft.promptOptimizer.apiKey])
+
+  useEffect(() => {
+    if (!optimizerModelListOpen) return
+    const onMouseDown = (e: MouseEvent) => {
+      if (optimizerModelFieldRef.current && !optimizerModelFieldRef.current.contains(e.target as Node)) {
+        setOptimizerModelListOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    return () => document.removeEventListener('mousedown', onMouseDown)
+  }, [optimizerModelListOpen])
+
+  const fetchOptimizerModelList = useCallback(async () => {
+    setOptimizerModelListOpen(true)
+    setOptimizerModelListLoading(true)
+    setOptimizerModelListError(null)
+    try {
+      const tempProfile: OpenAIProfile = {
+        id: 'optimizer-temp',
+        name: 'optimizer',
+        provider: 'openai',
+        baseUrl: draft.promptOptimizer.baseUrl,
+        apiKey: draft.promptOptimizer.apiKey,
+        model: draft.promptOptimizer.model,
+        timeout: draft.promptOptimizer.timeout,
+        apiMode: 'images',
+        codexCli: false,
+        apiProxy: false,
+      }
+      const ids = await listModels(tempProfile)
+      setOptimizerModelList(ids)
+      if (ids.length === 0) setOptimizerModelListError('接口返回为空')
+    } catch (err) {
+      setOptimizerModelList(null)
+      setOptimizerModelListError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setOptimizerModelListLoading(false)
+    }
+  }, [draft.promptOptimizer.baseUrl, draft.promptOptimizer.apiKey, draft.promptOptimizer.model, draft.promptOptimizer.timeout])
+
+  const updatePromptOptimizer = (patch: Partial<AppSettings['promptOptimizer']>) => {
+    setDraft((prev) => ({
+      ...prev,
+      promptOptimizer: { ...prev.promptOptimizer, ...patch },
+    }))
+  }
+
   if (!showSettings) return null
 
   const runImport = async (file: File, mode: ImportMode) => {
@@ -230,6 +323,7 @@ export default function SettingsModal() {
       const nextDraft = normalizeSettings(useStore.getState().settings)
       setDraft(nextDraft)
       setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
+      setOptimizerTimeoutInput(String(nextDraft.promptOptimizer.timeout))
       setShowProfileMenu(false)
     }
   }
@@ -253,6 +347,7 @@ export default function SettingsModal() {
     const nextDraft = normalizeSettings(useStore.getState().settings)
     setDraft(nextDraft)
     setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
+    setOptimizerTimeoutInput(String(nextDraft.promptOptimizer.timeout))
     setShowProfileMenu(false)
   }
 
@@ -697,6 +792,177 @@ export default function SettingsModal() {
                   className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                 />
               </label>
+            </div>
+          </section>
+
+          <section className="pt-6 border-t border-gray-100 dark:border-white/[0.08]">
+            <h4 className="mb-4 text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+              <svg className="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+              </svg>
+              提示词优化 API
+            </h4>
+            <div className="space-y-4">
+              <label className="block">
+                <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API URL</span>
+                <input
+                  value={draft.promptOptimizer.baseUrl}
+                  onChange={(e) => updatePromptOptimizer({ baseUrl: e.target.value })}
+                  type="text"
+                  placeholder={DEFAULT_SETTINGS.baseUrl}
+                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                />
+                <div data-selectable-text className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+                  独立配置，与图像生成 Provider 解耦。需是 OpenAI 兼容的 chat completions 接口。
+                </div>
+              </label>
+
+              <div className="block">
+                <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">API Key</span>
+                <div className="relative">
+                  <input
+                    value={draft.promptOptimizer.apiKey}
+                    onChange={(e) => updatePromptOptimizer({ apiKey: e.target.value })}
+                    type={showOptimizerApiKey ? 'text' : 'password'}
+                    placeholder="sk-..."
+                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOptimizerApiKey((v) => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showOptimizerApiKey ? (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                        <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <label className="block">
+                <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">模型 ID</span>
+                <div ref={optimizerModelFieldRef} className="relative">
+                  <div className="flex items-stretch gap-2">
+                    <input
+                      value={draft.promptOptimizer.model}
+                      onChange={(e) => updatePromptOptimizer({ model: e.target.value })}
+                      type="text"
+                      placeholder="gpt-4o-mini"
+                      className="flex-1 min-w-0 rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                    />
+                    <button
+                      type="button"
+                      onClick={fetchOptimizerModelList}
+                      disabled={optimizerModelListLoading}
+                      title="从 API 拉取模型列表"
+                      aria-label="从 API 拉取模型列表"
+                      className="flex-shrink-0 rounded-xl border border-gray-200/70 bg-white/60 px-2.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+                    >
+                      <svg
+                        className={`w-4 h-4 ${optimizerModelListLoading ? 'animate-spin' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        viewBox="0 0 24 24"
+                      >
+                        <path d="M21 12a9 9 0 0 1-15.5 6.36L3 21" />
+                        <path d="M3 12a9 9 0 0 1 15.5-6.36L21 3" />
+                        <path d="M21 3v6h-6" />
+                        <path d="M3 21v-6h6" />
+                      </svg>
+                    </button>
+                  </div>
+                  {optimizerModelListOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] py-1 max-h-60 overflow-y-auto ring-1 ring-black/5 dark:ring-white/10 animate-dropdown-down">
+                      {optimizerModelListLoading ? (
+                        <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">加载中…</div>
+                      ) : optimizerModelListError ? (
+                        <div className="px-3 py-2 text-xs text-red-500 dark:text-red-400 break-all">
+                          {optimizerModelListError}
+                          <div className="mt-1 text-gray-400 dark:text-gray-500">可继续手动填写模型 ID。</div>
+                        </div>
+                      ) : optimizerModelList && optimizerModelList.length > 0 ? (
+                        optimizerModelList.map((id) => (
+                          <div
+                            key={id}
+                            onClick={() => {
+                              updatePromptOptimizer({ model: id })
+                              setOptimizerModelListOpen(false)
+                            }}
+                            className={`px-3 py-2 text-xs cursor-pointer transition-colors break-all ${
+                              id === draft.promptOptimizer.model
+                                ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium'
+                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/[0.06]'
+                            }`}
+                          >
+                            {id}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">暂无可用模型</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </label>
+
+              <label className="block">
+                <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">请求超时 (秒)</span>
+                <input
+                  value={optimizerTimeoutInput}
+                  onChange={(e) => setOptimizerTimeoutInput(e.target.value)}
+                  onBlur={() => {
+                    const next = Number(optimizerTimeoutInput)
+                    const normalized =
+                      optimizerTimeoutInput.trim() === '' || Number.isNaN(next) || next <= 0
+                        ? draft.promptOptimizer.timeout
+                        : next
+                    setOptimizerTimeoutInput(String(normalized))
+                    if (normalized !== draft.promptOptimizer.timeout) {
+                      updatePromptOptimizer({ timeout: normalized })
+                    }
+                  }}
+                  type="number"
+                  min={1}
+                  max={600}
+                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                />
+              </label>
+
+              <div className="block">
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="block text-xs text-gray-500 dark:text-gray-400">系统提示词</span>
+                  <button
+                    type="button"
+                    onClick={() => updatePromptOptimizer({ systemPrompt: DEFAULT_OPTIMIZER_SYSTEM_PROMPT })}
+                    className="text-[10px] text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                  >
+                    重置为默认
+                  </button>
+                </div>
+                <textarea
+                  value={draft.promptOptimizer.systemPrompt}
+                  onChange={(e) => updatePromptOptimizer({ systemPrompt: e.target.value })}
+                  rows={6}
+                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 resize-y font-mono leading-relaxed"
+                />
+                <div data-selectable-text className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+                  控制改写风格。默认值会要求模型输出单段结构化英文图像提示词。
+                </div>
+              </div>
             </div>
           </section>
 

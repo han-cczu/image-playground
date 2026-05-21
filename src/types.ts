@@ -29,6 +29,17 @@ export function isOpenAIProfile(p: ApiProfile): p is OpenAIProfile {
   return p.provider === 'openai'
 }
 
+/** 提示词优化 API 的独立配置（OpenAI 兼容 chat completions） */
+export interface PromptOptimizerConfig {
+  baseUrl: string
+  apiKey: string
+  model: string
+  /** 秒 */
+  timeout: number
+  /** 用户可自定义的优化系统提示词 */
+  systemPrompt: string
+}
+
 export interface AppSettings {
   /** 旧版单配置字段：保留用于导入/查询参数兼容，实际请求以 active profile 为准 */
   baseUrl: string
@@ -42,6 +53,7 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'system'
   profiles: ApiProfile[]
   activeProfileId: string
+  promptOptimizer: PromptOptimizerConfig
 }
 
 // ===== 任务参数 =====

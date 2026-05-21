@@ -5,6 +5,7 @@ import type {
   AppSettings,
   GeminiProfile,
   OpenAIProfile,
+  PromptOptimizerConfig,
 } from '../../types'
 import { isOpenAIProfile } from '../../types'
 import { readRuntimeEnv } from './runtimeEnv'
@@ -16,6 +17,51 @@ export const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.co
 export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-image'
 export const DEFAULT_OPENAI_PROFILE_ID = 'default-openai'
 export const DEFAULT_API_TIMEOUT = 600
+
+export const DEFAULT_OPTIMIZER_MODEL = 'gpt-4o-mini'
+export const DEFAULT_OPTIMIZER_TIMEOUT = 60
+export const DEFAULT_OPTIMIZER_SYSTEM_PROMPT = `You are an expert prompt engineer specializing in text-to-image generation.
+
+Rewrite the user's draft prompt into a single, vivid, structured English image prompt suitable for state-of-the-art image models (GPT Image, DALL·E, Midjourney, Stable Diffusion).
+
+Guidelines:
+- Output ONLY the rewritten prompt. No preface, no quotes, no commentary, no markdown.
+- Preserve the user's core intent, subject, and any explicit constraints (style, aspect ratio, count, named entities).
+- Add concrete visual details: subject, composition, lighting, color palette, materials, mood, camera/lens (if applicable), and art style.
+- Keep it under ~120 words. One paragraph.
+- If the user already wrote a high-quality English prompt, lightly polish it instead of rewriting.`
+
+export function createDefaultPromptOptimizer(
+  overrides: Partial<PromptOptimizerConfig> = {},
+): PromptOptimizerConfig {
+  return {
+    baseUrl: DEFAULT_BASE_URL,
+    apiKey: '',
+    model: DEFAULT_OPTIMIZER_MODEL,
+    timeout: DEFAULT_OPTIMIZER_TIMEOUT,
+    systemPrompt: DEFAULT_OPTIMIZER_SYSTEM_PROMPT,
+    ...overrides,
+  }
+}
+
+export function normalizePromptOptimizer(input: unknown): PromptOptimizerConfig {
+  const record = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
+  const defaults = createDefaultPromptOptimizer()
+  return {
+    baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : defaults.baseUrl,
+    apiKey: typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
+    model:
+      typeof record.model === 'string' && record.model.trim() ? record.model : defaults.model,
+    timeout:
+      typeof record.timeout === 'number' && Number.isFinite(record.timeout) && record.timeout > 0
+        ? record.timeout
+        : defaults.timeout,
+    systemPrompt:
+      typeof record.systemPrompt === 'string' && record.systemPrompt.trim()
+        ? record.systemPrompt
+        : defaults.systemPrompt,
+  }
+}
 
 export function createDefaultOpenAIProfile(overrides: Partial<OpenAIProfile> = {}): OpenAIProfile {
   return {
@@ -154,6 +200,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     theme: record.theme === 'light' || record.theme === 'dark' || record.theme === 'system' ? record.theme : 'light',
     profiles,
     activeProfileId,
+    promptOptimizer: normalizePromptOptimizer(record.promptOptimizer),
   }
 }
 

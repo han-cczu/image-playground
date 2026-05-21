@@ -49,6 +49,10 @@ export function redactSettingsForExport(settings: AppSettings): AppSettings {
       ...profile,
       apiKey: '',
     })),
+    promptOptimizer: {
+      ...normalized.promptOptimizer,
+      apiKey: '',
+    },
   }
 }
 

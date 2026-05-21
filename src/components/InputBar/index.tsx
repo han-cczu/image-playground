@@ -41,6 +41,7 @@ export default function InputBar() {
   const setParams = useStore((s) => s.setParams)
   const settings = useStore((s) => s.settings)
   const setShowSettings = useStore((s) => s.setShowSettings)
+  const setShowPromptOptimizer = useStore((s) => s.setShowPromptOptimizer)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const showToast = useStore((s) => s.showToast)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
@@ -71,6 +72,7 @@ export default function InputBar() {
   const [isDragging, setIsDragging] = useState(false)
   const [submitHover, setSubmitHover] = useState(false)
   const [attachHover, setAttachHover] = useState(false)
+  const [optimizeHover, setOptimizeHover] = useState(false)
   const [imageHintId, setImageHintId] = useState<string | null>(null)
   const [mobileCollapsed, setMobileCollapsed] = useState(false)
   const [showSizePicker, setShowSizePicker] = useState(false)
@@ -91,6 +93,14 @@ export default function InputBar() {
   const isMobile = useIsMobile()
 
   const canSubmit = prompt.trim() && settings.apiKey
+  const optimizerKeyConfigured = Boolean(settings.promptOptimizer.apiKey.trim())
+  const optimizerPromptReady = Boolean(prompt.trim())
+  const canOptimize = optimizerKeyConfigured && optimizerPromptReady
+  const optimizeTooltipText = !optimizerKeyConfigured
+    ? '提示词优化 API 尚未配置，点设置中"提示词优化 API"添加'
+    : !optimizerPromptReady
+      ? '请先输入提示词'
+      : ''
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
   const maskTargetImage = maskDraft
     ? inputImages.find((img) => img.id === maskDraft.targetImageId) ?? null
@@ -741,6 +751,28 @@ export default function InputBar() {
               <div className="flex gap-2 flex-shrink-0 mb-0.5">
                 <div
                   className="relative"
+                  onMouseEnter={() => setOptimizeHover(true)}
+                  onMouseLeave={() => setOptimizeHover(false)}
+                >
+                  <ButtonTooltip visible={Boolean(optimizeTooltipText) && optimizeHover} text={optimizeTooltipText} />
+                  <button
+                    onClick={() => canOptimize && setShowPromptOptimizer(true)}
+                    disabled={!canOptimize}
+                    className={`p-2.5 rounded-xl transition-all shadow-sm ${
+                      canOptimize
+                        ? 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow'
+                        : 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
+                    }`}
+                    title="优化提示词"
+                    aria-label="优化提示词"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                    </svg>
+                  </button>
+                </div>
+                <div
+                  className="relative"
                   onMouseEnter={() => setAttachHover(true)}
                   onMouseLeave={() => setAttachHover(false)}
                 >
@@ -793,6 +825,28 @@ export default function InputBar() {
               </div>
 
               <div className="flex items-center gap-2">
+                <div
+                  className="relative"
+                  onMouseEnter={() => setOptimizeHover(true)}
+                  onMouseLeave={() => setOptimizeHover(false)}
+                >
+                  <ButtonTooltip visible={Boolean(optimizeTooltipText) && optimizeHover} text={optimizeTooltipText} />
+                  <button
+                    onClick={() => canOptimize && setShowPromptOptimizer(true)}
+                    disabled={!canOptimize}
+                    className={`p-2.5 rounded-xl transition-all shadow-sm flex-shrink-0 ${
+                      canOptimize
+                        ? 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300'
+                        : 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
+                    }`}
+                    title="优化提示词"
+                    aria-label="优化提示词"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                    </svg>
+                  </button>
+                </div>
                 <div
                   className="relative"
                   onMouseEnter={() => setAttachHover(true)}

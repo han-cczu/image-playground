@@ -119,13 +119,19 @@ describe('export/import reliability', () => {
           timeout: 600,
         },
       ],
+      promptOptimizer: {
+        ...DEFAULT_SETTINGS.promptOptimizer,
+        apiKey: 'optimizer-secret',
+      },
     })
 
     expect(JSON.stringify(redacted)).not.toContain('legacy-secret')
     expect(JSON.stringify(redacted)).not.toContain('profile-secret')
     expect(JSON.stringify(redacted)).not.toContain('gemini-secret')
+    expect(JSON.stringify(redacted)).not.toContain('optimizer-secret')
     expect(redacted.apiKey).toBe('')
     expect(redacted.profiles.every((profile) => profile.apiKey === '')).toBe(true)
+    expect(redacted.promptOptimizer.apiKey).toBe('')
   })
 
   it('imports legacy backups with API keys through the existing settings merge path', async () => {

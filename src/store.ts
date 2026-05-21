@@ -152,6 +152,8 @@ export interface AppState {
   setLightboxImageId: (id: string | null, list?: string[]) => void
   showSettings: boolean
   setShowSettings: (v: boolean) => void
+  showPromptOptimizer: boolean
+  setShowPromptOptimizer: (v: boolean) => void
 
   // Toast
   toast: { message: string; type: 'info' | 'success' | 'error' } | null
@@ -413,6 +415,8 @@ export const useStore = create<AppState>()(
         })),
       showSettings: false,
       setShowSettings: (showSettings) => set({ showSettings }),
+      showPromptOptimizer: false,
+      setShowPromptOptimizer: (showPromptOptimizer) => set({ showPromptOptimizer }),
 
       // Toast
       toast: null,
