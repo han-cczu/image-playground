@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "项目代码规范与禁用模式 —— 新增 mjs 脚本与改写 sw.js 时要遵守的统一标准"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "新增 scripts/inject-sw-build-id.mjs 与 .trellis/spec/frontend/service-worker.md 时需确认放置位置的约定"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "新增构建脚本前先确认是否有现成工具可复用，避免重复造轮子"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本任务横跨 build 脚本（Node）+ SW 运行时（浏览器）+ 注册入口（main.tsx），需要跨层一致性思维"}
