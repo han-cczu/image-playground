@@ -15,10 +15,10 @@ This directory contains guidelines for frontend development. Fill in each file w
 | Guide | Description | Status |
 |-------|-------------|--------|
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | To fill |
+| [Component Guidelines](./component-guidelines.md) | Sidebar/popover 互斥、fixed 居中补偿、a11y 必备项、Array.from 取首字符等 | Filled |
 | [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
-| [State Management](./state-management.md) | Local state, global state, server state | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
+| [State Management](./state-management.md) | Image task / favorite category / Conversation 三套 runtime contracts；bulk action / IDB upgrade 反模式 | Filled |
+| [Quality Guidelines](./quality-guidelines.md) | `src/lib/**` 禁 `window.*`；导出敏感字段强制脱敏；mobile drawer body lock、icon button aria-label、Esc+outside cleanup | Filled |
 | [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
 | [Service Worker](./service-worker.md) | `public/sw.js` 缓存策略与 kill-switch 逃生通道契约 | Filled |
 

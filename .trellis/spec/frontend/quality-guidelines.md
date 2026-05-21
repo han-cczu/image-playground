@@ -47,9 +47,79 @@ const timer = setTimeout(() => controller.abort(), timeoutMs)
 
 ## Required Patterns
 
-<!-- Patterns that must always be used -->
+### Required: Mobile fixed drawer must lock `document.body` scroll while open
 
-(To be filled by the team)
+**What**: 移动端 `< md` 断点用 `fixed inset-y-0 + transform translate-x-*` 实现的抽屉（如 Sidebar 移动态），打开时必须设置 `document.body.style.overflow = 'hidden'`，关闭/卸载时在 effect cleanup 中恢复。
+
+**Why**: 不锁背景滚动时，用户在抽屉内滑动会"穿透"到背景滚动主内容，移动端 iOS Safari 还会偶发触发 viewport 跳动。锁住 body overflow 是行业事实标准（Radix / HeadlessUI / shadcn 等抽屉组件都这么做）。
+
+**Example**:
+
+```tsx
+useEffect(() => {
+  if (!mobileOpen) return
+  const prev = document.body.style.overflow
+  document.body.style.overflow = 'hidden'
+  return () => { document.body.style.overflow = prev }
+}, [mobileOpen])
+```
+
+**Related**: 见 `component-guidelines.md` 中 drawer / popover Esc + outside-click + cleanup 模式。
+
+实证：commit `e6a2584`（PR2 复核自修） `src/components/Sidebar/index.tsx`。
+
+---
+
+### Required: icon-only `<button>` must declare `aria-label`
+
+**What**: 任何只渲染 icon（SVG / emoji / 单字符 / 图标字体）的 `<button>` 必须显式 `aria-label="<动作描述>"`。`title` attribute 对屏幕阅读器不可靠，不能替代 `aria-label`。
+
+**Why**: Screen reader 在没有 accessible name 时只念出 "button"。无障碍审计自动失败；键盘用户 Tab 过去也听不到含义。
+
+**Example**:
+
+```tsx
+<button onClick={onDelete} aria-label="删除对话" title="删除对话">
+  <TrashIcon aria-hidden="true" />
+</button>
+```
+
+**Related**: 见 `component-guidelines.md::Accessibility::Required: icon-only <button> must have aria-label`。
+
+实证：commit `e6a2584` 的 `src/components/Header.tsx`（4 个图标按钮）+ `src/components/Sidebar/`（折叠 / 新建 / 删除）；PR3 `src/components/InputBar/`（5 pill + 高级齿轮 + 关闭按钮）。
+
+---
+
+### Required: drawer & popover must listen Esc + outside click with effect cleanup
+
+**What**: 任何可关闭的 overlay 组件（抽屉、popover、菜单、对话框）必须：
+
+1. `keydown` 监听 `Escape` 触发关闭。
+2. `mousedown` 或 `pointerdown` 监听 outside ref 触发关闭。
+3. 监听挂到 `document`，在 `useEffect` cleanup 中**显式 removeEventListener**。
+4. 仅在 overlay open 时挂监听（`if (!open) return`），避免常驻空跑。
+
+**Why**: 不做 cleanup 会在组件卸载后留下僵尸监听，导致 stale closure 引用旧 props/state；不挂 Esc 让键盘用户无法关闭；不挂 outside click 让用户必须找到 X 按钮。这三件事是 overlay 组件的 baseline 期望，不是可选增强。
+
+**Example**:
+
+```tsx
+useEffect(() => {
+  if (!open) return
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+  const onDown = (e: MouseEvent) => {
+    if (!ref.current?.contains(e.target as Node)) onClose()
+  }
+  document.addEventListener('keydown', onKey)
+  document.addEventListener('mousedown', onDown)
+  return () => {
+    document.removeEventListener('keydown', onKey)
+    document.removeEventListener('mousedown', onDown)
+  }
+}, [open, onClose])
+```
+
+实证：commit `e6a2584` `src/components/Sidebar/index.tsx`；PR3 `src/components/InputBar/AdvancedParamsPopover.tsx` / `ModelMenu` / `ResolutionMenu`。
 
 ---
 

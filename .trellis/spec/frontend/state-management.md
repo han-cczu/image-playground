@@ -230,6 +230,119 @@ void (async () => {
 
 ---
 
+### Conversation runtime contracts
+
+1. Scope / Trigger
+   - Applies when UI code creates, renames, deletes, activates, or imports/exports a `Conversation`, or when `TaskRecord.conversationId` is assigned at submit / migration time.
+   - Conversation metadata is durable local data: persisted in IndexedDB (same source-of-truth tier as `tasks`/`images`); only `activeConversationId` and `sidebarCollapsed` go through `zustand-persist` (UI ephemeral state).
+
+2. Signatures
+   - `Conversation`: `{ id: string; title: string; createdAt: number; updatedAt: number; sortOrder?: number; color?: string | null }`
+   - `TaskRecord.conversationId?: string`（runtime guaranteed non-empty after `initStore` / `submitTask`）
+   - `createConversation(seedTitle?: string): string`
+   - `renameConversation(id: string, title: string): void`
+   - `deleteConversationWithTasks(id: string): void`（弹 confirmDialog + cascade tasks）
+   - `setActiveConversation(id: string | null): void`
+   - `toggleSidebar(): void` / `setSidebarCollapsed(v: boolean): void`
+   - `setConversations(conversations: Conversation[]): void`
+   - `getAllConversations(): Promise<Conversation[]>`
+   - `putConversation(conv: Conversation): Promise<void>`
+   - `deleteConversation(id: string, cascadeTasks: boolean): Promise<void>`（DB 层）
+   - `persistConversationMigration(updates): Promise<void>`（单事务 reseed）
+   - `normalizeConversations(list): Conversation[]`（archive 沉底 + sortOrder 紧致化）
+   - `filterAndSortTasks(tasks, { filterConversationId, ... })`
+
+3. Contracts
+   - `__archive__` 是固定 ID 的兜底对话，DB / store / UI **三层**都必须拒绝删除与重命名。`db.ts::deleteConversation('__archive__')` 抛错；`store.deleteConversationWithTasks` / `renameConversation` 走 toast 提示后早返回；UI 不渲染删除按钮 / 不进入重命名输入。
+   - 删除 Conversation 必须 cascade tasks（同一 IDB 事务用 cursor 扫描 `byConversationId` 索引），不能"先单独删 conversation 再异步删 tasks"。
+   - 历史 task 迁移走 reseed：每个出现过的 `favoriteCategoryId` → 一个 Conversation（id 复用 categoryId 防重复，title=分类 name，color=分类 color）；无 favorite 的 task → `__archive__`。
+   - reseed 必须**幂等**：用 `localStorage.image-playground.conversationMigrationVersion` 作版本标志防重跑，再叠加"扫描 orphan task（无 conversationId）"作兜底再跑一次。
+   - `setActiveConversation(id)` 在 store 层宽容（不校验 id 存在性）；UI 层与 `initStore` 在加载完 conversations 后必须二选一校验：UI 切换前 grep `find(c => c.id === id)`；`initStore` 加载完 conversations 后若 persisted `activeConversationId` 不在列表内，自动切到最新非 archive 对话。
+   - `Conversation` 列表本身**不进 zustand-persist**（与 tasks 一致避免双源真相）；只持久化 `activeConversationId` 与 `sidebarCollapsed`。
+   - `submitTask` 提交时若 `activeConversationId` 为空，必须先自动创建并激活一个对话再写入；首条 task 提交后若对话 title 仍为「新对话」，回写为 prompt 前 24 字。
+   - `clearAllData` / `importData(replace)` 必须同步清空 conversations object store + 重置 store 中的 conversations 数组，否则旧对话穿透到新备份。
+   - Export manifest version 4 携带 `conversations: Conversation[]`；旧导出（v3 无字段）import 时跑 reseed migration，新导出直接写入。
+   - `normalizeConversations` 在所有持久化读取路径（`mergePersistedStoreState`、`initStore`、Sidebar 渲染前）调用，保证 `__archive__` 永远 sort 到末尾。
+
+4. Validation & Error Matrix
+   - `deleteConversation('__archive__')` -> throw（DB 层）。
+   - `renameConversation('__archive__', ...)` -> toast「历史记录对话不可重命名」，store 不写入。
+   - `renameConversation(id, '   ')` -> trim 后为空，store 不写入，UI input 恢复原值。
+   - `submitTask` 时 `activeConversationId == null` -> 自动 `createConversation()`，激活后再继续。
+   - `initStore` 加载完发现 persisted `activeConversationId` 不在 `conversations` 列表 -> 重置为最新非 archive 对话的 id。
+   - IDB schema bump 失败 / onupgradeneeded throw -> 用户首次打开看不到任何 task；必须在 reseed 之外再做 "orphan task 扫描" 作启动兜底。
+   - 多 tab 同时打开：activeConversationId 通过 zustand-persist 写 localStorage，多 tab 之间最终一致但不实时（PRD out-of-scope）。
+
+5. Good/Base/Bad Cases
+   - Good: 旧用户首次打开，5 个 favoriteCategory 一一映射为 5 个 Conversation，title=分类 name，archive 沉底；2 张未收藏 task 进 archive。
+   - Base: 新用户首次打开，无历史数据，自动 seed 一个空 archive；新建对话默认 title「新对话」，提交首条 prompt 后改名为 prompt 前 24 字。
+   - Bad: `deleteConversationWithTasks(id)` 先 `setConversations(filtered)` 再异步 `await dbDeleteConversation` -> 万一 DB 抛错，UI 已被擦除，用户失去对话且 task 残留 IDB。
+
+6. Tests Required
+   - DB test: v1→v2 升级不丢 task；`deleteConversation('__archive__')` 抛错；cascade delete 同事务删 task + conversation。
+   - Store test: `createConversation` 自动激活；`renameConversation` 拒绝 archive 与空字符串；`deleteConversationWithTasks` confirmDialog + 只删目标对话的 task；`toggleSidebar` 翻转；`mergePersistedStoreState` 处理 `activeConversationId` / `sidebarCollapsed`。
+   - Migration test: 纯函数 reseed 按 favoriteCategory 切分、复用 categoryId、orphan task 进 archive、幂等。
+   - Filter test: `filterConversationId` 单独过滤 + 与 favoriteCategory 叠加（交集）。
+   - Import test: 旧导出（无 conversations 字段）跑 reseed；新导出（v4 含 conversations）直接写入并清空旧 conversations store。
+
+7. Wrong vs Correct
+
+Wrong（删除对话先擦 UI 再异步删 DB）:
+
+```typescript
+deleteConversationWithTasks: (id) => {
+  set((s) => ({ conversations: s.conversations.filter((c) => c.id !== id) }))
+  void dbDeleteConversation(id, true).catch(() => {})
+}
+```
+
+Correct（先 DB 后 UI；archive 双层保护）:
+
+```typescript
+deleteConversationWithTasks: (id) => {
+  if (id === ARCHIVE_CONVERSATION_ID) { showToast('历史记录对话不可删除'); return }
+  setConfirmDialog({
+    title: '删除对话',
+    message: '...',
+    action: async () => {
+      await dbDeleteConversation(id, /* cascadeTasks */ true)
+      set((s) => ({
+        conversations: s.conversations.filter((c) => c.id !== id),
+        tasks: s.tasks.filter((t) => t.conversationId !== id),
+        activeConversationId: s.activeConversationId === id ? null : s.activeConversationId,
+      }))
+    },
+  })
+}
+```
+
+Wrong（reseed 不幂等，每次启动重写所有 task.conversationId）:
+
+```typescript
+async function initStore() {
+  const tasks = await getAllTasks()
+  await persistConversationMigration({ tasks, categories })  // 重跑就会覆盖用户手动改的 conversationId
+}
+```
+
+Correct（localStorage 版本标志 + orphan 兜底）:
+
+```typescript
+async function initStore() {
+  const tasks = await getAllTasks()
+  const needsReseed = readMigrationVersion() < CURRENT_MIGRATION_VERSION
+                   || tasks.some((t) => !t.conversationId)
+  if (needsReseed) {
+    await persistConversationMigration({ tasks, categories })
+    writeMigrationVersion(CURRENT_MIGRATION_VERSION)
+  }
+}
+```
+
+实证：commit `eea442a`（PR1 数据层）— `src/lib/db.ts`、`src/lib/conversations.ts`、`src/lib/conversationMigration.ts`、`src/store.ts`、`src/lib/taskRuntime.ts`、`src/lib/exportImport.ts`。
+
+---
+
 ## Common Mistakes
 
 ### Bulk store actions that clear UI selection before writes settle
@@ -241,6 +354,62 @@ void (async () => {
 **Fix**: Wrap the batch in an async IIFE, `await Promise.allSettled(...)`, then `clearSelection()`. Per-task failure toasts emitted by `updateTaskInStore` continue to surface; no aggregate toast is required.
 
 **Prevention**: When `selectedTaskIds.length > 0` and the action mutates each selected task, treat selection state as load-bearing — never clear it before writes finish.
+
+### Reading zustand / localStorage from inside IDB `onupgradeneeded`
+
+**Symptom**: IDB schema bump 后用户刷一次正常、刷第二次（或在另一 tab 打开）对话切分错乱、部分 task 消失或归错对话。
+
+**Cause**: `onupgradeneeded` 里直接 `localStorage.getItem('image-playground')` 读 zustand-persist 拿 favoriteCategories 用于业务迁移。问题：(1) 多 tab 同时打开时只有一个 tab 触发 upgrade，其他 tab 拿到的 IDB 在 zustand-persist 视角是"被另一边突然改过"，时序不稳；(2) zustand-persist 反序列化未完成时 localStorage 可能还是上次的脏数据；(3) onupgradeneeded 是同步事务环境，里面用 await/Promise 链跑业务迁移会让事务自动 commit，后续写入抛 `TransactionInactiveError`。
+
+**Fix**: IDB 升级路径只做"创建 store + 兜底 archive 默认对话 + 给 task 补 conversationId 字段（不读外部数据）"这种**纯 schema 操作**。**真正按 favoriteCategory 切分的业务迁移留到应用启动后第一次跑**：`initStore` 里拿到 zustand 的 favoriteCategories 与 IDB 的 tasks 后，调一次 `persistConversationMigration(...)`，并在 localStorage 写一个 `conversationMigrationVersion` 标志防重跑。
+
+**Prevention**: `onupgradeneeded` 内禁止 await / 跨 store 读取 / 调用 zustand。如果业务迁移需要 zustand 状态，一律延迟到 `initStore`，并用版本标志 + orphan 兜底两道保险。
+
+❌ Bad（onupgradeneeded 内读 localStorage + 跑业务迁移）:
+
+```typescript
+request.onupgradeneeded = async (event) => {
+  const db = event.target.result
+  db.createObjectStore('conversations', { keyPath: 'id' })
+  const raw = localStorage.getItem('image-playground')  // 多 tab 时序不稳
+  const categories = JSON.parse(raw).state.favoriteCategories
+  const tasks = await getAllTasks()  // await 让事务 commit，后续 put 抛 TransactionInactiveError
+  for (const t of tasks) {
+    db.transaction('tasks', 'readwrite').objectStore('tasks').put({...t, conversationId: ...})
+  }
+}
+```
+
+✅ Good（onupgradeneeded 只动 schema，业务迁移留给 initStore）:
+
+```typescript
+request.onupgradeneeded = (event) => {
+  const db = event.target.result
+  if (event.oldVersion < 2) {
+    const store = db.createObjectStore('conversations', { keyPath: 'id' })
+    store.createIndex('byUpdatedAt', 'updatedAt')
+    store.put({ id: ARCHIVE_CONVERSATION_ID, title: '历史记录', /* ... */ })
+  }
+}
+
+// 应用启动后
+async function initStore() {
+  const tasks = await getAllTasks()
+  const conversations = await getAllConversations()
+  const needsReseed = readMigrationVersion() < CURRENT_MIGRATION_VERSION
+                   || tasks.some((t) => !t.conversationId)
+  if (needsReseed) {
+    const { tasks: nextTasks, conversations: nextConvs } =
+      reseedConversations({ tasks, conversations, favoriteCategories })
+    await persistConversationMigration({ tasks: nextTasks, conversations: nextConvs })
+    writeMigrationVersion(CURRENT_MIGRATION_VERSION)
+  }
+}
+```
+
+实证：commit `eea442a` 的 `src/lib/db.ts::DB_VERSION 1→2` 与 `src/lib/taskRuntime.ts::initStore`。
+
+---
 
 ### Persisting "diff" via index-aligned arrays
 
