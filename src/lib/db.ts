@@ -1,20 +1,37 @@
-import type { TaskRecord, StoredImage } from '../types'
+import type { Conversation, TaskRecord, StoredImage } from '../types'
+import { ARCHIVE_CONVERSATION_ID, createArchiveConversation } from './conversations'
 
 const DB_NAME = 'image-playground'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const STORE_TASKS = 'tasks'
 const STORE_IMAGES = 'images'
+const STORE_CONVERSATIONS = 'conversations'
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result
+      const tx = (e.target as IDBOpenDBRequest).transaction
       if (!db.objectStoreNames.contains(STORE_TASKS)) {
         db.createObjectStore(STORE_TASKS, { keyPath: 'id' })
       }
       if (!db.objectStoreNames.contains(STORE_IMAGES)) {
         db.createObjectStore(STORE_IMAGES, { keyPath: 'id' })
+      }
+      if (!db.objectStoreNames.contains(STORE_CONVERSATIONS)) {
+        const store = db.createObjectStore(STORE_CONVERSATIONS, { keyPath: 'id' })
+        store.createIndex('byUpdatedAt', 'updatedAt')
+        store.createIndex('bySortOrder', 'sortOrder')
+        // v1 → v2：写入 archive 默认对话；按 favoriteCategory 切分留到 initStore 启动时跑（拿得到 zustand）。
+        store.put(createArchiveConversation())
+      } else if (tx) {
+        // 已存在 conversations store 时，兜底确保 archive 存在
+        const store = tx.objectStore(STORE_CONVERSATIONS)
+        const getReq = store.get(ARCHIVE_CONVERSATION_ID)
+        getReq.onsuccess = () => {
+          if (!getReq.result) store.put(createArchiveConversation())
+        }
       }
     }
     req.onsuccess = () => resolve(req.result)
@@ -55,6 +72,82 @@ export function deleteTask(id: string): Promise<undefined> {
 
 export function clearTasks(): Promise<undefined> {
   return dbTransaction(STORE_TASKS, 'readwrite', (s) => s.clear())
+}
+
+// ===== Conversations =====
+
+export function getAllConversations(): Promise<Conversation[]> {
+  return dbTransaction(STORE_CONVERSATIONS, 'readonly', (s) => s.getAll())
+}
+
+export function putConversation(conversation: Conversation): Promise<IDBValidKey> {
+  return dbTransaction(STORE_CONVERSATIONS, 'readwrite', (s) => s.put(conversation))
+}
+
+/**
+ * 清空 conversations object store。
+ * 出于双层保护，调用方应在调用后立即重新写入 archive 默认对话。
+ */
+export function clearConversations(): Promise<undefined> {
+  return dbTransaction(STORE_CONVERSATIONS, 'readwrite', (s) => s.clear())
+}
+
+/**
+ * 批量写入 conversations + tasks（迁移期专用），单事务保证原子。
+ */
+export function persistConversationMigration(
+  conversations: Conversation[],
+  tasks: TaskRecord[],
+): Promise<void> {
+  return openDB().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_CONVERSATIONS, STORE_TASKS], 'readwrite')
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error)
+        tx.onabort = () => reject(tx.error ?? new Error('conversation migration aborted'))
+        const convStore = tx.objectStore(STORE_CONVERSATIONS)
+        for (const conv of conversations) convStore.put(conv)
+        const taskStore = tx.objectStore(STORE_TASKS)
+        for (const task of tasks) taskStore.put(task)
+      }),
+  )
+}
+
+/**
+ * 删除一个 conversation。
+ * - 「历史记录」(`__archive__`) 不允许删除，调用时抛错。
+ * - 当 cascadeTasks=true 时，会在同一事务中级联删除该 conversation 下的 task。
+ */
+export function deleteConversation(id: string, cascadeTasks: boolean): Promise<void> {
+  if (id === ARCHIVE_CONVERSATION_ID) {
+    return Promise.reject(new Error('「历史记录」对话不可删除'))
+  }
+  return openDB().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const storeNames = cascadeTasks
+          ? [STORE_CONVERSATIONS, STORE_TASKS]
+          : [STORE_CONVERSATIONS]
+        const tx = db.transaction(storeNames, 'readwrite')
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error)
+        tx.onabort = () => reject(tx.error ?? new Error('delete conversation aborted'))
+
+        tx.objectStore(STORE_CONVERSATIONS).delete(id)
+
+        if (!cascadeTasks) return
+        const taskStore = tx.objectStore(STORE_TASKS)
+        const cursorReq = taskStore.openCursor()
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result
+          if (!cursor) return
+          const value = cursor.value as TaskRecord
+          if (value.conversationId === id) cursor.delete()
+          cursor.continue()
+        }
+      }),
+  )
 }
 
 // ===== Images =====

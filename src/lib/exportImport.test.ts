@@ -7,10 +7,13 @@ import { useStore } from '../store'
 import { clearAllData, exportData, importData, redactSettingsForExport } from './exportImport'
 import { DEFAULT_FAVORITE_CATEGORY_COLOR } from './favoriteCategories'
 import {
+  clearConversations,
   clearImages,
   clearTasks,
+  getAllConversations,
   getAllImages,
   getAllTasks,
+  persistConversationMigration,
   putImage,
   putTask,
 } from './db'
@@ -23,6 +26,9 @@ vi.mock('./db', () => ({
   putImage: vi.fn(),
   clearImages: vi.fn(),
   storedImageToBytes: vi.fn(),
+  getAllConversations: vi.fn(),
+  persistConversationMigration: vi.fn(),
+  clearConversations: vi.fn(),
 }))
 
 vi.mock('./imageCache', () => ({
@@ -76,6 +82,15 @@ describe('export/import reliability', () => {
     })
     vi.mocked(clearImages).mockImplementation(async () => {
       dbCalls.push('clearImages')
+      return undefined
+    })
+    vi.mocked(getAllConversations).mockResolvedValue([])
+    vi.mocked(persistConversationMigration).mockImplementation(async () => {
+      dbCalls.push('persistConversationMigration')
+      return undefined
+    })
+    vi.mocked(clearConversations).mockImplementation(async () => {
+      dbCalls.push('clearConversations')
       return undefined
     })
     useStore.setState({
@@ -175,7 +190,8 @@ describe('export/import reliability', () => {
 
     await importData(file, { mode: 'merge' })
 
-    expect(dbCalls).toEqual([])
+    // merge 时旧导出（无 conversations）会跑一次 conversation reseed migration 写入
+    expect(dbCalls).toEqual(['persistConversationMigration'])
   })
 
   it('imports favorite category metadata and task assignments', async () => {
@@ -274,6 +290,11 @@ describe('export/import reliability', () => {
     ])
   })
 
+  it('clears the conversations object store when resetting all data', async () => {
+    await clearAllData()
+    expect(dbCalls).toContain('clearConversations')
+  })
+
   it('exports favorite category metadata in the manifest', async () => {
     let exportedBlob: Blob | null = null
     const click = vi.fn()
@@ -329,7 +350,14 @@ describe('export/import reliability', () => {
 
     await importData(file, { mode: 'replace' })
 
-    expect(dbCalls).toEqual(['clearTasks', 'clearImages', 'putTask'])
+    // replace 时旧导出会在导入完成后跑一次 conversation reseed migration
+    expect(dbCalls).toEqual([
+      'clearTasks',
+      'clearImages',
+      'clearConversations',
+      'putTask',
+      'persistConversationMigration',
+    ])
   })
 
   it('keeps the default favorite category after replacing with a legacy backup', async () => {
@@ -351,5 +379,93 @@ describe('export/import reliability', () => {
         sortOrder: 0,
       }),
     ])
+  })
+
+  it('runs conversation reseed migration for legacy backups without conversations field', async () => {
+    const taskWithCategory: TaskRecord = {
+      ...createTask('legacy-task'),
+      isFavorite: true,
+      favoriteCategoryId: 'cat-a',
+    }
+    const taskWithoutCategory = createTask('legacy-archive-task')
+    // 导入后 getAllTasks 返回这两个任务，迁移读到它们
+    vi.mocked(getAllTasks).mockResolvedValue([taskWithCategory, taskWithoutCategory])
+    useStore.setState({
+      favoriteCategories: [
+        {
+          id: 'cat-a',
+          name: '角色',
+          color: '#f59e0b',
+          sortOrder: 0,
+          createdAt: 1,
+        },
+      ],
+      conversations: [],
+      activeConversationId: null,
+      showToast: vi.fn(),
+    })
+    const file = createImportFile({
+      version: 3,
+      exportedAt: new Date(0).toISOString(),
+      settings: DEFAULT_SETTINGS,
+      favoriteCategories: [
+        {
+          id: 'cat-a',
+          name: '角色',
+          color: '#f59e0b',
+          sortOrder: 0,
+          createdAt: 1,
+        },
+      ],
+      tasks: [taskWithCategory, taskWithoutCategory],
+      imageFiles: {},
+    })
+
+    await importData(file, { mode: 'merge' })
+
+    // conversation reseed migration 应被调用，conversations 里应包含 cat-a + archive
+    expect(persistConversationMigration).toHaveBeenCalled()
+    const conversations = useStore.getState().conversations
+    expect(conversations.map((c) => c.id).sort()).toEqual(
+      ['cat-a', '__archive__'].sort(),
+    )
+    // activeConversationId 自动激活非 archive 的对话
+    expect(useStore.getState().activeConversationId).not.toBe('__archive__')
+    expect(useStore.getState().activeConversationId).not.toBeNull()
+  })
+
+  it('uses imported conversations metadata directly when present', async () => {
+    const taskWithConversation: TaskRecord = {
+      ...createTask('with-conv'),
+      conversationId: 'conv-imported',
+    }
+    vi.mocked(getAllTasks).mockResolvedValue([taskWithConversation])
+    useStore.setState({
+      favoriteCategories: [],
+      conversations: [],
+      activeConversationId: null,
+      showToast: vi.fn(),
+    })
+    const file = createImportFile({
+      version: 4,
+      exportedAt: new Date(0).toISOString(),
+      settings: DEFAULT_SETTINGS,
+      conversations: [
+        {
+          id: 'conv-imported',
+          title: '导入的对话',
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+      tasks: [taskWithConversation],
+      imageFiles: {},
+    })
+
+    await importData(file, { mode: 'merge' })
+
+    const conversations = useStore.getState().conversations
+    expect(conversations.some((c) => c.id === 'conv-imported')).toBe(true)
+    expect(conversations.some((c) => c.id === '__archive__')).toBe(true)
   })
 })

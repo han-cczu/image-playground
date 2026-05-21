@@ -103,6 +103,16 @@ export interface FavoriteCategory {
   createdAt: number
 }
 
+export interface Conversation {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  sortOrder?: number
+  /** 仅在由 favoriteCategory 迁移而来时填入，未来 sidebar 用作色条 */
+  color?: string | null
+}
+
 export interface TaskRecord {
   id: string
   prompt: string
@@ -143,6 +153,8 @@ export interface TaskRecord {
   favoriteCategoryId?: string | null
   /** 自定义排序值（降序）。未设置时按 createdAt 排序。 */
   sortOrder?: number
+  /** 归属的对话 id；运行时由 store/migration 保证非空，仅类型保留可选以兼容旧数据 */
+  conversationId?: string
 }
 
 // ===== IndexedDB 存储的图片 =====
@@ -231,6 +243,7 @@ export interface ExportData {
   exportedAt: string
   settings: AppSettings
   favoriteCategories?: FavoriteCategory[]
+  conversations?: Conversation[]
   tasks: TaskRecord[]
   /** imageId → 图片信息 */
   imageFiles: Record<string, {

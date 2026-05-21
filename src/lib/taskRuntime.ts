@@ -9,6 +9,9 @@ import {
   deleteImage,
   storeImage,
   storedImageToDataUrl,
+  getAllConversations,
+  putConversation,
+  persistConversationMigration,
 } from './db'
 import { callImageApi } from './api'
 import { validateMaskMatchesImage } from './image/canvasImage'
@@ -19,6 +22,16 @@ import {
   ensureImageCached,
   setCachedImage,
 } from './imageCache'
+import {
+  ARCHIVE_CONVERSATION_ID,
+  CONVERSATION_MIGRATION_VERSION,
+  createArchiveConversation,
+  deriveConversationTitleFromPrompt,
+  normalizeConversations,
+  readConversationMigrationVersion,
+  writeConversationMigrationVersion,
+} from './conversations'
+import { reseedConversationsFromFavoriteCategories } from './conversationMigration'
 
 const syncHttpWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const taskAbortControllers = new Map<string, AbortController>()
@@ -136,12 +149,95 @@ export function showCodexCliPrompt(force = false, reason = '接口返回的提�
   })
 }
 
-/** 初始化：从 IndexedDB 加载任务和图片缓存，清理孤立图片 */
+/** 初始化：加载 conversations → 跑迁移 → 加载 tasks → 激活默认对话 → 清理孤立图片 */
 export async function initStore() {
-  const storedTasks = await getAllTasks()
-  const { tasks, interruptedTasks } = markInterruptedSyncHttpTasks(storedTasks)
-  await Promise.all(interruptedTasks.map((task) => putTask(task)))
-  useStore.getState().setTasks(tasks)
+  /*
+   * ========================================================================
+   * 步骤1：加载 conversations 与原始 tasks
+   * ========================================================================
+   */
+  // 1.1 conversations + tasks 各自 readonly 读取
+  const [rawConversations, storedTasks] = await Promise.all([
+    getAllConversations(),
+    getAllTasks(),
+  ])
+
+  // 1.2 中断进行中的同步 HTTP 任务
+  const { tasks: interruptedNormalizedTasks, interruptedTasks } = markInterruptedSyncHttpTasks(storedTasks)
+
+  /*
+   * ========================================================================
+   * 步骤2：按 favoriteCategory 切分 reseed 迁移（幂等，靠 localStorage 防重跑）
+   * ========================================================================
+   */
+  // 2.1 取出 zustand 中的 favoriteCategories（zustand-persist 同步水合）
+  const persistedFavoriteCategories = useStore.getState().favoriteCategories
+  const migrationVersion = readConversationMigrationVersion()
+  const normalizedExistingConversations = normalizeConversations(rawConversations)
+  // 2.2 已迁移过且无 task 缺 conversationId 时跳过
+  const hasOrphanTasks = interruptedNormalizedTasks.some(
+    (task) => !task.conversationId,
+  )
+  const shouldRunReseed =
+    migrationVersion < CONVERSATION_MIGRATION_VERSION || hasOrphanTasks
+
+  let finalConversations = normalizedExistingConversations
+  let finalTasks = interruptedNormalizedTasks
+
+  if (shouldRunReseed) {
+    const { conversations: migratedConversations, dirtyTasks } =
+      reseedConversationsFromFavoriteCategories({
+        tasks: interruptedNormalizedTasks,
+        favoriteCategories: persistedFavoriteCategories,
+        existingConversations: normalizedExistingConversations,
+      })
+
+    // 2.3 单事务持久化（conversations + 受影响的 tasks）
+    const dirtyIds = new Set(dirtyTasks.map((task) => task.id))
+    const mergedTasks = interruptedNormalizedTasks.map(
+      (task) => dirtyTasks.find((dirty) => dirty.id === task.id) ?? task,
+    )
+    const persistTasks = mergedTasks.filter(
+      (task) => dirtyIds.has(task.id) || interruptedTasks.some((t) => t.id === task.id),
+    )
+    await persistConversationMigration(migratedConversations, persistTasks)
+    writeConversationMigrationVersion(CONVERSATION_MIGRATION_VERSION)
+
+    finalConversations = normalizeConversations(migratedConversations)
+    finalTasks = mergedTasks
+  } else if (interruptedTasks.length) {
+    // 没跑 reseed 但有任务被标记中断时，单独持久化
+    await Promise.all(interruptedTasks.map((task) => putTask(task)))
+  }
+
+  /*
+   * ========================================================================
+   * 步骤3：写入 store 并激活对话
+   * ========================================================================
+   */
+  // 3.1 兜底确保 archive 存在
+  if (!finalConversations.some((c) => c.id === ARCHIVE_CONVERSATION_ID)) {
+    const archive = createArchiveConversation()
+    await putConversation(archive)
+    finalConversations = normalizeConversations([archive, ...finalConversations])
+  }
+
+  // 3.2 写入 store
+  useStore.getState().setConversations(finalConversations)
+  useStore.getState().setTasks(finalTasks)
+
+  // 3.3 若没有 activeConversationId 或指向不存在的对话，激活 updatedAt 最新的对话
+  const currentActiveId = useStore.getState().activeConversationId
+  const idExists = currentActiveId
+    ? finalConversations.some((c) => c.id === currentActiveId)
+    : false
+  if (!idExists) {
+    const nextActive =
+      finalConversations.find((c) => c.id !== ARCHIVE_CONVERSATION_ID) ?? finalConversations[0]
+    useStore.getState().setActiveConversation(nextActive?.id ?? null)
+  }
+
+  const tasks = finalTasks
 
   // 收集所有任务引用的图片 id
   const referencedIds = new Set<string>()
@@ -179,6 +275,38 @@ export async function initStore() {
   }
   if (restoredInputImages.length !== persistedInputImages.length || restoredInputImages.some((img, index) => img.dataUrl !== persistedInputImages[index]?.dataUrl)) {
     useStore.getState().setInputImages(restoredInputImages)
+  }
+}
+
+async function maybeUpdateConversationOnFirstTask(conversationId: string, newTask: TaskRecord) {
+  const state = useStore.getState()
+  const target = state.conversations.find((c) => c.id === conversationId)
+  if (!target) return
+  // archive 永远保持「历史记录」标题
+  if (target.id === ARCHIVE_CONVERSATION_ID) return
+
+  // 判断是否为该对话首条 task（除新建的这一条）
+  const hadPriorTask = state.tasks.some(
+    (task) => task.id !== newTask.id && task.conversationId === conversationId,
+  )
+  const isFirstTask = !hadPriorTask
+  const isUnnamed = !target.title || target.title === '新对话'
+
+  const nextTitle = isFirstTask && isUnnamed
+    ? deriveConversationTitleFromPrompt(newTask.prompt)
+    : target.title
+  const updated = {
+    ...target,
+    title: nextTitle,
+    updatedAt: newTask.createdAt,
+  }
+  useStore.getState().setConversations(
+    state.conversations.map((c) => (c.id === conversationId ? updated : c)),
+  )
+  try {
+    await putConversation(updated)
+  } catch {
+    /* 持久化失败不阻塞 UI；下次 submit 会再次尝试更新 */
   }
 }
 
@@ -242,6 +370,12 @@ export async function submitTask(options: { allowFullMask?: boolean } = {}) {
     useStore.getState().setParams(normalizedParamPatch)
   }
 
+  // 确保当前有 active conversation；首装/异常情况下兜底创建
+  let activeConversationId = useStore.getState().activeConversationId
+  if (!activeConversationId) {
+    activeConversationId = useStore.getState().createConversation()
+  }
+
   const taskId = genId()
   const task: TaskRecord = {
     id: taskId,
@@ -259,11 +393,15 @@ export async function submitTask(options: { allowFullMask?: boolean } = {}) {
     createdAt: Date.now(),
     finishedAt: null,
     elapsed: null,
+    conversationId: activeConversationId,
   }
 
   const latestTasks = useStore.getState().tasks
   useStore.getState().setTasks([task, ...latestTasks])
   await putTask(task)
+
+  // 首条 task 提交后，若对话仍为「新对话」初始 title，则用 prompt 前 N 字回填，并更新 updatedAt
+  void maybeUpdateConversationOnFirstTask(activeConversationId, task)
 
   if (settings.clearInputAfterSubmit) {
     useStore.getState().setPrompt('')
@@ -462,7 +600,7 @@ export function reorderTask(
 
 /** 重试失败的任务：创建新任务并执行 */
 export async function retryTask(task: TaskRecord) {
-  const { settings } = useStore.getState()
+  const { settings, activeConversationId } = useStore.getState()
   const activeProfile = getActiveApiProfile(settings)
   const normalizedParams = normalizeParamsForSettings(task.params, settings)
   const taskId = genId()
@@ -482,6 +620,7 @@ export async function retryTask(task: TaskRecord) {
     createdAt: Date.now(),
     finishedAt: null,
     elapsed: null,
+    conversationId: task.conversationId ?? activeConversationId ?? ARCHIVE_CONVERSATION_ID,
   }
 
   const latestTasks = useStore.getState().tasks

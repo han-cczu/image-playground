@@ -20,6 +20,8 @@ vi.mock('./lib/db', async (importOriginal) => {
     ...actual,
     putTask: vi.fn(actual.putTask),
     storeImage: vi.fn(actual.storeImage),
+    putConversation: vi.fn(async () => 'conv-id'),
+    deleteConversation: vi.fn(async () => undefined),
   }
 })
 
@@ -31,8 +33,9 @@ vi.mock('./lib/api', async (importOriginal) => {
   }
 })
 
-import { putTask, storeImage } from './lib/db'
+import { deleteConversation, putConversation, putTask, storeImage } from './lib/db'
 import { callImageApi } from './lib/api'
+import { ARCHIVE_CONVERSATION_ID } from './lib/conversations'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 const categoryA: FavoriteCategory = {
@@ -446,5 +449,158 @@ describe('favorite category store actions', () => {
       favoriteCategoryId: null,
     }))
     expect(putTask).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'other' }))
+  })
+})
+
+describe('conversation store actions', () => {
+  beforeEach(() => {
+    vi.mocked(putConversation).mockReset()
+    vi.mocked(putConversation).mockResolvedValue('conv-id')
+    vi.mocked(deleteConversation).mockReset()
+    vi.mocked(deleteConversation).mockResolvedValue(undefined)
+    useStore.setState({
+      conversations: [],
+      activeConversationId: null,
+      tasks: [],
+      sidebarCollapsed: false,
+      showToast: vi.fn(),
+      setConfirmDialog: vi.fn(),
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('createConversation auto-activates the new conversation', () => {
+    const id = useStore.getState().createConversation()
+    expect(useStore.getState().activeConversationId).toBe(id)
+    expect(useStore.getState().conversations[0]?.id).toBe(id)
+    expect(useStore.getState().conversations[0]?.title).toBe('新对话')
+    expect(putConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ id, title: '新对话' }),
+    )
+  })
+
+  it('createConversation respects an explicit seed title', () => {
+    const id = useStore.getState().createConversation('我的对话')
+    expect(useStore.getState().conversations[0]).toMatchObject({ id, title: '我的对话' })
+  })
+
+  it('renameConversation persists the new title and bumps updatedAt', async () => {
+    const id = useStore.getState().createConversation()
+    const previous = useStore.getState().conversations.find((c) => c.id === id)
+    await new Promise((resolve) => setTimeout(resolve, 1))
+    await useStore.getState().renameConversation(id, '改名后')
+    const next = useStore.getState().conversations.find((c) => c.id === id)
+    expect(next?.title).toBe('改名后')
+    expect(next?.updatedAt).toBeGreaterThanOrEqual(previous?.updatedAt ?? 0)
+    expect(putConversation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id, title: '改名后' }),
+    )
+  })
+
+  it('renameConversation rejects renaming the archive conversation', async () => {
+    const showToast = vi.fn()
+    useStore.setState({
+      conversations: [
+        {
+          id: ARCHIVE_CONVERSATION_ID,
+          title: '历史记录',
+          createdAt: 1,
+          updatedAt: 1,
+          color: null,
+        },
+      ],
+      showToast,
+    })
+
+    await useStore.getState().renameConversation(ARCHIVE_CONVERSATION_ID, '想改名')
+
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringContaining('「历史记录」对话不可重命名'),
+      'error',
+    )
+    expect(useStore.getState().conversations[0]?.title).toBe('历史记录')
+    expect(putConversation).not.toHaveBeenCalled()
+  })
+
+  it('deleteConversationWithTasks rejects deleting the archive conversation', () => {
+    const showToast = vi.fn()
+    useStore.setState({
+      conversations: [
+        {
+          id: ARCHIVE_CONVERSATION_ID,
+          title: '历史记录',
+          createdAt: 1,
+          updatedAt: 1,
+          color: null,
+        },
+      ],
+      activeConversationId: ARCHIVE_CONVERSATION_ID,
+      showToast,
+    })
+
+    useStore.getState().deleteConversationWithTasks(ARCHIVE_CONVERSATION_ID)
+
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringContaining('「历史记录」对话不可删除'),
+      'error',
+    )
+    expect(useStore.getState().conversations).toHaveLength(1)
+  })
+
+  it('deleteConversationWithTasks asks for confirmation, deletes only the target conversation and its tasks', async () => {
+    const setConfirmDialog = vi.fn()
+    useStore.setState({
+      conversations: [
+        { id: 'conv-keep', title: '保留', createdAt: 1, updatedAt: 1 },
+        { id: 'conv-target', title: '待删', createdAt: 2, updatedAt: 2 },
+      ],
+      tasks: [
+        { ...task({ id: 'task-keep', conversationId: 'conv-keep' }) },
+        { ...task({ id: 'task-target', conversationId: 'conv-target' }) },
+      ],
+      activeConversationId: 'conv-target',
+      setConfirmDialog,
+      showToast: vi.fn(),
+    })
+
+    useStore.getState().deleteConversationWithTasks('conv-target')
+
+    expect(setConfirmDialog).toHaveBeenCalled()
+    const dialog = vi.mocked(setConfirmDialog).mock.calls[0][0] as {
+      action: () => void
+    }
+    dialog.action()
+    await vi.waitFor(() => {
+      expect(useStore.getState().conversations.find((c) => c.id === 'conv-target')).toBeUndefined()
+    })
+    expect(useStore.getState().tasks.map((t) => t.id)).toEqual(['task-keep'])
+    expect(useStore.getState().activeConversationId).toBe('conv-keep')
+    expect(deleteConversation).toHaveBeenCalledWith('conv-target', true)
+  })
+
+  it('toggleSidebar flips the persisted collapse flag', () => {
+    expect(useStore.getState().sidebarCollapsed).toBe(false)
+    useStore.getState().toggleSidebar()
+    expect(useStore.getState().sidebarCollapsed).toBe(true)
+    useStore.getState().toggleSidebar()
+    expect(useStore.getState().sidebarCollapsed).toBe(false)
+  })
+
+  it('mergePersistedStoreState restores activeConversationId and sidebarCollapsed', () => {
+    const merged = mergePersistedStoreState(
+      { activeConversationId: 'conv-foo', sidebarCollapsed: true },
+      useStore.getInitialState(),
+    )
+    expect(merged.activeConversationId).toBe('conv-foo')
+    expect(merged.sidebarCollapsed).toBe(true)
+  })
+
+  it('mergePersistedStoreState defaults activeConversationId / sidebarCollapsed when missing', () => {
+    const merged = mergePersistedStoreState({}, useStore.getInitialState())
+    expect(merged.activeConversationId).toBeNull()
+    expect(merged.sidebarCollapsed).toBe(false)
   })
 })

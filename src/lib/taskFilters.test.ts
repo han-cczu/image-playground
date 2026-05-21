@@ -56,4 +56,74 @@ describe('task filtering', () => {
 
     expect(filtered.map((item) => item.id)).toEqual(['categorized-favorite', 'plain-favorite'])
   })
+
+  it('filters by conversationId when provided', () => {
+    const tasks = [
+      task({ id: 'in-a', conversationId: 'conv-a', createdAt: 1 }),
+      task({ id: 'in-b', conversationId: 'conv-b', createdAt: 2 }),
+      task({ id: 'no-conv', createdAt: 3 }),
+    ]
+
+    const filtered = filterAndSortTasks(tasks, {
+      searchQuery: '',
+      filterStatus: 'all',
+      filterFavorite: false,
+      filterFavoriteCategoryId: null,
+      filterConversationId: 'conv-a',
+    })
+
+    expect(filtered.map((item) => item.id)).toEqual(['in-a'])
+  })
+
+  it('combines conversationId filter with favorite category filter (intersection)', () => {
+    const tasks = [
+      task({
+        id: 'a-fav',
+        conversationId: 'conv-a',
+        isFavorite: true,
+        favoriteCategoryId: 'cat-a',
+        createdAt: 1,
+      }),
+      task({
+        id: 'b-fav',
+        conversationId: 'conv-b',
+        isFavorite: true,
+        favoriteCategoryId: 'cat-a',
+        createdAt: 2,
+      }),
+      task({
+        id: 'a-non-fav',
+        conversationId: 'conv-a',
+        isFavorite: false,
+        createdAt: 3,
+      }),
+    ]
+
+    const filtered = filterAndSortTasks(tasks, {
+      searchQuery: '',
+      filterStatus: 'all',
+      filterFavorite: false,
+      filterFavoriteCategoryId: 'cat-a',
+      filterConversationId: 'conv-a',
+    })
+
+    expect(filtered.map((item) => item.id)).toEqual(['a-fav'])
+  })
+
+  it('treats empty/undefined conversationId as no conversation filter', () => {
+    const tasks = [
+      task({ id: 'a', conversationId: 'conv-a', createdAt: 1 }),
+      task({ id: 'b', conversationId: 'conv-b', createdAt: 2 }),
+    ]
+
+    const filtered = filterAndSortTasks(tasks, {
+      searchQuery: '',
+      filterStatus: 'all',
+      filterFavorite: false,
+      filterFavoriteCategoryId: null,
+      filterConversationId: '',
+    })
+
+    expect(filtered.map((item) => item.id).sort()).toEqual(['a', 'b'])
+  })
 })

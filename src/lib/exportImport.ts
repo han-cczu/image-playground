@@ -1,5 +1,5 @@
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
-import type { AppSettings, ExportData, TaskRecord } from '../types'
+import type { AppSettings, Conversation, ExportData, TaskRecord } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { useStore } from '../store'
 import { mergeImportedSettings, DEFAULT_SETTINGS, normalizeSettings } from './api/apiProfiles'
@@ -12,8 +12,17 @@ import {
   putImage,
   clearImages,
   storedImageToBytes,
+  getAllConversations,
+  persistConversationMigration,
+  clearConversations as dbClearConversations,
 } from './db'
 import { clearImageCache } from './imageCache'
+import {
+  ARCHIVE_CONVERSATION_ID,
+  createArchiveConversation,
+  normalizeConversations,
+} from './conversations'
+import { reseedConversationsFromFavoriteCategories } from './conversationMigration'
 
 export type ImportMode = 'merge' | 'replace'
 
@@ -84,10 +93,25 @@ function sanitizeImportedTasksForFavoriteCategories(
 export async function clearAllData() {
   await dbClearTasks()
   await clearImages()
+  await dbClearConversations()
   clearImageCache()
-  const { setTasks, clearInputImages, clearMaskDraft, setSettings, setParams, setFavoriteCategories, showToast } = useStore.getState()
+  const {
+    setTasks,
+    clearInputImages,
+    clearMaskDraft,
+    setSettings,
+    setParams,
+    setFavoriteCategories,
+    setConversations,
+    setActiveConversation,
+    showToast,
+  } = useStore.getState()
   setTasks([])
   setFavoriteCategories([createDefaultFavoriteCategory()])
+  const archive = createArchiveConversation()
+  await persistConversationMigration([archive], [])
+  setConversations([archive])
+  setActiveConversation(archive.id)
   clearInputImages()
   useStore.setState({ dismissedCodexCliPrompts: [] })
   clearMaskDraft()
@@ -101,6 +125,7 @@ export async function exportData() {
   try {
     const tasks = await getAllTasks()
     const images = await getAllImages()
+    const conversations = await getAllConversations()
     const { settings, favoriteCategories } = useStore.getState()
     const exportedAt = Date.now()
     const imageCreatedAtFallback = new Map<string, number>()
@@ -133,10 +158,11 @@ export async function exportData() {
     }
 
     const manifest: ExportData = {
-      version: 3,
+      version: 4,
       exportedAt: new Date(exportedAt).toISOString(),
       settings: redactSettingsForExport(settings),
       favoriteCategories: normalizeFavoriteCategories(favoriteCategories),
+      conversations: normalizeConversations(conversations),
       tasks,
       imageFiles,
     }
@@ -177,9 +203,12 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
     if ((options.mode ?? 'merge') === 'replace') {
       await dbClearTasks()
       await clearImages()
+      await dbClearConversations()
       clearImageCache()
       const state = useStore.getState()
       state.setTasks([])
+      state.setConversations([])
+      state.setActiveConversation(null)
       state.clearInputImages()
       state.clearMaskDraft()
     }
@@ -221,6 +250,63 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
     } else if (importedCategories.length) {
       const state = useStore.getState()
       state.setFavoriteCategories(mergeFavoriteCategories(state.favoriteCategories, importedCategories))
+    }
+
+    /*
+     * ========================================================================
+     * 步骤2：处理 conversations（兼容旧导出无 conversations 字段）
+     * ========================================================================
+     * 数据源：
+     *   1) manifest 中可选的 conversations
+     *   2) 当前已存在的 conversations（merge 模式时保留本地）
+     * 操作要点：
+     *   1) 有 conversations 字段 → 直接归一化写入
+     *   2) 无 conversations 字段（旧导出）→ 跑一次 reseed migration
+     */
+    const hasConversationsMetadata = Array.isArray(data.conversations)
+    const persistedTasksAfterImport = await getAllTasks()
+    let finalConversations: Conversation[]
+    if (hasConversationsMetadata) {
+      const importedConversations = normalizeConversations(data.conversations)
+      const existingConversations = isReplaceMode ? [] : await getAllConversations()
+      const conversationById = new Map<string, Conversation>()
+      for (const conv of existingConversations) conversationById.set(conv.id, conv)
+      for (const conv of importedConversations) {
+        if (!conversationById.has(conv.id)) conversationById.set(conv.id, conv)
+      }
+      if (!conversationById.has(ARCHIVE_CONVERSATION_ID)) {
+        conversationById.set(ARCHIVE_CONVERSATION_ID, createArchiveConversation())
+      }
+      finalConversations = Array.from(conversationById.values())
+      // 已写入 task 中无 conversationId 的兜底分配
+      const orphanTasks = persistedTasksAfterImport.filter((task) => !task.conversationId)
+      if (orphanTasks.length) {
+        const reseed = reseedConversationsFromFavoriteCategories({
+          tasks: orphanTasks,
+          favoriteCategories: useStore.getState().favoriteCategories,
+          existingConversations: finalConversations,
+        })
+        finalConversations = reseed.conversations
+        await persistConversationMigration(finalConversations, reseed.dirtyTasks)
+      } else {
+        await persistConversationMigration(finalConversations, [])
+      }
+    } else {
+      // 旧导出：跑同样的 reseed migration
+      const existingConversations = isReplaceMode ? [] : await getAllConversations()
+      const reseed = reseedConversationsFromFavoriteCategories({
+        tasks: persistedTasksAfterImport,
+        favoriteCategories: useStore.getState().favoriteCategories,
+        existingConversations,
+      })
+      finalConversations = reseed.conversations
+      await persistConversationMigration(finalConversations, reseed.dirtyTasks)
+    }
+    useStore.getState().setConversations(normalizeConversations(finalConversations))
+    if (!useStore.getState().activeConversationId) {
+      const nextActive =
+        finalConversations.find((c) => c.id !== ARCHIVE_CONVERSATION_ID) ?? finalConversations[0]
+      useStore.getState().setActiveConversation(nextActive?.id ?? null)
     }
 
     const tasks = await getAllTasks()

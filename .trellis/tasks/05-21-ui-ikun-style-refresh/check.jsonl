@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "review 时核对 forbidden patterns（src/lib/** 不得用 window.*）与 testing requirements（local-first data safety contracts）。"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "verify store actions 不违反 bulk action / index-aligned diff 反模式；Conversation CRUD 与 task 归属变更必须遵循 image task runtime contracts。"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "review Sidebar / 抽屉 / 空状态 / 底栏组件的 props、a11y、styling 一致性。"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "持久化迁移代码必须有运行时校验（normalizeConversations）与 TS 边界。"}

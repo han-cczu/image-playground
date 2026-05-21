@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "实现核心改造 store/zustand-persist/IndexedDB；spec 含 image task runtime contracts、favorite category contracts、bulk action 与 index-aligned diff 反模式，直接约束 Conversation CRUD 与迁移逻辑。"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "forbidden patterns（src/lib/** 禁 window.*）、testing requirements 中 local-first data safety contracts 直接适用 IndexedDB 升级迁移代码。"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Sidebar / 空状态 / 底栏重构涉及大量组件新建，需对齐 props / styling / 可访问性约定。"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "新增 Conversation / 扩展 TaskRecord.conversationId / 持久化数据迁移函数都需要严格类型边界。"}

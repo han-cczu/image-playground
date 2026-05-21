@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type {
   AppSettings,
+  Conversation,
   FavoriteCategory,
   TaskParams,
   InputImage,
@@ -16,7 +17,16 @@ import {
   createDefaultFavoriteCategory,
   normalizeFavoriteCategories,
 } from './lib/favoriteCategories'
-import { putTask } from './lib/db'
+import {
+  ARCHIVE_CONVERSATION_ID,
+  genConversationId,
+  isArchiveConversation,
+} from './lib/conversations'
+import {
+  deleteConversation as dbDeleteConversation,
+  putConversation,
+  putTask,
+} from './lib/db'
 
 type PersistedStoreState = Partial<AppState> & {
   favoriteCategoriesInitialized?: boolean
@@ -83,6 +93,11 @@ export function mergePersistedStoreState(
     favoriteCategoriesInitialized: true,
     filterFavoriteCategoryId: null,
     filterFavorite: false,
+    // conversations 列表跟 tasks 一致走 IDB，不进 zustand-persist
+    conversations: currentState.conversations,
+    activeConversationId:
+      typeof persisted?.activeConversationId === 'string' ? persisted.activeConversationId : null,
+    sidebarCollapsed: persisted?.sidebarCollapsed === true,
   }
 }
 
@@ -127,6 +142,20 @@ export interface AppState {
   updateFavoriteCategory: (id: string, patch: Partial<Pick<FavoriteCategory, 'name' | 'color'>>) => void
   deleteFavoriteCategory: (id: string) => Promise<void>
   moveFavoriteCategory: (id: string, direction: -1 | 1) => void
+
+  // 对话（conversations）
+  conversations: Conversation[]
+  activeConversationId: string | null
+  setConversations: (conversations: Conversation[]) => void
+  createConversation: (seedTitle?: string) => string
+  renameConversation: (id: string, title: string) => Promise<void>
+  deleteConversationWithTasks: (id: string) => void
+  setActiveConversation: (id: string | null) => void
+
+  // Sidebar
+  sidebarCollapsed: boolean
+  toggleSidebar: () => void
+  setSidebarCollapsed: (v: boolean) => void
 
   // 搜索和筛选
   searchQuery: string
@@ -373,6 +402,94 @@ export const useStore = create<AppState>()(
           return { favoriteCategories: next.map((category, sortOrder) => ({ ...category, sortOrder })) }
         }),
 
+      // Conversations
+      conversations: [],
+      activeConversationId: null,
+      setConversations: (conversations) => set({ conversations }),
+      createConversation: (seedTitle) => {
+        const id = genConversationId()
+        const now = Date.now()
+        const next: Conversation = {
+          id,
+          title: seedTitle?.trim() || '新对话',
+          createdAt: now,
+          updatedAt: now,
+        }
+        set((state) => ({
+          conversations: [next, ...state.conversations.filter((c) => c.id !== id)],
+          activeConversationId: id,
+        }))
+        void putConversation(next).catch(() => {
+          /* 持久化失败不阻塞 UI；后续可通过其他动作再次写入 */
+        })
+        return id
+      },
+      renameConversation: async (id, title) => {
+        const trimmed = title.trim()
+        if (!trimmed) return
+        const state = get()
+        if (isArchiveConversation(id)) {
+          state.showToast('「历史记录」对话不可重命名', 'error')
+          return
+        }
+        const target = state.conversations.find((c) => c.id === id)
+        if (!target) return
+        const updated: Conversation = { ...target, title: trimmed, updatedAt: Date.now() }
+        set({
+          conversations: state.conversations.map((c) => (c.id === id ? updated : c)),
+        })
+        await putConversation(updated)
+      },
+      deleteConversationWithTasks: (id) => {
+        const state = get()
+        if (isArchiveConversation(id)) {
+          state.showToast('「历史记录」对话不可删除', 'error')
+          return
+        }
+        const target = state.conversations.find((c) => c.id === id)
+        if (!target) return
+
+        const affectedTaskCount = state.tasks.filter((task) => task.conversationId === id).length
+        state.setConfirmDialog({
+          title: '删除对话',
+          message:
+            affectedTaskCount > 0
+              ? `确定删除对话「${target.title}」？该对话下的 ${affectedTaskCount} 条任务将一并删除，且不可恢复。`
+              : `确定删除对话「${target.title}」？`,
+          confirmText: '删除',
+          tone: 'danger',
+          action: () => {
+            void (async () => {
+              try {
+                await dbDeleteConversation(id, true)
+                const latest = get()
+                const remainingConversations = latest.conversations.filter((c) => c.id !== id)
+                const remainingTasks = latest.tasks.filter((task) => task.conversationId !== id)
+                const nextActive =
+                  latest.activeConversationId === id
+                    ? remainingConversations[0]?.id ?? ARCHIVE_CONVERSATION_ID
+                    : latest.activeConversationId
+                set({
+                  conversations: remainingConversations,
+                  tasks: remainingTasks,
+                  activeConversationId: nextActive,
+                })
+                latest.showToast('对话已删除', 'success')
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err)
+                get().showToast(`删除对话失败：${message}`, 'error')
+              }
+            })()
+          },
+        })
+      },
+      setActiveConversation: (id) => set({ activeConversationId: id }),
+
+      // Sidebar
+      sidebarCollapsed: false,
+      toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+      setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
+
       // Search & filter
       searchQuery: '',
       setSearchQuery: (q) => set({ searchQuery: q }),
@@ -442,6 +559,8 @@ export const useStore = create<AppState>()(
         prompt: state.prompt,
         inputImages: state.inputImages.map((img) => ({ id: img.id, dataUrl: '' })),
         dismissedCodexCliPrompts: state.dismissedCodexCliPrompts,
+        activeConversationId: state.activeConversationId,
+        sidebarCollapsed: state.sidebarCollapsed,
       }),
     },
   ),
