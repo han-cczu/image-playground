@@ -397,7 +397,7 @@ export default function SettingsModal() {
         onClick={handleClose}
       />
       <div
-        className="relative z-10 w-full max-w-md rounded-3xl border border-white/50 bg-white/95 p-5 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 overflow-y-auto max-h-[85vh] custom-scrollbar"
+        className="relative z-10 w-full max-w-md sm:max-w-lg md:max-w-2xl rounded-3xl border border-white/50 bg-white/95 p-5 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 overflow-y-auto max-h-[85vh] custom-scrollbar"
       >
         <div className="mb-5 flex items-center justify-between gap-4">
           <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2">
@@ -421,13 +421,10 @@ export default function SettingsModal() {
           </div>
         </div>
 
-        <div className="space-y-6">
-          <section>
+        <div className="space-y-5">
+          <section className="rounded-2xl bg-gray-50/40 dark:bg-white/[0.02] p-5">
             <div className="mb-4 flex items-center justify-between gap-3 relative">
-              <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-                <svg className="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
-                </svg>
+              <h4 className="text-base font-semibold text-gray-800 dark:text-gray-200">
                 习惯配置
               </h4>
             </div>
@@ -438,27 +435,24 @@ export default function SettingsModal() {
                   <button
                     type="button"
                     onClick={() => setDraft({ ...draft, clearInputAfterSubmit: !draft.clearInputAfterSubmit })}
-                    className={`relative inline-flex h-3.5 w-6 items-center rounded-full transition-colors ${draft.clearInputAfterSubmit ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${draft.clearInputAfterSubmit ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
                     role="switch"
                     aria-checked={draft.clearInputAfterSubmit}
                     aria-label="提交任务后清空输入框"
                   >
-                    <span className={`inline-block h-2.5 w-2.5 transform rounded-full bg-white shadow transition-transform ${draft.clearInputAfterSubmit ? 'translate-x-[11px]' : 'translate-x-[2px]'}`} />
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-md transition-transform duration-200 ${draft.clearInputAfterSubmit ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
                   </button>
                 </div>
-                <div data-selectable-text className="text-[10px] text-gray-400 dark:text-gray-500">
+                <div data-selectable-text className="text-xs text-gray-400 dark:text-gray-500">
                   开启后，提交成功创建任务时会清空提示词和参考图。
                 </div>
               </div>
             </div>
           </section>
 
-          <section>
+          <section className="rounded-2xl bg-gray-50/40 dark:bg-white/[0.02] p-5">
             <div className="mb-4 flex items-center justify-between gap-3 relative">
-              <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-                <svg className="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                </svg>
+              <h4 className="text-base font-semibold text-gray-800 dark:text-gray-200">
                 API 配置
               </h4>
 
@@ -471,7 +465,7 @@ export default function SettingsModal() {
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     <span className="min-w-0 truncate">{activeProfile.name}</span>
-                    <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+                    <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
                       {providerLabel(activeProfile.provider)}
                     </span>
                   </span>
@@ -509,7 +503,7 @@ export default function SettingsModal() {
                               className="flex min-w-0 flex-1 items-center gap-2 pr-2"
                             >
                               <span className="min-w-0 truncate">{profile.name}</span>
-                              <span className={`rounded px-1.5 py-0.5 text-[10px] shrink-0 ${profile.id === activeProfile.id ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-white/[0.08] dark:text-gray-400'}`}>
+                              <span className={`rounded px-1.5 py-0.5 text-xs shrink-0 ${profile.id === activeProfile.id ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-white/[0.08] dark:text-gray-400'}`}>
                                 {providerLabel(profile.provider)}
                               </span>
                             </button>
@@ -575,10 +569,11 @@ export default function SettingsModal() {
                       className="flex cursor-pointer items-center gap-1.5"
                       role="switch"
                       aria-checked={activeProfile.codexCli}
+                      aria-label="Codex CLI"
                     >
-                      <span className={`text-[10px] transition-colors ${activeProfile.codexCli ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}>Codex CLI</span>
-                      <span className={`relative inline-flex h-3.5 w-6 items-center rounded-full transition-colors ${activeProfile.codexCli ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
-                        <span className={`inline-block h-2.5 w-2.5 transform rounded-full bg-white shadow transition-transform ${activeProfile.codexCli ? 'translate-x-[11px]' : 'translate-x-[2px]'}`} />
+                      <span className={`text-xs transition-colors ${activeProfile.codexCli ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}>Codex CLI</span>
+                      <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${activeProfile.codexCli ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-md transition-transform duration-200 ${activeProfile.codexCli ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
                       </span>
                     </div>
                   </div>
@@ -590,7 +585,7 @@ export default function SettingsModal() {
                     placeholder={DEFAULT_SETTINGS.baseUrl}
                     className={`w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 ${apiProxyEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                   />
-                  <div data-selectable-text className="mt-1 min-h-[22px] flex items-center text-[10px] text-gray-400 dark:text-gray-500">
+                  <div data-selectable-text className="mt-1 min-h-[22px] flex items-center text-xs text-gray-400 dark:text-gray-500">
                     {apiProxyEnabled ? (
                       <span className="text-yellow-600 dark:text-yellow-500">已开启代理，实际请求目标由部署端决定，此处设置被忽略。</span>
                     ) : (
@@ -610,7 +605,7 @@ export default function SettingsModal() {
                     placeholder={DEFAULT_GEMINI_BASE_URL}
                     className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                   />
-                  <div data-selectable-text className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+                  <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                     默认走 Google AI Studio。如使用代理或第三方兼容服务，可在此处覆盖。
                   </div>
                 </label>
@@ -623,15 +618,15 @@ export default function SettingsModal() {
                     <button
                       type="button"
                       onClick={() => updateActiveProfile({ apiProxy: !activeProfile.apiProxy })}
-                      className={`relative inline-flex h-3.5 w-6 items-center rounded-full transition-colors ${activeProfile.apiProxy ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${activeProfile.apiProxy ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
                       role="switch"
                       aria-checked={activeProfile.apiProxy}
                       aria-label="API 代理"
                     >
-                      <span className={`inline-block h-2.5 w-2.5 transform rounded-full bg-white shadow transition-transform ${activeProfile.apiProxy ? 'translate-x-[11px]' : 'translate-x-[2px]'}`} />
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-md transition-transform duration-200 ${activeProfile.apiProxy ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
                     </button>
                   </div>
-                  <div data-selectable-text className="text-[10px] text-gray-400 dark:text-gray-500">
+                  <div data-selectable-text className="text-xs text-gray-400 dark:text-gray-500">
                     由当前部署提供同源代理，用于解决浏览器跨域限制；开启后 API URL 设置会被忽略。
                   </div>
                 </div>
@@ -668,7 +663,7 @@ export default function SettingsModal() {
                     )}
                   </button>
                 </div>
-                <div data-selectable-text className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+                <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                   URL 临时传入密钥请使用 hash：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">#apiKey=</code>，读取后会自动清除。
                 </div>
               </div>
@@ -692,7 +687,7 @@ export default function SettingsModal() {
                     ]}
                     className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                   />
-                  <div data-selectable-text className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+                  <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                     支持通过查询参数覆盖：<code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">apiMode=images</code> 或 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">apiMode=responses</code>。
                   </div>
                 </label>
@@ -769,7 +764,7 @@ export default function SettingsModal() {
                     </div>
                   )}
                 </div>
-                <div data-selectable-text className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+                <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                   {activeProfile.provider === 'gemini' ? (
                     <>使用 Google 多模态图像模型，例如 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_GEMINI_MODEL}</code>。不支持遮罩与 quality 参数；多图生成会并发拆单。</>
                   ) : (activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode) === 'responses' ? (
@@ -795,11 +790,8 @@ export default function SettingsModal() {
             </div>
           </section>
 
-          <section className="pt-6 border-t border-gray-100 dark:border-white/[0.08]">
-            <h4 className="mb-4 text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-              <svg className="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-              </svg>
+          <section className="rounded-2xl bg-gray-50/40 dark:bg-white/[0.02] p-5">
+            <h4 className="mb-4 text-base font-semibold text-gray-800 dark:text-gray-200">
               提示词优化 API
             </h4>
             <div className="space-y-4">
@@ -812,7 +804,7 @@ export default function SettingsModal() {
                   placeholder={DEFAULT_SETTINGS.baseUrl}
                   className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                 />
-                <div data-selectable-text className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+                <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                   独立配置，与图像生成 Provider 解耦。需是 OpenAI 兼容的 chat completions 接口。
                 </div>
               </label>
@@ -948,7 +940,7 @@ export default function SettingsModal() {
                   <button
                     type="button"
                     onClick={() => updatePromptOptimizer({ systemPrompt: DEFAULT_OPTIMIZER_SYSTEM_PROMPT })}
-                    className="text-[10px] text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                    className="text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
                   >
                     重置为默认
                   </button>
@@ -959,18 +951,15 @@ export default function SettingsModal() {
                   rows={6}
                   className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 resize-y font-mono leading-relaxed"
                 />
-                <div data-selectable-text className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+                <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                   控制改写风格。默认值会要求模型输出单段结构化英文图像提示词。
                 </div>
               </div>
             </div>
           </section>
 
-          <section className="pt-6 border-t border-gray-100 dark:border-white/[0.08]">
-            <h4 className="mb-4 text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-              <svg className="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.023.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" />
-              </svg>
+          <section className="rounded-2xl bg-gray-50/40 dark:bg-white/[0.02] p-5">
+            <h4 className="mb-4 text-base font-semibold text-gray-800 dark:text-gray-200">
               收藏分类
             </h4>
             <div className="space-y-3">
@@ -1060,11 +1049,8 @@ export default function SettingsModal() {
             </div>
           </section>
 
-          <section className="pt-6 border-t border-gray-100 dark:border-white/[0.08]">
-            <h4 className="mb-4 text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-              <svg className="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
-              </svg>
+          <section className="rounded-2xl bg-gray-50/40 dark:bg-white/[0.02] p-5">
+            <h4 className="mb-4 text-base font-semibold text-gray-800 dark:text-gray-200">
               数据管理
             </h4>
             <div className="space-y-3">
