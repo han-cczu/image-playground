@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查代码风格、forbidden 模式、错误处理是否合规"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "校验新增类型 (PromptOptimizerConfig、SSE 解析) 是否符合项目类型规范"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "校验 settings 新字段的 normalize / 导入导出兼容性"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查 types -> store -> component -> api lib 各层调用是否一致，无遗漏点"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复核是否重复造轮子（特别是 SettingsModal 已有的输入控件、Modal 风格、tooltip 组件）"}
