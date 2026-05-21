@@ -170,3 +170,39 @@ Hardened local data export/import, URL bootstrap secrets, concurrent generation 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: ui-ikun-style-refresh: 引入 Conversation + sidebar/EmptyState/底栏改造 + spec 沉淀
+
+**Date**: 2026-05-22
+**Task**: ui-ikun-style-refresh: 引入 Conversation + sidebar/EmptyState/底栏改造 + spec 沉淀
+**Branch**: `main`
+
+### Summary
+
+完整模仿 IkunImage 风格：引入 Conversation 顶层实体（IDB v1→v2 升级 + 按 favoriteCategory 迁移）；左 sidebar 桌面常驻可折叠 + 移动抽屉；空状态 emoji + 4 pill；底栏改为 5 pill + 高级参数 popover；对话双击重命名 + ⋮ 菜单；Header 删除按钮 hotfix wire 到 deleteConversationWithTasks；沉淀 Conversation runtime contracts 与 IDB onupgradeneeded 反模式到 state-management.md，多 popover 互斥/sidebar 居中补偿/Array.from 取首字符等到 component-guidelines.md，mobile drawer body lock/icon aria-label/Esc+outside cleanup 到 quality-guidelines.md。3 个 frontend spec 文件从 To fill 翻成 Filled。138 tests / tsc / build 全绿，未做浏览器手测。历史按钮仍占位，留独立任务做跨对话搜索。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eea442a` | (see git log) |
+| `e6a2584` | (see git log) |
+| `b236e09` | (see git log) |
+| `08f3b52` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
+- **Total Sessions**: 6
 - **Last Active**: 2026-05-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~172 | Active |
+| `journal-1.md` | ~208 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-05-22 | ui-ikun-style-refresh: 引入 Conversation + sidebar/EmptyState/底栏改造 + spec 沉淀 | `eea442a`, `e6a2584`, `b236e09`, `08f3b52` | `main` |
 | 5 | 2026-05-22 | 加固 Service Worker：版本化 CACHE_NAME + HTML 不写回 + kill-switch | `8b8de26` | `main` |
 | 4 | 2026-05-21 | 提示词优化功能（独立 OpenAI 兼容 API） | `f9b662d` | `main` |
 | 3 | 2026-05-20 | 已收藏多选批量挪类菜单 | `993372b` | `main` |
