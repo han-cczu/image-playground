@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "审查 aria-label / aria-hidden / popover 关闭机制等约束在视觉刷新后是否仍然完整"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "审查改动后是否仍符合项目代码标准"}
