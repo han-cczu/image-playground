@@ -1,5 +1,6 @@
 import { useStore } from '../store'
 import { getActiveApiProfile } from '../lib/api/apiProfiles'
+import { ARCHIVE_CONVERSATION_ID } from '../lib/conversations'
 
 type Theme = 'light' | 'dark' | 'system'
 
@@ -60,6 +61,7 @@ export default function Header({ onOpenMobileSidebar }: HeaderProps) {
   const showToast = useStore((s) => s.showToast)
   const activeConversationId = useStore((s) => s.activeConversationId)
   const conversations = useStore((s) => s.conversations)
+  const deleteConversationWithTasks = useStore((s) => s.deleteConversationWithTasks)
 
   const cycleTheme = () => setSettings({ theme: nextTheme(theme) })
 
@@ -78,6 +80,13 @@ export default function Header({ onOpenMobileSidebar }: HeaderProps) {
 
   const placeholderClick = () => {
     showToast('该功能即将推出', 'info')
+  }
+
+  const canDeleteActiveConversation =
+    !!activeConversation && activeConversation.id !== ARCHIVE_CONVERSATION_ID
+  const handleDeleteActiveConversation = () => {
+    if (!canDeleteActiveConversation || !activeConversation) return
+    deleteConversationWithTasks(activeConversation.id)
   }
 
   return (
@@ -147,10 +156,11 @@ export default function Header({ onOpenMobileSidebar }: HeaderProps) {
 
           <button
             type="button"
-            onClick={placeholderClick}
-            className="rounded-lg p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
-            title="批量删除（即将推出）"
-            aria-label="批量删除"
+            onClick={handleDeleteActiveConversation}
+            disabled={!canDeleteActiveConversation}
+            className="rounded-lg p-2 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent dark:hover:bg-gray-900 dark:disabled:hover:bg-transparent"
+            title="删除当前对话"
+            aria-label="删除当前对话"
           >
             <svg className="h-5 w-5 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 6h18" />
