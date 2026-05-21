@@ -75,6 +75,7 @@ export default function TaskGrid() {
   const filterStatus = useStore((s) => s.filterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const filterFavoriteCategoryId = useStore((s) => s.filterFavoriteCategoryId)
+  const filterConversationId = useStore((s) => s.activeConversationId)
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const selectedTaskIds = useStore((s) => s.selectedTaskIds)
@@ -98,8 +99,9 @@ export default function TaskGrid() {
       filterStatus,
       filterFavorite,
       filterFavoriteCategoryId,
+      filterConversationId,
     })
-  }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId])
+  }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId, filterConversationId])
 
   const dragDisabled =
     searchQuery.trim() !== '' ||
@@ -251,30 +253,15 @@ export default function TaskGrid() {
   }, [clearSelection, isMac])
 
   if (!filteredTasks.length) {
-    return (
-      <div className="text-center py-20 text-gray-400 dark:text-gray-500">
-        {searchQuery || filterFavorite || filterFavoriteCategoryId ? (
+    // 「真正的空对话」由 App 的 EmptyState 承接；这里只在用户主动加了筛选/搜索时占位。
+    if (searchQuery || filterFavorite || filterFavoriteCategoryId || filterStatus !== 'all') {
+      return (
+        <div className="text-center py-20 text-gray-400 dark:text-gray-500">
           <p className="text-sm">没有找到匹配的记录</p>
-        ) : (
-          <>
-            <svg
-              className="w-16 h-16 mx-auto mb-4 text-gray-200 dark:text-gray-700"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1}
-                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-              />
-            </svg>
-            <p className="text-sm">输入提示词开始生成图片</p>
-          </>
-        )}
-      </div>
-    )
+        </div>
+      )
+    }
+    return null
   }
 
   return (

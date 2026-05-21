@@ -1,4 +1,5 @@
 import { useStore } from '../store'
+import { getActiveApiProfile } from '../lib/api/apiProfiles'
 
 type Theme = 'light' | 'dark' | 'system'
 
@@ -46,37 +47,127 @@ function ThemeIcon({ theme }: { theme: Theme }) {
   )
 }
 
-export default function Header() {
+interface HeaderProps {
+  /** 打开移动端 sidebar 抽屉 */
+  onOpenMobileSidebar: () => void
+}
+
+export default function Header({ onOpenMobileSidebar }: HeaderProps) {
   const setShowSettings = useStore((s) => s.setShowSettings)
   const theme = useStore((s) => (s.settings.theme ?? 'light') as Theme)
   const setSettings = useStore((s) => s.setSettings)
+  const settings = useStore((s) => s.settings)
+  const showToast = useStore((s) => s.showToast)
+  const activeConversationId = useStore((s) => s.activeConversationId)
+  const conversations = useStore((s) => s.conversations)
 
   const cycleTheme = () => setSettings({ theme: nextTheme(theme) })
 
+  const activeProfile = getActiveApiProfile(settings)
+  const modelLabel = activeProfile.model || '未配置模型'
+  const modeLabel =
+    activeProfile.provider === 'openai'
+      ? activeProfile.apiMode === 'responses'
+        ? 'Responses'
+        : '创建图'
+      : 'Gemini'
+
+  const activeConversation = activeConversationId
+    ? conversations.find((c) => c.id === activeConversationId)
+    : null
+
+  const placeholderClick = () => {
+    showToast('该功能即将推出', 'info')
+  }
+
   return (
-    <header data-no-drag-select className="safe-area-top sticky top-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-white/[0.08]">
-      <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between">
-        <div className="flex items-start gap-1">
-          <h1 className="text-lg font-bold tracking-tight text-gray-800 dark:text-gray-100">
-            Image Playground
-          </h1>
-        </div>
-        <div className="flex items-center gap-1">
+    <header
+      data-no-drag-select
+      className="safe-area-top sticky top-0 z-30 border-b border-gray-200 bg-white/80 backdrop-blur dark:border-white/[0.08] dark:bg-gray-950/80"
+    >
+      <div className="safe-area-x safe-header-inner mx-auto flex max-w-7xl items-center justify-between gap-2">
+        {/* 左侧：移动端 hamburger + 当前对话/模型信息 */}
+        <div className="flex min-w-0 items-center gap-2">
           <button
+            type="button"
+            onClick={onOpenMobileSidebar}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06] md:hidden"
+            title="打开对话列表"
+            aria-label="打开对话列表"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
+
+          <div className="flex min-w-0 items-center gap-2">
+            {/* 桌面端：当前模型名 + 模式 chip */}
+            <div className="hidden min-w-0 items-center gap-2 md:flex">
+              <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-100" title={modelLabel}>
+                {modelLabel}
+              </span>
+              <span className="inline-flex shrink-0 items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-600 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30">
+                {modeLabel}
+              </span>
+            </div>
+
+            {/* 移动端：当前对话标题（无对话时显示品牌名） */}
+            <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-100 md:hidden">
+              {activeConversation?.title ?? 'Image Playground'}
+            </span>
+          </div>
+        </div>
+
+        {/* 右上：4 个图标 */}
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
             onClick={cycleTheme}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
+            className="rounded-lg p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
             title={`主题:${THEME_LABEL[theme]}(点击切换)`}
             aria-label={`切换主题，当前 ${THEME_LABEL[theme]}`}
           >
             <ThemeIcon theme={theme} />
           </button>
+
           <button
+            type="button"
+            onClick={placeholderClick}
+            className="rounded-lg p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
+            title="历史（即将推出）"
+            aria-label="历史"
+          >
+            <svg className="h-5 w-5 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v5l3 3" />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            onClick={placeholderClick}
+            className="rounded-lg p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
+            title="批量删除（即将推出）"
+            aria-label="批量删除"
+          >
+            <svg className="h-5 w-5 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18" />
+              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+            </svg>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowSettings(true)}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
+            className="rounded-lg p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
             title="设置"
+            aria-label="打开设置"
           >
             <svg
-              className="w-5 h-5 text-gray-600 dark:text-gray-400"
+              className="h-5 w-5 text-gray-600 dark:text-gray-400"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"

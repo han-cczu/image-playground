@@ -1,9 +1,12 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { initStore } from './store'
 import { useStore } from './store'
 import { normalizeSettings, switchApiProfileProvider } from './lib/api/apiProfiles'
 import { readUrlBootstrap } from './lib/urlBootstrap'
+import { filterAndSortTasks } from './lib/taskFilters'
 import Header from './components/Header'
+import Sidebar from './components/Sidebar'
+import EmptyState from './components/EmptyState'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
 import InputBar from './components/InputBar'
@@ -18,6 +21,40 @@ import ImageContextMenu from './components/ImageContextMenu'
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
+  const tasks = useStore((s) => s.tasks)
+  const activeConversationId = useStore((s) => s.activeConversationId)
+  const searchQuery = useStore((s) => s.searchQuery)
+  const filterStatus = useStore((s) => s.filterStatus)
+  const filterFavorite = useStore((s) => s.filterFavorite)
+  const filterFavoriteCategoryId = useStore((s) => s.filterFavoriteCategoryId)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+
+  /**
+   * 当前对话下的任务（含全部 status / favorite 等筛选）。
+   * 只用来判断是否展示 EmptyState；TaskGrid 自己仍会再过滤一次。
+   */
+  const tasksInActiveConversation = useMemo(() => {
+    return filterAndSortTasks(tasks, {
+      searchQuery,
+      filterStatus,
+      filterFavorite,
+      filterFavoriteCategoryId,
+      filterConversationId: activeConversationId,
+    })
+  }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId, activeConversationId])
+
+  /**
+   * 是否展示「真正的空状态」（emoji + 4 个 pill）：
+   *   - 当前对话下任何 task 都没有
+   *   - 且用户没有在搜索/筛选
+   * 否则交给 TaskGrid 自己的「没有匹配的记录」占位。
+   */
+  const showEmptyState =
+    tasksInActiveConversation.length === 0 &&
+    !searchQuery.trim() &&
+    filterStatus === 'all' &&
+    !filterFavorite &&
+    !filterFavoriteCategoryId
 
   useEffect(() => {
     const bootstrap = readUrlBootstrap(window.location.href)
@@ -83,13 +120,31 @@ export default function App() {
 
   return (
     <>
-      <Header />
-      <main data-home-main data-drag-select-surface className="pb-48">
-        <div className="safe-area-x max-w-7xl mx-auto">
-          <SearchBar />
-          <TaskGrid />
+      <div className="flex min-h-screen md:h-screen md:overflow-hidden">
+        <Sidebar
+          mobileOpen={mobileSidebarOpen}
+          onMobileClose={() => setMobileSidebarOpen(false)}
+        />
+        <div className="flex min-h-screen min-w-0 flex-1 flex-col md:h-screen md:min-h-0">
+          <Header onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />
+          <main
+            data-home-main
+            data-drag-select-surface
+            className="flex-1 pb-48 md:overflow-y-auto"
+          >
+            <div className="safe-area-x mx-auto max-w-7xl">
+              {showEmptyState ? (
+                <EmptyState />
+              ) : (
+                <>
+                  <SearchBar />
+                  <TaskGrid />
+                </>
+              )}
+            </div>
+          </main>
         </div>
-      </main>
+      </div>
       <InputBar />
       <DetailModal />
       <Lightbox />
