@@ -137,3 +137,36 @@ Hardened local data export/import, URL bootstrap secrets, concurrent generation 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: 加固 Service Worker：版本化 CACHE_NAME + HTML 不写回 + kill-switch
+
+**Date**: 2026-05-22
+**Task**: 加固 Service Worker：版本化 CACHE_NAME + HTML 不写回 + kill-switch
+**Branch**: `main`
+
+### Summary
+
+诊断 Chrome 端无法打开 image-playground.diaohan111.workers.dev 的根因——旧 Service Worker 命中过期缓存。改 public/sw.js：CACHE_NAME 由构建脚本注入 image-playground-<git-hash>-<timestamp>（每次部署自然失效旧缓存），navigate 分支删除 cache.put('./index.html', copy)（在线永远拿网络版本，离线由 install 时的预缓存兜底），新增 KILL_SWITCH 常量作为单向逃生通道（claim + unregister + includeUncontrolled + Promise.allSettled 强制刷新所有 tab）。配套 scripts/inject-sw-build-id.mjs 注入脚本（7 项单测），新增 .trellis/spec/frontend/service-worker.md 沉淀缓存策略契约。两轮 trellis-check 各自抓到 Windows 入口判断 bug 与 kill-switch claim/matchAll 时序 bug 并自修。已推送至 origin/main 触发 CF 自动部署，线上 sw.js 已确认含新 CACHE_NAME 与 KILL_SWITCH=false。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8b8de26` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

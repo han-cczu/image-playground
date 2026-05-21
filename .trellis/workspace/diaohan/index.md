@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 4
-- **Last Active**: 2026-05-21
+- **Total Sessions**: 5
+- **Last Active**: 2026-05-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~139 | Active |
+| `journal-1.md` | ~172 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-05-22 | 加固 Service Worker：版本化 CACHE_NAME + HTML 不写回 + kill-switch | `8b8de26` | `main` |
 | 4 | 2026-05-21 | 提示词优化功能（独立 OpenAI 兼容 API） | `f9b662d` | `main` |
 | 3 | 2026-05-20 | 已收藏多选批量挪类菜单 | `993372b` | `main` |
 | 2 | 2026-05-20 | 收藏分类批量与删除边界修复 | `2b7700c` | `main` |
