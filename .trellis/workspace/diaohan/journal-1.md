@@ -104,3 +104,36 @@ Hardened local data export/import, URL bootstrap secrets, concurrent generation 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: 提示词优化功能（独立 OpenAI 兼容 API）
+
+**Date**: 2026-05-21
+**Task**: 提示词优化功能（独立 OpenAI 兼容 API）
+**Branch**: `main`
+
+### Summary
+
+新增『提示词优化』能力：InputBar 提交按钮左侧 ✨ → 弹出对比 Modal → 通过独立配置的 OpenAI 兼容 chat completions API 流式生成优化后的英文图像提示词 → 用户主动『采用』回填到输入框。配置与图像生成 profiles 完全解耦（AppSettings.promptOptimizer 单一独立字段），导出 ZIP 同步脱敏，spec 沉淀两条防再犯规则（lib 层禁 window.* 全局；新增 secret 字段必须同步 redactSettingsForExport）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f9b662d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
