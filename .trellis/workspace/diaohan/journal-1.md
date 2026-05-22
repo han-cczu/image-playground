@@ -317,7 +317,7 @@ Hardened local data export/import, URL bootstrap secrets, concurrent generation 
 
 ### Summary
 
-把底栏占位 '风格预设功能尚未上线' pill 改为 working：9 选项 popover（无风格 + 8 偏写实预设：写实摄影/胶片/人像/古典油画/文艺水彩/工业设计图/建筑渲染/产品摄影），选中后 API 调用前 buildFinalPrompt 拼接英文修饰词到 prompt，task.prompt 保持用户原始输入不被污染。注入策略走 TaskParams.stylePreset 独立字段路线（方案 A），旧数据天然兼容。trellis-check 抓到真实安全 bug：原型链键防护——之前用  会返回 true 导致 prompt 拼出 'undefined, xxx'，改为 hasOwnProperty + isStylePresetKey 谓词。主代理决定 + check 自修两条 issue：删除 TaskRecord.stylePreset 顶层冗余字段（YAGNI，单一真实来源 = params.stylePreset）；StylePickerPopover 降级 ARIA role 与现有 ModelMenu/ResolutionMenu/AdvancedParamsPopover 一致（避免半实现的 listbox）。component-guidelines.md 加 backlog 项记录 4 个 popover 统一缺关闭后焦点返回。152 tests 全过，单 commit 94c3659（+268/-17，7 文件）。
+把底栏占位 '风格预设功能尚未上线' pill 改为 working：9 选项 popover（无风格 + 8 偏写实预设：写实摄影/胶片/人像/古典油画/文艺水彩/工业设计图/建筑渲染/产品摄影），选中后 API 调用前 buildFinalPrompt 拼接英文修饰词到 prompt，task.prompt 保持用户原始输入不被污染。注入策略走 TaskParams.stylePreset 独立字段路线（方案 A），旧数据天然兼容。trellis-check 抓到真实安全 bug：原型链键防护——之前用 `key in STYLE_PRESETS` 沿原型链查找，传 `__proto__`/`toString` 等键会返回 true，导致 prompt 拼出 'undefined, xxx'，改为 hasOwnProperty + isStylePresetKey 谓词。主代理决定 + check 自修两条 issue：删除 TaskRecord.stylePreset 顶层冗余字段（YAGNI，单一真实来源 = params.stylePreset）；StylePickerPopover 降级 ARIA role 与现有 ModelMenu/ResolutionMenu/AdvancedParamsPopover 一致（避免半实现的 listbox）。component-guidelines.md 加 backlog 项记录 4 个 popover 统一缺关闭后焦点返回。152 tests 全过，单 commit 94c3659（+268/-17，7 文件）。
 
 ### Main Changes
 
