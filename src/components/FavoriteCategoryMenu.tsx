@@ -4,6 +4,7 @@ import type { FavoriteCategory } from '../types'
 import { useStore } from '../store'
 import {
   DEFAULT_FAVORITE_CATEGORY_ID,
+  FAVORITE_CATEGORY_COLORS,
   createDefaultFavoriteCategory,
 } from '../lib/favoriteCategories'
 
@@ -56,6 +57,11 @@ export default function FavoriteCategoryMenu({
   const [openUp, setOpenUp] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
   const [draftName, setDraftName] = useState('')
+  const pickNextDefaultColor = useCallback(
+    () => FAVORITE_CATEGORY_COLORS[favoriteCategories.length % FAVORITE_CATEGORY_COLORS.length],
+    [favoriteCategories.length],
+  )
+  const [draftColor, setDraftColor] = useState<string>(pickNextDefaultColor)
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -121,12 +127,19 @@ export default function FavoriteCategoryMenu({
     if (!isOpen) {
       setIsCreating(false)
       setDraftName('')
+      setDraftColor(pickNextDefaultColor())
       return
     }
     if (isCreating) {
       window.setTimeout(() => inputRef.current?.focus(), 0)
     }
-  }, [isCreating, isOpen])
+  }, [isCreating, isOpen, pickNextDefaultColor])
+
+  useEffect(() => {
+    if (isCreating) {
+      setDraftColor(pickNextDefaultColor())
+    }
+  }, [isCreating, pickNextDefaultColor])
 
   const closeMenu = () => {
     setIsOpen(false)
@@ -155,7 +168,7 @@ export default function FavoriteCategoryMenu({
   const createCategory = () => {
     const name = draftName.trim()
     if (!name) return
-    const categoryId = createFavoriteCategory({ name })
+    const categoryId = createFavoriteCategory({ name, color: draftColor })
     onSelect(categoryId)
     closeMenu()
   }
@@ -242,6 +255,27 @@ export default function FavoriteCategoryMenu({
 
       {isCreating ? (
         <div className="px-2 py-1">
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5 px-0.5" role="radiogroup" aria-label="分类颜色">
+            {FAVORITE_CATEGORY_COLORS.map((color) => {
+              const selected = color === draftColor
+              return (
+                <button
+                  key={color}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  aria-label={`选择颜色 ${color}`}
+                  onClick={() => setDraftColor(color)}
+                  className={`h-4 w-4 shrink-0 rounded-full transition ${
+                    selected
+                      ? 'ring-2 ring-offset-2 ring-blue-500 ring-offset-white dark:ring-offset-gray-900'
+                      : 'ring-1 ring-black/5 hover:ring-black/20 dark:ring-white/10 dark:hover:ring-white/30'
+                  }`}
+                  style={{ backgroundColor: color }}
+                />
+              )
+            })}
+          </div>
           <div className="flex gap-1.5">
             <input
               ref={inputRef}
@@ -256,6 +290,7 @@ export default function FavoriteCategoryMenu({
                   e.preventDefault()
                   setIsCreating(false)
                   setDraftName('')
+                  setDraftColor(pickNextDefaultColor())
                 }
               }}
               placeholder={createPlaceholder}
