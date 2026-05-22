@@ -316,6 +316,7 @@ export default function InputBar() {
   const inputImages = useStore((s) => s.inputImages)
   const removeInputImage = useStore((s) => s.removeInputImage)
   const clearInputImages = useStore((s) => s.clearInputImages)
+  const clearMaskDraft = useStore((s) => s.clearMaskDraft)
   const params = useStore((s) => s.params)
   const setParams = useStore((s) => s.setParams)
   const settings = useStore((s) => s.settings)
@@ -1075,6 +1076,55 @@ export default function InputBar() {
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
+          {/* 重置全部输入 */}
+          {(() => {
+            const promptLen = prompt.trim().length
+            const canReset = promptLen > 0 || inputImages.length > 0 || maskDraft != null
+            const parts: string[] = []
+            if (promptLen > 0) parts.push(`文字（${promptLen} 字符）`)
+            if (inputImages.length > 0) parts.push(`${inputImages.length} 张参考图`)
+            if (maskDraft) parts.push('1 个遮罩')
+            const resetMessage = `将清空：${parts.join('、')}。继续？`
+            return (
+              <button
+                type="button"
+                disabled={!canReset}
+                onClick={() =>
+                  setConfirmDialog({
+                    title: '重置全部输入',
+                    message: resetMessage,
+                    action: () => {
+                      setPrompt('')
+                      clearInputImages()
+                      clearMaskDraft()
+                    },
+                  })
+                }
+                className={
+                  canReset
+                    ? `${PILL_BASE} hover:bg-red-50/50 hover:text-red-500 dark:hover:bg-red-950/30 dark:hover:text-red-400`
+                    : PILL_DISABLED
+                }
+                aria-label="重置全部输入"
+                title={canReset ? '清空文字、参考图与遮罩' : '当前没有可重置的内容'}
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                </svg>
+                <span>重置</span>
+              </button>
+            )
+          })()}
+
           {/* 上传 */}
           <div
             className="relative"
@@ -1233,16 +1283,34 @@ export default function InputBar() {
 
           {/* 输入框 + 发送 */}
           <div className="flex items-end gap-2">
-            <textarea
-              ref={textareaRef}
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={handleKeyDown}
-              rows={1}
-              placeholder="描述你想要的图片，支持粘贴图片..."
-              aria-label="描述图片"
-              className="flex-1 px-4 py-3 rounded-2xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] text-sm focus:outline-none leading-relaxed resize-none shadow-sm transition-[border-color,box-shadow] duration-200"
-            />
+            <div className="relative flex-1">
+              <textarea
+                ref={textareaRef}
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={1}
+                placeholder="描述你想要的图片，支持粘贴图片..."
+                aria-label="描述图片"
+                className="w-full px-4 py-3 rounded-2xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] text-sm focus:outline-none leading-relaxed resize-none shadow-sm transition-[border-color,box-shadow] duration-200"
+              />
+              {prompt.trim().length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPrompt('')
+                    requestAnimationFrame(() => adjustTextareaHeight())
+                    textareaRef.current?.focus()
+                  }}
+                  className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-white/[0.06] dark:hover:text-gray-300 transition-colors"
+                  aria-label="清空输入"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
             <div
               className="relative flex shrink-0 items-end pb-0.5"
               onMouseEnter={() => setSubmitHover(true)}
