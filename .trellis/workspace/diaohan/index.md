@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
+- **Total Sessions**: 11
 - **Last Active**: 2026-05-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~342 | Active |
+| `journal-1.md` | ~375 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-05-22 | support-http-ip-deploy: 正式支持 IP+HTTP 直连部署模式 + 沉淀 SW 契约 5 | `496a79f` | `main` |
 | 10 | 2026-05-22 | 风格预设功能：底栏 pill 接入实际选择 + 原型链键防护 | `94c3659` | `main` |
 | 9 | 2026-05-22 | docker-deploy: 加 Docker 部署栈 + 沉淀 sw.js HTTP 层契约 4 | `625653f` | `main` |
 | 8 | 2026-05-22 | react-error-boundary: 区域级 ErrorBoundary + hydration normalize hotfix + spec 沉淀 | `15597dc`, `9361f0d` | `main` |

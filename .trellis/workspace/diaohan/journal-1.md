@@ -340,3 +340,36 @@ Hardened local data export/import, URL bootstrap secrets, concurrent generation 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: support-http-ip-deploy: 正式支持 IP+HTTP 直连部署模式 + 沉淀 SW 契约 5
+
+**Date**: 2026-05-22
+**Task**: support-http-ip-deploy: 正式支持 IP+HTTP 直连部署模式 + 沉淀 SW 契约 5
+**Branch**: `main`
+
+### Summary
+
+把 IP+HTTP 直连从「能跑但悄悄丢功能」升级为一等公民部署形态。docker compose 加 profile 互斥：默认 docker compose up -d 只起 app + cors-proxy；--profile https 用现有 Caddyfile（HTTPS + Let's Encrypt）；--profile lan 用新增 Caddyfile.lan（监听 :80 无 ACME）。App 层 graceful degradation：main.tsx 在 navigator.serviceWorker.register + dev unregister 两路径都包 'serviceWorker' in navigator && window.isSecureContext 守卫，HTTP 模式静默 skip 不再 console.error；新增 InsecureContextBanner 组件，仅 !isSecureContext && !dismissed 时渲染顶部 amber 警告条（role=status + aria-live=polite），关闭走 zustand-persist 跨刷新保留；banner 挂在所有业务 ErrorBoundary 之外（recovery surface 反模式）。Store: 新增 dismissedInsecureContextBanner 持久化字段，mergePersistedStoreState 显式 default false 遵循 hydration normalize 反模式。Spec 沉淀：service-worker.md 新增「契约 5：main.tsx 注册 SW 前必须 window.isSecureContext 检查」附 why / 严格不变量 / 与 HTTP 模式部署的关系；部署前自检清单加 HTTP 模式条目。README 顶部加三种模式速查表 + HTTPS / HTTP+IP / sslip.io HTTPS-over-IP 三个完整子节，sslip.io 路径零代码改动让无域名用户也能上 HTTPS 保留完整 PWA / kill-switch。验证 tsc 0 / 155 tests / build OK / docker compose 三种 profile config 都 parse OK。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `496a79f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
