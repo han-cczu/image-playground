@@ -240,3 +240,37 @@ Hardened local data export/import, URL bootstrap secrets, concurrent generation 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: react-error-boundary: 区域级 ErrorBoundary + hydration normalize hotfix + spec 沉淀
+
+**Date**: 2026-05-22
+**Task**: react-error-boundary: 区域级 ErrorBoundary + hydration normalize hotfix + spec 沉淀
+**Branch**: `main`
+
+### Summary
+
+白屏事故链路收尾：(1) 15597dc 修 mergePersistedStoreState 不 normalize settings 导致老用户 promptOptimizer 缺字段 → InputBar 渲染期 throw → 整页白屏的 latent bug；(2) 9361f0d 引入区域级 React ErrorBoundary（10 处包裹：Sidebar/Header/main/InputBar + 6 个 Modal；ConfirmDialog/Toast 故意不包以避免 recovery surface 死循环递归），class component + display: contents wrapper + 三按钮（重试/刷新/清空本地数据并重载 with ConfirmDialog 二次确认）+ retry 限次 3 + dev 显完整 stack/prod 显 message + 6 字符 hash；hashString 与 computeRetryState 抽纯函数走 vitest node 测试（项目无 RTL/jsdom），146 tests 全绿。Spec 沉淀两条 anti-pattern：state-management.md「zustand-persist 反序列化不 normalize settings 导致老用户白屏」配 normalize 函数容忍 undefined 规则；component-guidelines.md「把 Toast/ConfirmDialog 包进 ErrorBoundary 会触发 fallback → ConfirmDialog → throw → fallback 死循环」配正确分层结构。后续 advisory：Bootstrap Guidelines 任务长期 in_progress 未处理；Header 历史按钮（跨对话搜索）仍占位。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `15597dc` | (see git log) |
+| `9361f0d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

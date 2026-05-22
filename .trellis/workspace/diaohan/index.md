@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
+- **Total Sessions**: 8
 - **Last Active**: 2026-05-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~242 | Active |
+| `journal-1.md` | ~276 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-05-22 | react-error-boundary: 区域级 ErrorBoundary + hydration normalize hotfix + spec 沉淀 | `15597dc`, `9361f0d` | `main` |
 | 7 | 2026-05-22 | SettingsModal 视觉美化：对齐主页 ikun 风格 | `74248ea`, `1541561` | `main` |
 | 6 | 2026-05-22 | ui-ikun-style-refresh: 引入 Conversation + sidebar/EmptyState/底栏改造 + spec 沉淀 | `eea442a`, `e6a2584`, `b236e09`, `08f3b52` | `main` |
 | 5 | 2026-05-22 | 加固 Service Worker：版本化 CACHE_NAME + HTML 不写回 + kill-switch | `8b8de26` | `main` |
