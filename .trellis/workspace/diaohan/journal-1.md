@@ -472,3 +472,36 @@ Hardened local data export/import, URL bootstrap secrets, concurrent generation 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: Sidebar 折叠态修复：Logo 接管展开入口 + 复用空新对话
+
+**Date**: 2026-05-22
+**Task**: Sidebar 折叠态修复：Logo 接管展开入口 + 复用空新对话
+**Branch**: `main`
+
+### Summary
+
+Sidebar 折叠态两个 UX 痛点修复。Bug 1：折叠后 md:w-14 容器只有 32px 内宽，Logo h-8 w-8 + Toggle h-8 w-8 共 64px 挤不下，toggle button 被布局 justify-between 推出可视区，用户无法点回展开。修复 = Logo 折叠态变 <button> 接管展开入口（aria-label 展开 sidebar + hover ring 反馈），原 toggle button 用 !sidebarCollapsed 条件渲染只在展开态出现，SVG 方向简化为固定折叠。Bug 2：handleCreate 裸调 createConversation 不查重，连按 + 堆积多个 title=新对话 的空对话，折叠态首字符全是新无法区分。修复 = 新增 src/lib/conversations.ts::findReusableEmptyConversation 纯函数扫描 title===新对话 && taskCount===0 && 非 archive 的候选，多候选取 createdAt 最大值；handleCreate 命中则 setActive 不新建。不动 store.createConversation 保持 taskRuntime.ts:377 自动建对话路径不受影响。新增 11 个 vitest case 覆盖空列表、单/多候选、已重命名、有 task、archive、自定义 defaultTitle（i18n 场景）、createdAt 相等稳定性、纯函数 immutability。trellis-check 自修补 2 个测试 case 锁定 reduce 稳定性与入参不可变。3 个 open issue（移动端抽屉折叠态显示既有 bug、其它按钮 SVG 缺 aria-hidden、状态切换焦点丢失）均非本 PR 引入，留作 follow-up。166 tests 全过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8431525` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
