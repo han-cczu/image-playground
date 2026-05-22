@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "popover 互斥状态、drawer/popover Esc+outside-click cleanup、icon-only button aria-label、装饰 SVG aria-hidden 等模式必须遵守；本任务重写 ModelMenu 全部命中"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "zustand 单字段订阅；写回 profile.model 走 setSettings({profiles: map(...)}) 不可解构整个 store"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "icon-only button aria-label / drawer&popover Esc+outside-click 复检；新增 🔄 刷新按钮必须 aria-label"}
