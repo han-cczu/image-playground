@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "zustand 单字段订阅约定 + persist 路径 + sortedConversations 派生模式；新增 galleryView 字段和 persist 兼容性必须遵守"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "已沉淀关键约束：icon-only button aria-label / 装饰 SVG aria-hidden / mobile drawer body lock；新 Sidebar 图库按钮 + task 卡片标签按钮要遵守"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "代码标准；filterAndSortTasks 测试拓展遵守 src/lib 层禁 window.* 约束（虽然 filter 函数本就纯函数）"}

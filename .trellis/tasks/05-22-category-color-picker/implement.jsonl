@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "FavoriteCategoryMenu 是 portal popover 组件，新增交互需遵守 a11y / 关闭态重置 / 键盘交互等组件规范"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "createFavoriteCategory 是 favorite category runtime contract 的入口，调用方式必须符合 store action 约定"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "色板圆点应复用列表项已有的 rounded-full + style backgroundColor 模式，避免新造样式"}
