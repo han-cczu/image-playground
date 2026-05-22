@@ -439,3 +439,36 @@ Hardened local data export/import, URL bootstrap secrets, concurrent generation 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: EmptyState 香蕉 emoji 换成 OpenAI 官方 logo
+
+**Date**: 2026-05-22
+**Task**: EmptyState 香蕉 emoji 换成 OpenAI 官方 logo
+**Branch**: `main`
+
+### Summary
+
+用户希望主区域空状态的 🍌 装饰 emoji 改成 OpenAI 花瓣 logo。改 src/components/EmptyState.tsx：替换为内联 SVG（viewBox 24x24，fill=currentColor），尺寸 88px，跟随 text-gray-800/dark:text-gray-100 适配亮暗模式；带 aria-hidden + focusable=false。文案/pill/布局不动。tsc + 155 单测全过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f7fbe14` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
