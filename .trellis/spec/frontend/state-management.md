@@ -411,6 +411,67 @@ async function initStore() {
 
 ---
 
+### zustand-persist 反序列化时不 normalize settings → 新字段对老用户白屏
+
+**Symptom**: 给 `AppSettings` 加了一个新字段（如 `promptOptimizer.apiKey`），新开发环境用没问题。但有持久化数据早于该字段引入的老用户刷新页面立刻白屏。Console 第一条错误形如 `TypeError: Cannot read properties of undefined (reading 'apiKey')`，指向某个组件读 `settings.<新字段>.xxx` 的位置（如 `InputBar/index.tsx:384`）。
+
+**Cause**: zustand-persist 的反序列化合并函数（项目里是 `mergePersistedStoreState`）原本直接 `...persisted` 裸展开 settings：
+
+```typescript
+return {
+  ...currentState,
+  ...persisted,                  // 把 localStorage 里的旧 settings 整个塞进来
+  favoriteCategories: ...,        // 只有特定字段走了 normalize
+}
+```
+
+`normalizeSettings`（`apiProfiles.ts`）虽然每个字段都 `normalize<Field>(record.<field>)` 兜了 default，但它只在 `setSettings` 路径被调，**hydration 不走这条路**。结果：localStorage 里早期写入的 settings 对象没有新字段 → spread 后整个 `settings.promptOptimizer === undefined` → 组件渲染期读 `.apiKey` 抛 TypeError → 项目当时没 error boundary → 整页 unmount → 白屏。
+
+**Fix**: hydration merge 函数里给 settings 显式跑一次 `normalizeSettings`：
+
+```typescript
+return {
+  ...currentState,
+  ...persisted,
+  settings: normalizeSettings(persisted?.settings),  // ← 让 normalizer 兜默认值
+  favoriteCategories: ...,
+}
+```
+
+`normalizeSettings` 内部已经为每个字段调 `normalize<Field>`，新字段引入时只需在那里加一行 default 即可，hydration 路径自动受益。
+
+**Prevention**:
+1. **`AppSettings` 任何新增字段的 PR** 必须同步：(a) 在 `normalizeSettings` 内调用对应 `normalize<NewField>(record.<newField>)`；(b) `normalize<NewField>` 自身必须 accept `undefined` / 缺字段输入并返回完整 default 对象，**不能 assume 输入存在**；(c) 不需要再改 `mergePersistedStoreState`，因为这条规则之后 hydration 已统一走 normalize。
+2. **review checklist**：写 `record.<newField>.foo` 时，看 normalize 函数是否处理 `record === undefined` / `record.<newField> === undefined` 两种情况。
+3. **Code-review red flag**：任何 `normalize<X>(record: any)` 函数体里写 `record.foo` 不带 `?.` 或没有先 `record ?? {}` 就是潜在 white-screen 炸弹。
+
+❌ Bad（normalize 假设输入存在）:
+
+```typescript
+function normalizePromptOptimizer(record: any): PromptOptimizerConfig {
+  return {
+    apiKey: record.apiKey ?? '',        // record === undefined → throw
+    baseUrl: record.baseUrl ?? '',
+  }
+}
+```
+
+✅ Good（normalize 容忍缺字段）:
+
+```typescript
+function normalizePromptOptimizer(record: unknown): PromptOptimizerConfig {
+  const r = (record && typeof record === 'object' ? record : {}) as Record<string, unknown>
+  return {
+    apiKey: typeof r.apiKey === 'string' ? r.apiKey : '',
+    baseUrl: typeof r.baseUrl === 'string' ? r.baseUrl : DEFAULT_BASE_URL,
+  }
+}
+```
+
+实证：commit `15597dc fix(store): hydration 路径补齐 normalizeSettings，修复老用户白屏`。`src/store.ts::mergePersistedStoreState` 加 1 行 `settings: normalizeSettings(persisted?.settings)`，`src/components/InputBar/index.tsx:384` 即可不再 throw。
+
+---
+
 ### Persisting "diff" via index-aligned arrays
 
 **Symptom**: After refactoring a store action that "mutates many records and persists only the changed ones", the wrong records are persisted (or correct records are skipped) even though the in-memory state looks right.

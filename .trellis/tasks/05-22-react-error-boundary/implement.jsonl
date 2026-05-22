@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "回退 UI 必须遵循 Styling Patterns（token 与 EmptyState/Sidebar/AdvancedParamsPopover 同源）、Accessibility 强制项（role=alert/aria-label/aria-hidden 装饰 icon）、avoid subscribe 整 store 等已有规范"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "新建组件不踩 forbidden patterns（src/lib/** 不可用 window.*；boundary 在 src/components 层允许 window.location.reload 等），Required Patterns 中 icon-only button aria-label 等本任务必中"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "boundary 的「清空本地数据并重载」按钮要调用 clearAllData，必须了解 conversations / tasks / images 多 store 清空契约，避免半清空"}

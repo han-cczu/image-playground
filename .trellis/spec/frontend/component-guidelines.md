@@ -135,6 +135,64 @@ const ON = draft.someFlag
 
 ---
 
+### Pattern: Region-scoped React Error Boundary with `display: contents` wrapper
+
+**Problem**: 单点渲染错误（React 渲染期 throw）会让整棵树 unmount，用户看到白屏，sidebar / Header / 输入栏全部一起塌掉。事件 handler 和 Promise rejection 走的是已有 `try/catch + showToast`，但**渲染期 throw 必须靠 error boundary**。React 19 boundary 只能用 class component 实现，且**包一层 div 会破坏 `[data-home-main]` / `[data-drag-select-surface]` 这些 closest selector 之外的直接子选择器与 flex 布局**。
+
+**Solution**: 写一个 region-aware 的 `<ErrorBoundary region="main|sidebar|header|inputbar|modal">`，无错误时用 `display: contents` 包一层 div 维持 React class component 实例，**但物理 box 在 layout 中消失**，子元素仍参与父级 flex/grid 布局；触发错误时换成「区域适配」的 fallback UI（main 用完整面板、sidebar/inputbar 用紧凑卡片、header 用一行 banner、modal 用居中弹层）。
+
+```tsx
+// 关键：无错时用 display: contents 让 wrapper 不参与 layout
+render() {
+  if (!this.state.error) {
+    return (
+      <div style={{ display: 'contents' }} key={resetCounter}>
+        {this.props.children}
+      </div>
+    )
+  }
+  // ... 区域适配 fallback
+}
+```
+
+App.tsx 用法：
+
+```tsx
+<ErrorBoundary region="sidebar"><Sidebar ... /></ErrorBoundary>
+<ErrorBoundary region="header"><Header ... /></ErrorBoundary>
+<ErrorBoundary region="main"><main data-home-main data-drag-select-surface>...</main></ErrorBoundary>
+<ErrorBoundary region="inputbar"><InputBar /></ErrorBoundary>
+<ErrorBoundary region="modal"><DetailModal /></ErrorBoundary>
+```
+
+**Why**:
+
+- `display: contents` 是 CSS 标准能力，让元素自己的 box 不渲染、子元素直接「继承上一级 layout」。这是 React class boundary（必须有真实 DOM 节点）+ 已有 `flex` 父容器（要求直接子是 flex 项）共存的唯一干净解。
+- 区域级而非顶层：InputBar throw 时 sidebar / 已生成图片仍可见可用，比单顶层 boundary 体验高一档。
+- React 19 dev 模式会在 `componentDidCatch` 之外还原向 console 打 stack，prod 模式我们只 log message 防泄漏。
+- Retry 通过 `key={resetCounter++}` 强制子树重新 mount；连续 3 次 retry 失败禁用「重试」按钮，避免子树立刻再次 throw 造成的 UI 抽搐。
+
+**Boundary 接不到的（React 硬约束）**：
+
+- 事件 handler 内 throw
+- Promise rejection / async error
+- SSR throw
+- Boundary 自身渲染 throw
+
+这些路径仍然走 `try/catch + showToast`，不要试图用 boundary 替代。
+
+**关键约束**：
+
+- 必须 class component（React 19 hook 不支持 boundary）。
+- 不要用 Fragment 包 children（class component 实例必须有真实 DOM，但 `display: contents` 让它消失在 layout 中）。
+- 「清空本地数据并重载」必须走 `setConfirmDialog` 二次确认，对齐其他破坏性操作。
+- 回退 UI `role="alert"` + 所有按钮 `aria-label`。
+- prod 错误显示 `error.message + 6 字符 hash`（基于 `message + stack` 的简单 base36 hash），dev 显示完整 stack + componentStack。
+
+**实证**：`src/components/ErrorBoundary.tsx` + `src/App.tsx` 8 处包裹（sidebar/header/main/inputbar + 5 个 modal）。`hashString` 与 `computeRetryState` 抽成纯函数，在 vitest node 环境直接单测，避开了项目当前没装 RTL/jsdom 的现实。
+
+---
+
 ## Accessibility
 
 ### Required: icon-only `<button>` must have `aria-label`
@@ -269,3 +327,61 @@ const conversations = useStore((s) => s.conversations)
 zustand 默认对 selector 结果做 `Object.is` 比较，单字段订阅是 O(1) 引用比较；返回 object/array 时需要自定义 `equalityFn` 否则每次都不等。
 
 实证：本任务 `TaskGrid.tsx`、`Sidebar/index.tsx`、`Header.tsx` 全部走单字段订阅。
+
+---
+
+### Common Mistake: 把 Toast / ConfirmDialog 等 recovery surface 包进 ErrorBoundary
+
+**Symptom**: 引入 ErrorBoundary 之后，某次 ConfirmDialog 自己有 bug 渲染期 throw —— 整页进入「fallback UI → fallback UI 点按钮要弹 ConfirmDialog → ConfirmDialog 又 throw → 又被 boundary 接 → 又 fallback」死循环，按钮无响应、控制台错误暴涨。
+
+**Cause**: ErrorBoundary 的 fallback UI 内部依赖**全局 recovery surface**（如 `ConfirmDialog` 处理二次确认、`Toast` 通知 async 错误）。如果这些组件本身被同一个 boundary 树包住，它们 throw 时会落回 fallback —— 而 fallback 又要调它们 → 递归。
+
+**Fix**: recovery surface 永远渲染在**所有业务 ErrorBoundary 之外**。`App.tsx` 的结构应该是：
+
+```tsx
+return (
+  <>
+    <ErrorBoundary region="sidebar"><Sidebar /></ErrorBoundary>
+    <ErrorBoundary region="header"><Header /></ErrorBoundary>
+    <ErrorBoundary region="main"><main>...</main></ErrorBoundary>
+    <ErrorBoundary region="inputbar"><InputBar /></ErrorBoundary>
+    {/* Modals 各自包 boundary */}
+    <ErrorBoundary region="modal"><DetailModal /></ErrorBoundary>
+    ...
+    {/* ↓ recovery surface 在所有业务 boundary 之外，不被任何 boundary 包 */}
+    <ConfirmDialog />
+    <Toast />
+  </>
+)
+```
+
+**Prevention**:
+1. **Recovery surface 清单要短而瘦** —— ConfirmDialog、Toast 这种「fallback UI 会主动调用」的组件不能多，且自身代码要尽量纯展示（少订阅 store / 少做派生），降低 throw 概率。
+2. **如果你担心 recovery surface 自己崩** —— 在最外层加一个 silent 顶层 boundary 兜底，但它的 fallback UI 必须**完全 inline DOM**（直接 `<div>` + 原生 `confirm()` / `alert()`），**不依赖任何业务组件或 store**。这样即便项目最重的依赖全炸，用户仍能看到一个"页面崩溃，请刷新"的兜底页。
+3. **Code review red flag**：看到 `<ErrorBoundary>...<ConfirmDialog />...</ErrorBoundary>` 或类似把 Toast 包进任何业务 boundary 的写法，直接打回。
+
+❌ Bad（ConfirmDialog 被 boundary 包，触发死循环）:
+
+```tsx
+<ErrorBoundary region="app">
+  <Sidebar />
+  <main>...</main>
+  <InputBar />
+  <ConfirmDialog />   {/* ← 它 throw 时 fallback 又要调它 */}
+  <Toast />
+</ErrorBoundary>
+```
+
+✅ Good（recovery surface 留在 boundary 外）:
+
+```tsx
+<>
+  <ErrorBoundary region="sidebar"><Sidebar /></ErrorBoundary>
+  <ErrorBoundary region="main"><main>...</main></ErrorBoundary>
+  <ErrorBoundary region="inputbar"><InputBar /></ErrorBoundary>
+  <ConfirmDialog />
+  <Toast />
+</>
+```
+
+**实证**：ErrorBoundary 实现任务 `src/App.tsx`。trellis-check 复核明确确认这一决策正确。详见同文件 [Pattern: Region-scoped React Error Boundary with `display: contents` wrapper](#pattern-region-scoped-react-error-boundary-with-display-contents-wrapper)。

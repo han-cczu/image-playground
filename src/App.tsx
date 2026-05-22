@@ -18,6 +18,7 @@ import ConfirmDialog from './components/ConfirmDialog'
 import Toast from './components/Toast'
 import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
+import ErrorBoundary from './components/ErrorBoundary'
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
@@ -121,39 +122,59 @@ export default function App() {
   return (
     <>
       <div className="flex min-h-screen md:h-screen md:overflow-hidden">
-        <Sidebar
-          mobileOpen={mobileSidebarOpen}
-          onMobileClose={() => setMobileSidebarOpen(false)}
-        />
+        <ErrorBoundary region="sidebar">
+          <Sidebar
+            mobileOpen={mobileSidebarOpen}
+            onMobileClose={() => setMobileSidebarOpen(false)}
+          />
+        </ErrorBoundary>
         <div className="flex min-h-screen min-w-0 flex-1 flex-col md:h-screen md:min-h-0">
-          <Header onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />
-          <main
-            data-home-main
-            data-drag-select-surface
-            className="flex-1 pb-48 md:overflow-y-auto"
-          >
-            <div className="safe-area-x mx-auto max-w-7xl">
-              {showEmptyState ? (
-                <EmptyState />
-              ) : (
-                <>
-                  <SearchBar />
-                  <TaskGrid />
-                </>
-              )}
-            </div>
-          </main>
+          <ErrorBoundary region="header">
+            <Header onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />
+          </ErrorBoundary>
+          <ErrorBoundary region="main">
+            <main
+              data-home-main
+              data-drag-select-surface
+              className="flex-1 pb-48 md:overflow-y-auto"
+            >
+              <div className="safe-area-x mx-auto max-w-7xl">
+                {showEmptyState ? (
+                  <EmptyState />
+                ) : (
+                  <>
+                    <SearchBar />
+                    <TaskGrid />
+                  </>
+                )}
+              </div>
+            </main>
+          </ErrorBoundary>
         </div>
       </div>
-      <InputBar />
-      <DetailModal />
-      <Lightbox />
-      <SettingsModal />
-      <PromptOptimizerModal />
+      <ErrorBoundary region="inputbar">
+        <InputBar />
+      </ErrorBoundary>
+      <ErrorBoundary region="modal">
+        <DetailModal />
+      </ErrorBoundary>
+      <ErrorBoundary region="modal">
+        <Lightbox />
+      </ErrorBoundary>
+      <ErrorBoundary region="modal">
+        <SettingsModal />
+      </ErrorBoundary>
+      <ErrorBoundary region="modal">
+        <PromptOptimizerModal />
+      </ErrorBoundary>
       <ConfirmDialog />
       <Toast />
-      <MaskEditorModal />
-      <ImageContextMenu />
+      <ErrorBoundary region="modal">
+        <MaskEditorModal />
+      </ErrorBoundary>
+      <ErrorBoundary region="modal">
+        <ImageContextMenu />
+      </ErrorBoundary>
     </>
   )
 }
