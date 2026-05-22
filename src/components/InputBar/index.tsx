@@ -1588,7 +1588,7 @@ export default function InputBar() {
               onMouseEnter={() => setSubmitHover(true)}
               onMouseLeave={() => setSubmitHover(false)}
             >
-              <ButtonTooltip visible={!settings.apiKey && submitHover} text="尚未完成 API 配置，请在右上角设置中进行" />
+              <ButtonTooltip visible={!settings.apiKey && submitHover} text="尚未完成 API 配置，请点 sidebar 底部齿轮按钮打开设置" />
               <button
                 type="button"
                 onClick={() => settings.apiKey ? submitTask() : setShowSettings(true)}
