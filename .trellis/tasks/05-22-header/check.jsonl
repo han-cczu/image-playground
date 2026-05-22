@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "校验余下的主题按钮仍符合 icon button a11y 与样式约定"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "确认 Header 无残留 unused import / selector；Sidebar 设置/删除入口未被波及"}
