@@ -632,6 +632,29 @@ describe('insecure context banner state', () => {
     expect(merged.dismissedInsecureContextBanner).toBe(true)
   })
 
+  it('mergePersistedStoreState defaults galleryView to false for missing / false / non-boolean persisted values', () => {
+    const initial = useStore.getInitialState()
+    // 旧用户：持久化里没有 galleryView 字段
+    expect(mergePersistedStoreState({}, initial).galleryView).toBe(false)
+    // 显式 false
+    expect(mergePersistedStoreState({ galleryView: false }, initial).galleryView).toBe(false)
+    // 非 boolean 类型（受损/旧数据）也兜底 false
+    expect(
+      mergePersistedStoreState(
+        { galleryView: 'true' as unknown as boolean },
+        initial,
+      ).galleryView,
+    ).toBe(false)
+  })
+
+  it('mergePersistedStoreState preserves galleryView === true', () => {
+    const merged = mergePersistedStoreState(
+      { galleryView: true },
+      useStore.getInitialState(),
+    )
+    expect(merged.galleryView).toBe(true)
+  })
+
   it('setDismissedInsecureContextBanner flips and persists the flag through the store', () => {
     useStore.setState({ dismissedInsecureContextBanner: false })
     useStore.getState().setDismissedInsecureContextBanner(true)

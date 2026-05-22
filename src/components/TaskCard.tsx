@@ -14,6 +14,13 @@ interface DragHandle {
   disabled: boolean
 }
 
+interface ConversationTagProp {
+  id: string
+  title: string
+  color: string
+  onClick: () => void
+}
+
 interface Props {
   task: TaskRecord
   onReuse: () => void
@@ -22,6 +29,8 @@ interface Props {
   onClick: (e: React.MouseEvent | React.TouchEvent) => void
   isSelected?: boolean
   dragHandle?: DragHandle
+  /** 图库视图下渲染所属对话标签；undefined 时不渲染 */
+  conversationTag?: ConversationTagProp
 }
 
 export default function TaskCard({
@@ -32,6 +41,7 @@ export default function TaskCard({
   onClick,
   isSelected,
   dragHandle,
+  conversationTag,
 }: Props) {
   const [thumbSrc, setThumbSrc] = useState<string>('')
   const [coverRatio, setCoverRatio] = useState<string>('')
@@ -400,6 +410,25 @@ export default function TaskCard({
                   />
                   <span className="min-w-0 truncate">{favoriteCategory.name.trim() || '未命名分类'}</span>
                 </span>
+              )}
+              {conversationTag && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    conversationTag.onClick()
+                  }}
+                  className="min-w-0 max-w-[140px] text-xs px-1.5 py-0.5 rounded bg-gray-50 dark:bg-white/[0.04] text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.08] flex items-center gap-1 flex-shrink-0"
+                  title={`来自对话「${conversationTag.title}」`}
+                  aria-label={`跳转到对话「${conversationTag.title}」`}
+                >
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: conversationTag.color }}
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 truncate">{conversationTag.title}</span>
+                </button>
               )}
               </div>
             {/* 操作按钮 */}

@@ -100,6 +100,8 @@ export function mergePersistedStoreState(
       typeof persisted?.activeConversationId === 'string' ? persisted.activeConversationId : null,
     sidebarCollapsed: persisted?.sidebarCollapsed === true,
     dismissedInsecureContextBanner: persisted?.dismissedInsecureContextBanner === true,
+    // 旧用户持久化数据没有 galleryView 字段；显式 normalize 为 boolean，避免 undefined 渗透到组件
+    galleryView: persisted?.galleryView === true,
   }
 }
 
@@ -162,6 +164,10 @@ export interface AppState {
   // Insecure context banner（HTTP + IP 模式提示）
   dismissedInsecureContextBanner: boolean
   setDismissedInsecureContextBanner: (v: boolean) => void
+
+  // 图库视图：跨对话查看全部 task
+  galleryView: boolean
+  setGalleryView: (view: boolean) => void
 
   // 搜索和筛选
   searchQuery: string
@@ -501,6 +507,10 @@ export const useStore = create<AppState>()(
       setDismissedInsecureContextBanner: (dismissedInsecureContextBanner) =>
         set({ dismissedInsecureContextBanner }),
 
+      // Gallery view
+      galleryView: false,
+      setGalleryView: (galleryView) => set({ galleryView }),
+
       // Search & filter
       searchQuery: '',
       setSearchQuery: (q) => set({ searchQuery: q }),
@@ -573,6 +583,7 @@ export const useStore = create<AppState>()(
         activeConversationId: state.activeConversationId,
         sidebarCollapsed: state.sidebarCollapsed,
         dismissedInsecureContextBanner: state.dismissedInsecureContextBanner,
+        galleryView: state.galleryView,
       }),
     },
   ),

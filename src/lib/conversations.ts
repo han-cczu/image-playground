@@ -13,6 +13,16 @@ export function genConversationId(): string {
   return `conv-${Date.now().toString(36)}-${(++conversationUid).toString(36)}-${Math.random().toString(36).slice(2, 7)}`
 }
 
+/** 简易 hash → 取色（按 id 稳定地从一组品牌色里挑一个，用于无 color 时的兜底色块）。 */
+const FALLBACK_COLORS = ['#3b82f6', '#f59e0b', '#14b8a6', '#a855f7', '#ef4444', '#22c55e', '#ec4899', '#64748b']
+export function pickFallbackColor(id: string): string {
+  let h = 0
+  for (let i = 0; i < id.length; i++) {
+    h = (h * 31 + id.charCodeAt(i)) | 0
+  }
+  return FALLBACK_COLORS[Math.abs(h) % FALLBACK_COLORS.length]
+}
+
 export function createArchiveConversation(now = Date.now()): Conversation {
   return {
     id: ARCHIVE_CONVERSATION_ID,

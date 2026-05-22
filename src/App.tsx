@@ -25,6 +25,7 @@ export default function App() {
   const setSettings = useStore((s) => s.setSettings)
   const tasks = useStore((s) => s.tasks)
   const activeConversationId = useStore((s) => s.activeConversationId)
+  const galleryView = useStore((s) => s.galleryView)
   const searchQuery = useStore((s) => s.searchQuery)
   const filterStatus = useStore((s) => s.filterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
@@ -32,7 +33,9 @@ export default function App() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
 
   /**
-   * 当前对话下的任务（含全部 status / favorite 等筛选）。
+   * 当前视图下的任务（含全部 status / favorite 等筛选）。
+   * - galleryView=true：跨对话全部 task
+   * - galleryView=false：仅当前 activeConversationId 下 task
    * 只用来判断是否展示 EmptyState；TaskGrid 自己仍会再过滤一次。
    */
   const tasksInActiveConversation = useMemo(() => {
@@ -41,9 +44,9 @@ export default function App() {
       filterStatus,
       filterFavorite,
       filterFavoriteCategoryId,
-      filterConversationId: activeConversationId,
+      filterConversationId: galleryView ? undefined : activeConversationId,
     })
-  }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId, activeConversationId])
+  }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId, activeConversationId, galleryView])
 
   /**
    * 是否展示「真正的空状态」（emoji + 4 个 pill）：
@@ -142,7 +145,7 @@ export default function App() {
             >
               <div className="safe-area-x mx-auto max-w-7xl">
                 {showEmptyState ? (
-                  <EmptyState />
+                  <EmptyState mode={galleryView ? 'gallery' : 'conversation'} />
                 ) : (
                   <>
                     <SearchBar />

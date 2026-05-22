@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import type { Conversation } from '../../types'
-import { isArchiveConversation } from '../../lib/conversations'
+import { isArchiveConversation, pickFallbackColor } from '../../lib/conversations'
 import { formatRelativeTime } from './relativeTime'
 
 interface ConversationItemProps {
@@ -19,16 +19,6 @@ function firstChar(title: string): string {
   if (!trimmed) return '?'
   // Array.from 能正确处理 surrogate pair 与多数 emoji
   return Array.from(trimmed)[0] ?? '?'
-}
-
-/** 简易 hash → 取色（按 id 稳定地从一组品牌色里挑一个，仅用于折叠态图标背景兜底）。 */
-const FALLBACK_COLORS = ['#3b82f6', '#f59e0b', '#14b8a6', '#a855f7', '#ef4444', '#22c55e', '#ec4899', '#64748b']
-function pickFallbackColor(id: string): string {
-  let h = 0
-  for (let i = 0; i < id.length; i++) {
-    h = (h * 31 + id.charCodeAt(i)) | 0
-  }
-  return FALLBACK_COLORS[Math.abs(h) % FALLBACK_COLORS.length]
 }
 
 export default function ConversationItem({

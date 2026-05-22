@@ -43,11 +43,40 @@ function Logo({ collapsed, onToggle }: { collapsed: boolean; onToggle?: () => vo
       <button
         type="button"
         onClick={onToggle}
-        className="flex items-center gap-2 rounded-lg p-0.5 transition hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-500/50"
+        className="group flex items-center gap-2 rounded-lg p-0.5 transition hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-500/50"
         title="展开 sidebar"
         aria-label="展开 sidebar"
       >
-        {inner}
+        <span className="relative">
+          <span
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-purple-500 text-white"
+            aria-hidden="true"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="3" />
+              <circle cx="9" cy="9" r="1.5" fill="currentColor" />
+              <path d="M21 15l-5-5L5 21" />
+            </svg>
+          </span>
+          <span
+            aria-hidden="true"
+            className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-white opacity-0 shadow-sm ring-1 ring-gray-200 transition-opacity duration-150 group-hover:opacity-100 dark:bg-gray-800 dark:ring-white/10"
+          >
+            <svg
+              className="h-2.5 w-2.5 text-gray-600 dark:text-gray-300"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </span>
+        </span>
       </button>
     )
   }
@@ -65,6 +94,8 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const setShowSettings = useStore((s) => s.setShowSettings)
   const tasks = useStore((s) => s.tasks)
+  const galleryView = useStore((s) => s.galleryView)
+  const setGalleryView = useStore((s) => s.setGalleryView)
 
   /** 按统一规则排序的对话（archive 永远在最底）。 */
   const sortedConversations = useMemo(
@@ -120,6 +151,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
     // F3：active id 必须真实存在；否则忽略点击
     const target = useStore.getState().conversations.find((c) => c.id === id)
     if (!target) return
+    setGalleryView(false)
     setActiveConversation(id)
     onMobileClose()
   }
@@ -128,10 +160,12 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
     // 避免连按 + 堆积同名空"新对话"：若已存在可复用的空对话，直接切过去
     const reusable = findReusableEmptyConversation(sortedConversations, taskCountByConversation)
     if (reusable) {
+      setGalleryView(false)
       setActiveConversation(reusable.id)
       onMobileClose()
       return
     }
+    setGalleryView(false)
     createConversation()
     onMobileClose()
   }
@@ -179,6 +213,32 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
           )}
         </div>
 
+        {/* 图库 */}
+        <div className="px-3 pt-2">
+          <button
+            type="button"
+            onClick={() => {
+              setGalleryView(true)
+              onMobileClose()
+            }}
+            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              galleryView
+                ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300'
+                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06]'
+            } ${sidebarCollapsed ? 'justify-center px-2' : ''}`}
+            title="图库"
+            aria-label="打开图库（全部任务）"
+            aria-current={galleryView ? 'true' : undefined}
+          >
+            <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="9" cy="9" r="2" />
+              <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+            </svg>
+            {!sidebarCollapsed && <span>图库</span>}
+          </button>
+        </div>
+
         {/* 新建对话 */}
         <div className="px-3 py-2">
           <button
@@ -212,7 +272,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
               <li key={c.id}>
                 <ConversationItem
                   conversation={c}
-                  active={c.id === activeConversationId}
+                  active={!galleryView && c.id === activeConversationId}
                   collapsed={sidebarCollapsed}
                   taskCount={taskCountByConversation.get(c.id) ?? 0}
                   onSelect={() => handleSelect(c.id)}

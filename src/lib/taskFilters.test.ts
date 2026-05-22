@@ -126,4 +126,44 @@ describe('task filtering', () => {
 
     expect(filtered.map((item) => item.id).sort()).toEqual(['a', 'b'])
   })
+
+  it('galleryView=true (filterConversationId undefined) returns tasks across all conversations', () => {
+    // 模拟图库视图：App.tsx 在 galleryView=true 时传 filterConversationId: undefined
+    const tasks = [
+      task({ id: 'in-a', conversationId: 'conv-a', createdAt: 1 }),
+      task({ id: 'in-b', conversationId: 'conv-b', createdAt: 2 }),
+      task({ id: 'in-archive', conversationId: '__archive__', createdAt: 3 }),
+    ]
+
+    const filtered = filterAndSortTasks(tasks, {
+      searchQuery: '',
+      filterStatus: 'all',
+      filterFavorite: false,
+      filterFavoriteCategoryId: null,
+      filterConversationId: undefined,
+    })
+
+    // 跨对话全部返回，按 createdAt 倒序
+    expect(filtered.map((item) => item.id)).toEqual(['in-archive', 'in-b', 'in-a'])
+  })
+
+  it('galleryView=false (filterConversationId set) restricts to that conversation only', () => {
+    const tasks = [
+      task({ id: 'in-a-1', conversationId: 'conv-a', createdAt: 1 }),
+      task({ id: 'in-a-2', conversationId: 'conv-a', createdAt: 4 }),
+      task({ id: 'in-b', conversationId: 'conv-b', createdAt: 2 }),
+      task({ id: 'in-archive', conversationId: '__archive__', createdAt: 3 }),
+    ]
+
+    const filtered = filterAndSortTasks(tasks, {
+      searchQuery: '',
+      filterStatus: 'all',
+      filterFavorite: false,
+      filterFavoriteCategoryId: null,
+      filterConversationId: 'conv-a',
+    })
+
+    // 仅当前 conversation，按 createdAt 倒序
+    expect(filtered.map((item) => item.id)).toEqual(['in-a-2', 'in-a-1'])
+  })
 })

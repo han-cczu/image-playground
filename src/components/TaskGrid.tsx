@@ -14,22 +14,31 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { TaskRecord } from '../types'
+import type { Conversation, TaskRecord } from '../types'
 import { useStore, reuseConfig, editOutputs, removeTask, reorderTask } from '../store'
 import { filterAndSortTasks } from '../lib/taskFilters'
+import { pickFallbackColor } from '../lib/conversations'
 import TaskCard from './TaskCard'
+
+export interface ConversationTag {
+  id: string
+  title: string
+  color: string
+  onClick: () => void
+}
 
 interface SortableTaskCardProps {
   task: TaskRecord
   isSelected: boolean
   dragDisabled: boolean
+  conversationTag?: ConversationTag
   onClick: (e: React.MouseEvent | React.TouchEvent) => void
   onReuse: () => void
   onEditOutputs: () => void
   onDelete: () => void
 }
 
-function SortableTaskCard({ task, isSelected, dragDisabled, ...handlers }: SortableTaskCardProps) {
+function SortableTaskCard({ task, isSelected, dragDisabled, conversationTag, ...handlers }: SortableTaskCardProps) {
   const {
     attributes,
     listeners,
@@ -57,6 +66,7 @@ function SortableTaskCard({ task, isSelected, dragDisabled, ...handlers }: Sorta
       <TaskCard
         task={task}
         isSelected={isSelected}
+        conversationTag={conversationTag}
         dragHandle={{
           ref: setActivatorNodeRef,
           listeners,
@@ -75,7 +85,12 @@ export default function TaskGrid() {
   const filterStatus = useStore((s) => s.filterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const filterFavoriteCategoryId = useStore((s) => s.filterFavoriteCategoryId)
-  const filterConversationId = useStore((s) => s.activeConversationId)
+  const activeConversationId = useStore((s) => s.activeConversationId)
+  const galleryView = useStore((s) => s.galleryView)
+  const setGalleryView = useStore((s) => s.setGalleryView)
+  const setActiveConversation = useStore((s) => s.setActiveConversation)
+  const conversations = useStore((s) => s.conversations)
+  const filterConversationId = galleryView ? null : activeConversationId
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const selectedTaskIds = useStore((s) => s.selectedTaskIds)
@@ -103,7 +118,14 @@ export default function TaskGrid() {
     })
   }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId, filterConversationId])
 
+  /** 派生 conversationId → Conversation，给图库视图下 task 卡片渲染对话标签用。 */
+  const conversationById = useMemo(
+    () => new Map<string, Conversation>(conversations.map((c) => [c.id, c])),
+    [conversations],
+  )
+
   const dragDisabled =
+    galleryView ||
     searchQuery.trim() !== '' ||
     filterStatus !== 'all' ||
     filterFavorite ||
@@ -273,12 +295,29 @@ export default function TaskGrid() {
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={filteredTasks.map((t) => t.id)} strategy={rectSortingStrategy}>
           <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
-            {filteredTasks.map((task) => (
+            {filteredTasks.map((task) => {
+              let conversationTag: ConversationTag | undefined
+              if (galleryView && task.conversationId) {
+                const conv = conversationById.get(task.conversationId)
+                if (conv) {
+                  conversationTag = {
+                    id: conv.id,
+                    title: conv.title,
+                    color: conv.color || pickFallbackColor(conv.id),
+                    onClick: () => {
+                      setGalleryView(false)
+                      setActiveConversation(conv.id)
+                    },
+                  }
+                }
+              }
+              return (
               <SortableTaskCard
                 key={task.id}
                 task={task}
                 isSelected={selectedTaskIds.includes(task.id)}
                 dragDisabled={dragDisabled}
+                conversationTag={conversationTag}
                 onClick={(e) => {
                   if (Date.now() < suppressClickUntil.current) {
                     e.preventDefault()
@@ -299,7 +338,8 @@ export default function TaskGrid() {
                 onEditOutputs={() => editOutputs(task)}
                 onDelete={() => handleDelete(task)}
               />
-            ))}
+              )
+            })}
           </div>
         </SortableContext>
       </DndContext>
