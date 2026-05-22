@@ -505,3 +505,36 @@ Sidebar 折叠态两个 UX 痛点修复。Bug 1：折叠后 md:w-14 容器只有
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: InputBar 模型 pill 升级为两段式
+
+**Date**: 2026-05-22
+**Task**: InputBar 模型 pill 升级为两段式
+**Branch**: `main`
+
+### Summary
+
+把 InputBar 模型 pill 的菜单从单纯'切换 profile'升级为两段式：上半段拉取当前 profile 可用 model 列表（OpenAI 走 listModels API + useRef Map 按 profile.id 缓存 + 🔄刷新按钮 + idle/loading/success/error 状态机；Gemini 显示占位；缺 apiKey 显示打开设置入口；当前 model 不在列表时置顶并标注），下半段保留原 profile 切换。竞态保护通过校验 active profile 未变才更新 UI。a11y/popover cleanup 完整保留。trellis-implement + trellis-check 双代理完成，tsc + 166 单测全过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `db7edc7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
