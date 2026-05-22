@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "已沉淀关键约束：icon-only button aria-label、装饰 SVG aria-hidden、popover Esc + outside-click + cleanup（本任务的 confirmDialog 已是项目模式无需特殊处理，但视觉风格 / 类名约定要对齐）"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "代码标准；不直接踩 src/lib 禁 window.* 那条（本任务改组件），但保持整体合规"}

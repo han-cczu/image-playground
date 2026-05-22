@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "审查 aria-label / disabled 状态视觉 / hover 反馈是否与项目约束一致"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "审查代码标准合规"}
