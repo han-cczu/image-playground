@@ -637,3 +637,36 @@ FavoriteCategoryMenu 创建态追加 8 色预设色板（FAVORITE_CATEGORY_COLOR
 ### Next Steps
 
 - None - task complete
+
+
+## Session 20: README 同步：补齐近期 8 项功能 + 修错误指引
+
+**Date**: 2026-05-23
+**Task**: README 同步：补齐近期 8 项功能 + 修错误指引
+**Branch**: `main`
+
+### Summary
+
+README 落后 1-2 周累积的功能改动（约 17 个 session），含 2 处明确错误指引（右上角设置/Header 主题切换）会让新用户找不到设置入口。决策走档 A 最小侵入式追加 bullet 点，不重组结构、不加 What's New、不加截图、不加 i18n。改动仅 README.md，+10/-4。修 L36 / L91 设置入口指引到 sidebar 底部；补 8 项新功能 bullet：对话式创作 / 风格预设（9 选 1 含 8 偏写实预设）/ 一键清空 / 图库视图（跨对话聚合 + 对话标签 + 禁拖拽）/ 收藏分类色板 / 模型 pill 两段式 / 稳定性保障（ErrorBoundary + SW kill-switch + 版本化 CACHE_NAME）；拖拽排序末追加图库限定。trellis-check 20 项核验 18 ✅ 1 ⚠️ 0 ❌；⚠️ 是 L23 按时间倒序措辞（实际排序键 sortOrder ?? createdAt），普通用户读着自然故保留。范围之外发现 InputBar L1591 ButtonTooltip 文案 stale（仍说右上角设置），严格遵守 Out of Scope 未动，作为 follow-up micro task 候选。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fa6ca96` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
