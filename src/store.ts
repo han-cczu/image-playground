@@ -89,6 +89,7 @@ export function mergePersistedStoreState(
   return {
     ...currentState,
     ...persisted,
+    settings: normalizeSettings(persisted?.settings),
     favoriteCategories: shouldSeedDefaultCategory ? [createDefaultFavoriteCategory()] : normalizedCategories,
     favoriteCategoriesInitialized: true,
     filterFavoriteCategoryId: null,
