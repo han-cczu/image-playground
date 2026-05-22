@@ -19,6 +19,7 @@ import Toast from './components/Toast'
 import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
 import ErrorBoundary from './components/ErrorBoundary'
+import InsecureContextBanner from './components/InsecureContextBanner'
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
@@ -121,6 +122,7 @@ export default function App() {
 
   return (
     <>
+      <InsecureContextBanner />
       <div className="flex min-h-screen md:h-screen md:overflow-hidden">
         <ErrorBoundary region="sidebar">
           <Sidebar

@@ -6,7 +6,10 @@ import { installMobileViewportGuards } from './lib/image/viewport'
 
 installMobileViewportGuards()
 
-if ('serviceWorker' in navigator) {
+// Secure context（HTTPS / localhost）才允许注册 Service Worker。
+// HTTP + IP 部署模式下浏览器会 reject 注册 Promise；
+// 此处提前 skip，避免 console 红错，并让 InsecureContextBanner 接管用户提示。
+if ('serviceWorker' in navigator && window.isSecureContext) {
   if (import.meta.env.PROD) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch((error) => {

@@ -125,9 +125,17 @@ https://image-playground.diaohan111.workers.dev/?apiUrl={address}#apiKey={key}
 
 ## 🐳 Docker 部署
 
-项目自带多阶段 `Dockerfile`、`nginx.conf`、`docker-compose.yml`、`Caddyfile`、`cors-proxy.conf`，可一键部署到任意支持 Docker 的服务器（VPS / 自建机），与现有 `npm run deploy`（Cloudflare Workers）路径互不影响。
+项目自带多阶段 `Dockerfile`、`nginx.conf`、`docker-compose.yml`、`Caddyfile`、`Caddyfile.lan`、`cors-proxy.conf`，可一键部署到任意支持 Docker 的服务器（VPS / 自建机），与现有 `npm run deploy`（Cloudflare Workers）路径互不影响。
 
-> ⚠️ 浏览器需要 **HTTPS** 才能完整启用 Service Worker、IndexedDB Blob、剪贴板 API 等能力；建议直接用下方 docker-compose 全栈方案（自带 Caddy 自动证书）。
+### 三种部署模式速查
+
+| 模式 | 适用场景 | 启动命令 | 能力完整性 |
+|---|---|---|---|
+| **HTTPS（推荐）** | 有域名 + DNS 指向服务器 | `docker compose --profile https up -d --build` | ✅ 完整功能（PWA / 离线 / 剪贴板写入 / kill-switch） |
+| **HTTP + IP** | LAN 内网 / VPS 无域名 / 临时调试 | `docker compose --profile lan up -d --build` | ⚠️ 丢失 PWA / 离线 / kill-switch / 剪贴板写入；图像生成 + IndexedDB 历史正常 |
+| **HTTPS over IP（sslip.io）** | 没买域名又想要 HTTPS | 改 `Caddyfile` 域名为 `<服务器IP>.sslip.io`，再 `--profile https` | ✅ 完整功能（与方案一相同） |
+
+> 默认 `docker compose up -d` 不带 profile 不会启任何外层反代（`caddy` / `caddy-lan` 都被 profile 守门）；**必须**显式 `--profile https` 或 `--profile lan`。
 
 ### 方式 A：单容器（快速试跑，无 HTTPS）
 
@@ -148,15 +156,18 @@ docker run -d --name image-playground -p 8080:80 image-playground
 
 ### 方式 B：docker-compose 全栈（推荐，含 HTTPS + CORS 代理）
 
-包含三个服务：
+包含四个服务（按 profile 启停）：
 
-| 服务 | 作用 |
-|---|---|
-| `app` | nginx:alpine 托管前端静态产物 |
-| `cors-proxy` | nginx:alpine 反代到上游图像/文本 API，补 CORS 响应头 |
-| `caddy` | 对外反向代理 + 自动 Let's Encrypt HTTPS 证书 |
+| 服务 | 启用条件 | 作用 |
+|---|---|---|
+| `app` | 默认（无 profile） | nginx:alpine 托管前端静态产物 |
+| `cors-proxy` | 默认（无 profile） | nginx:alpine 反代到上游图像/文本 API，补 CORS 响应头 |
+| `caddy` | `--profile https` | 对外反向代理 + 自动 Let's Encrypt HTTPS 证书（监听 80/443）|
+| `caddy-lan` | `--profile lan` | HTTP + IP 直连模式 Caddy（仅监听 80，无 HTTPS）|
 
-**步骤**：
+> `caddy` 与 `caddy-lan` 同时绑 80 端口、互斥启动，必须二选一。
+
+**HTTPS 部署步骤**：
 
 1. 把代码 clone 到服务器，进入仓库根目录。
 2. 编辑 `Caddyfile`，把两处 `your-domain.com` / `cors.your-domain.com` 改成你自己的域名（需提前把 A/AAAA 记录指向当前服务器公网 IP）：
@@ -185,10 +196,58 @@ docker run -d --name image-playground -p 8080:80 image-playground
 4. 启动：
 
    ```bash
-   docker compose up -d --build
+   docker compose --profile https up -d --build
    ```
 
 5. 首次访问 `https://your-domain.com`，Caddy 会自动签发证书。
+
+### 方式 C：HTTP + IP 直连模式（无域名 / LAN / 临时）
+
+适合企业内网、VPS 还没绑域名、临时演示等场景。**注意**：HTTP 模式下浏览器会自动禁用 secure context 限制的能力：
+
+- ❌ Service Worker / PWA 安装 / 离线访问 / kill-switch
+- ❌ `navigator.clipboard.write` / Web Share API
+- ✅ 图像生成 / IndexedDB 历史 / 贴粘图片（onPaste 事件不受限）
+
+**步骤**：
+
+1. 把代码 clone 到服务器，进入仓库根目录。
+2. （可选）编辑 `cors-proxy.conf`，把 `$upstream` 改成你需要代理的 API（同方式 B 的第 3 步）。
+3. 启动：
+
+   ```bash
+   docker compose --profile lan up -d --build
+   ```
+
+4. 浏览器访问 `http://<服务器 IP>`（局域网内也可以 `http://<内网 IP>` / `http://localhost`）。
+5. 页面顶部会显示一行黄色 banner 提示「当前为 HTTP 模式…」，可点 × 关闭，关闭状态会保留到下次访问。
+
+> 想要 HTTPS 但又没买域名？看下一节 ↓
+
+### 方式 D：HTTPS over IP（sslip.io，零购买）
+
+[sslip.io](https://sslip.io/) 提供「IP 嵌入到域名里」的零配置 DNS 服务：访问 `1.2.3.4.sslip.io` 会自动解析到 `1.2.3.4`，且能向 Let's Encrypt 签发真实证书。
+
+**步骤**：
+
+1. 编辑 `Caddyfile`，把 `your-domain.com` 换成 `<你的服务器 IP>.sslip.io`，把 `cors.your-domain.com` 换成 `cors.<服务器 IP>.sslip.io`（**注意：IP 里的点号照常保留**）：
+
+   ```caddyfile
+   1.2.3.4.sslip.io {
+       reverse_proxy app:80
+   }
+   cors.1.2.3.4.sslip.io {
+       reverse_proxy cors-proxy:80
+   }
+   ```
+
+2. 启动：
+
+   ```bash
+   docker compose --profile https up -d --build
+   ```
+
+3. 首次访问 `https://1.2.3.4.sslip.io`，Caddy 自动签证书。**完整功能可用**，与方式 B 等价。
 
 ### 在 SettingsModal 配合 CORS 代理使用
 
@@ -206,9 +265,14 @@ docker run -d --name image-playground -p 8080:80 image-playground
 
 ### 维护与升级
 
-- 拉取新代码后 `docker compose up -d --build` 即可滚动更新；旧版本 Service Worker 通过 `__CACHE_NAME__` 注入机制自动失效。
+- 拉取新代码后用对应模式的命令滚动更新：
+  - HTTPS（含 sslip.io）：`docker compose --profile https up -d --build`
+  - HTTP + IP：`docker compose --profile lan up -d --build`
+- 旧版本 Service Worker 通过 `__CACHE_NAME__` 注入机制自动失效（仅 HTTPS 模式下生效；HTTP 模式 SW 本就未注册）。
 - 仅修改 `cors-proxy.conf` 时：`docker compose restart cors-proxy`。
-- 仅修改 `Caddyfile` 时：`docker compose restart caddy`。
+- 仅修改 `Caddyfile` 时：`docker compose --profile https restart caddy`。
+- 仅修改 `Caddyfile.lan` 时：`docker compose --profile lan restart caddy-lan`。
+- 在两种模式之间切换：先 `docker compose --profile <旧> down`，再 `docker compose --profile <新> up -d --build`（不能同时跑，两者都绑 80 端口）。
 
 ### 与 Cloudflare Workers 部署的关系
 

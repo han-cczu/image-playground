@@ -99,6 +99,7 @@ export function mergePersistedStoreState(
     activeConversationId:
       typeof persisted?.activeConversationId === 'string' ? persisted.activeConversationId : null,
     sidebarCollapsed: persisted?.sidebarCollapsed === true,
+    dismissedInsecureContextBanner: persisted?.dismissedInsecureContextBanner === true,
   }
 }
 
@@ -157,6 +158,10 @@ export interface AppState {
   sidebarCollapsed: boolean
   toggleSidebar: () => void
   setSidebarCollapsed: (v: boolean) => void
+
+  // Insecure context banner（HTTP + IP 模式提示）
+  dismissedInsecureContextBanner: boolean
+  setDismissedInsecureContextBanner: (v: boolean) => void
 
   // 搜索和筛选
   searchQuery: string
@@ -491,6 +496,11 @@ export const useStore = create<AppState>()(
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
 
+      // Insecure context banner
+      dismissedInsecureContextBanner: false,
+      setDismissedInsecureContextBanner: (dismissedInsecureContextBanner) =>
+        set({ dismissedInsecureContextBanner }),
+
       // Search & filter
       searchQuery: '',
       setSearchQuery: (q) => set({ searchQuery: q }),
@@ -562,6 +572,7 @@ export const useStore = create<AppState>()(
         dismissedCodexCliPrompts: state.dismissedCodexCliPrompts,
         activeConversationId: state.activeConversationId,
         sidebarCollapsed: state.sidebarCollapsed,
+        dismissedInsecureContextBanner: state.dismissedInsecureContextBanner,
       }),
     },
   ),

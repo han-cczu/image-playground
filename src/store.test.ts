@@ -604,3 +604,39 @@ describe('conversation store actions', () => {
     expect(merged.sidebarCollapsed).toBe(false)
   })
 })
+
+describe('insecure context banner state', () => {
+  it('mergePersistedStoreState defaults dismissedInsecureContextBanner to false for missing / false / non-boolean persisted values', () => {
+    const initial = useStore.getInitialState()
+    expect(
+      mergePersistedStoreState({}, initial).dismissedInsecureContextBanner,
+    ).toBe(false)
+    expect(
+      mergePersistedStoreState({ dismissedInsecureContextBanner: false }, initial)
+        .dismissedInsecureContextBanner,
+    ).toBe(false)
+    expect(
+      mergePersistedStoreState(
+        // 模拟旧持久化数据里没有该字段
+        { dismissedInsecureContextBanner: undefined as unknown as boolean },
+        initial,
+      ).dismissedInsecureContextBanner,
+    ).toBe(false)
+  })
+
+  it('mergePersistedStoreState preserves dismissedInsecureContextBanner === true', () => {
+    const merged = mergePersistedStoreState(
+      { dismissedInsecureContextBanner: true },
+      useStore.getInitialState(),
+    )
+    expect(merged.dismissedInsecureContextBanner).toBe(true)
+  })
+
+  it('setDismissedInsecureContextBanner flips and persists the flag through the store', () => {
+    useStore.setState({ dismissedInsecureContextBanner: false })
+    useStore.getState().setDismissedInsecureContextBanner(true)
+    expect(useStore.getState().dismissedInsecureContextBanner).toBe(true)
+    useStore.getState().setDismissedInsecureContextBanner(false)
+    expect(useStore.getState().dismissedInsecureContextBanner).toBe(false)
+  })
+})

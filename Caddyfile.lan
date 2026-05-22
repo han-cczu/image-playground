@@ -1,0 +1,22 @@
+# HTTP + IP 直连模式。监听 :80，无 HTTPS，无 ACME。
+# 用法：docker compose --profile lan up -d
+#
+# 注意：此模式下浏览器会自动禁用以下能力（secure context 限制）：
+#   - Service Worker / PWA 安装 / 离线访问 / kill-switch
+#   - navigator.clipboard.write / Web Share API
+# 项目代码会自动探测并 skip SW 注册 + 顶部显示提示 banner。
+# 不影响：图像生成、IndexedDB 历史、贴粘图片（onPaste 事件）。
+#
+# 若想在没有域名的情况下用 HTTPS，请参考 README 的「HTTPS over IP（sslip.io）」小节。
+
+:80 {
+    encode gzip
+
+    header {
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    reverse_proxy app:80
+}

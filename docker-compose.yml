@@ -1,15 +1,27 @@
 # image-playground 全栈部署。
-# 三个服务：
-#   app        - nginx:alpine 托管 vite 构建产物
-#   cors-proxy - nginx:alpine 反代到上游图像 API（OpenAI / Gemini / 自定义）
-#   caddy      - 外层反代 + 自动 HTTPS（Let's Encrypt）
+# 四个服务，按 profile 启停：
+#   app        - nginx:alpine 托管 vite 构建产物（无 profile，所有模式都启）
+#   cors-proxy - nginx:alpine 反代到上游图像 API（无 profile，所有模式都启）
+#   caddy      - 外层反代 + 自动 HTTPS（Let's Encrypt） —— 仅在 --profile https 下启
+#   caddy-lan  - HTTP + IP 直连模式的 Caddy（监听 :80，无 HTTPS） —— 仅在 --profile lan 下启
 #
-# 使用步骤：
-#   1) 把 Caddyfile 里的 your-domain.com / cors.your-domain.com 改成你的真实域名
-#   2)（可选）改 cors-proxy.conf 里的 $upstream 指向你需要代理的 API
-#   3) docker compose up -d --build
+# 两种部署模式：
+#   ▸ HTTPS（推荐，有域名）:
+#       1) 把 Caddyfile 里的 your-domain.com / cors.your-domain.com 改成你的真实域名
+#       2)（可选）改 cors-proxy.conf 里的 $upstream
+#       3) docker compose --profile https up -d --build
+#       4) 访问 https://your-domain.com
 #
-# 注意：app 与 cors-proxy 都不直接对外暴露端口，外网访问只走 caddy（80 / 443）。
+#   ▸ HTTP + IP（LAN / 临时 / 无域名）:
+#       1) docker compose --profile lan up -d --build
+#       2) 访问 http://<服务器 IP>
+#       注意：浏览器在 http+IP 下会禁用 PWA / Service Worker / 剪贴板写入等能力。
+#       项目代码会在页面顶部显示一行 banner 明确提示。
+#
+# 进阶：HTTPS over IP（sslip.io）—— 见 README「Docker 部署」节。
+#
+# 注意：app 与 cors-proxy 都不直接对外暴露端口，外网访问只走 caddy / caddy-lan。
+# 默认 docker compose up -d（不带 profile）不会启动任何 caddy，必须显式 --profile https 或 --profile lan。
 
 services:
   app:
@@ -47,6 +59,7 @@ services:
     image: caddy:2-alpine
     container_name: image-playground-caddy
     restart: unless-stopped
+    profiles: ["https"]
     ports:
       - "80:80"
       - "443:443"
@@ -60,6 +73,23 @@ services:
       - app
       - cors-proxy
 
+  caddy-lan:
+    image: caddy:2-alpine
+    container_name: image-playground-caddy-lan
+    restart: unless-stopped
+    profiles: ["lan"]
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile.lan:/etc/caddy/Caddyfile:ro
+      - caddy_lan_data:/data
+      - caddy_lan_config:/config
+    networks:
+      - internal
+    depends_on:
+      - app
+      - cors-proxy
+
 networks:
   internal:
     driver: bridge
@@ -67,3 +97,5 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
+  caddy_lan_data:
+  caddy_lan_config:

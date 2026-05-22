@@ -146,6 +146,40 @@ curl -i -H 'If-None-Match: "abc"' https://your-domain/sw.js   # 不能返回 304
 
 ---
 
+### 契约 5：`src/main.tsx` 注册 SW 之前必须先 `window.isSecureContext` 检查
+
+`navigator.serviceWorker.register(...)` 在非 secure context（HTTP + IP / 非 localhost）下会被浏览器直接 reject，
+落到 `.catch` 输出 `console.error('Service worker registration failed: ...')`。
+HTTP + IP 直连部署模式（`docker compose --profile lan up -d`）是项目支持的一等公民部署形态，
+**不能在 console 留下持续红错**，也不能假装一切正常 —— 用户需要被明确告知 PWA / 离线 / kill-switch 已被禁用。
+
+**Why**：
+
+- console 持续红错会让真实问题（API 错误、网络错误）被淹没。
+- 静默 skip 但什么 UI 都不显示，用户会以为「PWA 装不上是 bug」反复重试。
+- 注册失败的 Promise reject 路径不带任何业务价值：浏览器规则就是 secure context only，重试也不会成功。
+
+**How**：
+
+- `src/main.tsx` 的 `navigator.serviceWorker.register(...)` 调用必须包在 `if ('serviceWorker' in navigator && window.isSecureContext)` 内。
+- dev 环境的 `getRegistrations().then(unregister)` 路径同样包在该判断内：dev 通常是 localhost（secure context），不影响；万一开发者用 IP 跑 dev，也不会因为读不到 secure context 抛错。
+- 用户提示由 `src/components/InsecureContextBanner.tsx` 接管：仅在 `!window.isSecureContext && !dismissed` 时渲染顶部一行黄色 banner，关闭状态写 zustand-persist。
+- 不要试图在 main.tsx 里 `console.warn`「当前为 HTTP 模式」之类的提示 —— 提示统一走 UI banner，console 保持干净。
+
+**严格不变量**：
+
+- main.tsx 中 `navigator.serviceWorker.register` 不能裸调；外层必须有 `window.isSecureContext` 判断。
+- InsecureContextBanner **不能**被任何业务 ErrorBoundary 包裹（recovery surface 反模式，详见 `component-guidelines.md`）。
+- 注册失败的 `.catch(console.error)` 保留 —— secure context 下仍可能因部署事故 / SW 文件 404 等失败，此时红错有意义。
+
+**与 HTTP 模式部署的关系**：
+
+- HTTP + IP 部署模式（`docker compose --profile lan up -d`）走 `Caddyfile.lan`，浏览器拿到非 secure context。
+- 此模式下 SW 不注册 → 契约 1/2/3/4 全部「不适用」（没有 SW 运行）。
+- 升级到 HTTPS（域名 / sslip.io）后 SW 自动恢复，契约 1-4 重新生效。
+
+---
+
 ## Common Mistake
 
 ### Wrong vs Correct
@@ -329,6 +363,7 @@ caches.open(CACHE_NAME).then((c) => c.match('./index.html'))
 - [ ] `npm run build` 成功结束，无 `inject-sw-build-id` 抛错
 - [ ] （部署后）在浏览器实际验证 AC2 / AC3 / AC4：能否正常拿到新部署、kill-switch 是否能救回旧 SW、离线是否仍有 index.html 兜底
 - [ ] **（HTTP 层）** `curl -i <url>/sw.js` 响应头含 `Cache-Control: no-cache, no-store, must-revalidate`，**不**含 `ETag` / `Last-Modified`；带 `If-None-Match` 的条件请求不能返回 304（契约 4）
+- [ ] **（HTTP + IP 模式）** `src/main.tsx` 中 `navigator.serviceWorker.register` 调用外层有 `window.isSecureContext` 检查；HTTP 模式下 console 不出现 `Service worker registration failed`；页面顶部渲染 `InsecureContextBanner`（契约 5）
 
 ---
 
