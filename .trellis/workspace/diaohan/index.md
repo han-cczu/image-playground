@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 16
+- **Total Sessions**: 17
 - **Last Active**: 2026-05-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~540 | Active |
+| `journal-1.md` | ~573 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 17 | 2026-05-22 | 图库视图：Sidebar 顶部独立入口跨对话查看全部任务 | `6425e2c` | `main` |
 | 16 | 2026-05-22 | InputBar 模型 pill 升级为两段式 | `db7edc7` | `main` |
 | 15 | 2026-05-22 | Sidebar 折叠态修复：Logo 接管展开入口 + 复用空新对话 | `8431525` | `main` |
 | 14 | 2026-05-22 | EmptyState 香蕉 emoji 换成 OpenAI 官方 logo | `f7fbe14` | `main` |

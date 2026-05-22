@@ -538,3 +538,36 @@ Sidebar 折叠态两个 UX 痛点修复。Bug 1：折叠后 md:w-14 容器只有
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: 图库视图：Sidebar 顶部独立入口跨对话查看全部任务
+
+**Date**: 2026-05-22
+**Task**: 图库视图：Sidebar 顶部独立入口跨对话查看全部任务
+**Branch**: `main`
+
+### Summary
+
+用户反馈跨对话查找历史 task 困难。引入'图库'作为与对话平级的视图模式：Sidebar 顶部独立按钮（Logo 下、新建对话上、折叠态仅 icon），点击后主区域聚合所有 task 按 createdAt 倒序展示。技术决策：用显式 galleryView: boolean 状态而非 activeConversationId === null 隐含表达，让代码意图清晰。进入图库不清空 activeConversationId（保留对话状态便于切回），点对话项 / 新建对话 / task 卡片对话标签都会 setGalleryView(false)。task 卡片在图库视图额外渲染'对话标签'（色块 + 截断对话名 + 点击跳转）。trellis-check 抓到一个 UX 隐患：图库下拖拽 task 会跨对话改全局 sortOrder 污染对话内部顺序，主代理决策禁用拖拽（galleryView=true 时 dragDisabled=true）。pickFallbackColor + FALLBACK_COLORS 从 ConversationItem 提取到 src/lib/conversations.ts 供 TaskGrid 复用。zustand-persist 严格 === true 兜底（参考 state-management.md 已沉淀的'hydration normalize 防白屏'契约），旧用户 hydrate 后 galleryView=false 不抛错。3 个 open issue 留作 follow-up：ConversationTag 类型微重复、tasksInActiveConversation 变量名歧义、SelectionActionBar 跨对话多选已确认可用无需改。新增 4 个测试 case 覆盖 filter undefined 行为 + hydration 兼容性，170 tests 全过。10 文件 +260/-40 单 commit。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6425e2c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
