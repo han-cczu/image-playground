@@ -84,6 +84,57 @@ const toggle = (key: typeof openMenu) =>
 
 ---
 
+### Pattern: iOS-style toggle 几何对称公式
+
+**Problem**: 自写 toggle（不引入 Radix / headless-ui）时，开启态滑块位移容易写得不对称——常见是"算出滑块走到容器右边内 = 容器宽 - 滑块宽 = 36 - 16 = 20px → 写 translate-x-5（20px）"。结果开启态滑块**贴着右边缘**，关闭态又有 2px 左边距，左右气孔不一致，视觉上像松动。
+
+**Solution**: 把"左右气孔相等"作为公式，先选定单边气孔 `pad`，反推 translate：
+
+```
+轨道 (track):    h-5 w-9   →  20 × 36 px
+滑块 (thumb):    h-4 w-4   →  16 × 16 px
+
+左气孔 (off)  pad_off  = translate-x-0.5  =  2 px
+右气孔 (on)   pad_on   = w-9 − w-4 − translate_on  =  36 − 16 − x  =  20 − x
+
+要求 pad_on == pad_off == 2 px
+   →  x = 18 px
+   →  translate-x-[18px]
+```
+
+代码：
+
+```tsx
+const ON = draft.someFlag
+<button
+  role="switch"
+  aria-checked={ON}
+  aria-label="某项开关"  // ← 必带，见下方 Accessibility 段
+  onClick={() => setDraft({ ...draft, someFlag: !ON })}
+  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+    ON ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'
+  }`}
+>
+  <span
+    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-md transition-transform duration-200 ${
+      ON ? 'translate-x-[18px]' : 'translate-x-0.5'
+    }`}
+  />
+</button>
+```
+
+**Why**:
+- `h-5 w-9` (20×36px) 是 iOS HIG 与 Material 现代 switch 的事实标准尺寸，触控目标 ≥ 36px 满足 WCAG。
+- 滑块用 `h-4 w-4` (16×16px) 留出 2px 单边气孔，是当代 toggle 的常见比例（轨道:滑块 ≈ 5:4 高度）。
+- `translate-x-[18px]` 用 Tailwind 任意值语法精确控制，不能用 `translate-x-5`（20px → 贴右边）或 `translate-x-4`（16px → 右边 4px 与左边 2px 不对称）。
+- `shadow-md` + `transition-transform duration-200` 让滑动有"实体感"，区别于 2018 风的硬切换。
+
+**实证**：commit `<sw-task>` 之后的 SettingsModal 视觉刷新任务，`src/components/SettingsModal.tsx` 3 处 toggle（clearInputAfterSubmit / codexCli / apiProxy）。
+
+**未来扩展**：若同款 toggle ≥ 4 处复用，按 [code-reuse-thinking-guide](../guides/code-reuse-thinking-guide.md) 抽 `<SettingSwitch checked label onChange />` 组件，把上述公式封进去，调用方只关心 `checked` / `label`。抽组件时**不要重推数学**，直接复用本 Pattern 的常量。
+
+---
+
 ## Accessibility
 
 ### Required: icon-only `<button>` must have `aria-label`
@@ -147,6 +198,33 @@ useEffect(() => {
 ---
 
 ## Common Mistakes
+
+### Common Mistake: 自写 toggle 开启态滑块位移不对称
+
+**Symptom**: 写完 iOS-style switch，滑块开启态"贴着右边缘"或"关闭态左 2px / 开启态右 4px"，视觉上像没对齐。
+
+**Cause**: 凭直觉用 `translate-x-4`(16px) 或 `translate-x-5`(20px)，没按"左右气孔相等"反推。
+- `translate-x-5` (20px) → 滑块紧贴右边，左 2px / 右 0px
+- `translate-x-4` (16px) → 左 2px / 右 4px，不对称
+- 正确：`translate-x-[18px]` → 左 2px / 右 2px
+
+**Fix**: 按 [iOS-style toggle 几何对称公式](#pattern-ios-style-toggle-几何对称公式) 的 Pattern 反推 translate 值。`h-5 w-9 + h-4 w-4` 必配 `translate-x-[18px] / translate-x-0.5`。
+
+**Prevention**: 写 toggle 时第一步不是写代码，是先列出"轨道 W − 滑块 W − 期望右气孔 = translate"，把数学算对再下手。任何"看着差不多就行"的眼睛估算都会翻车——CSS 像素差 2px 在 retina 屏特别明显。
+
+❌ Bad:
+```tsx
+className={ON ? 'translate-x-5' : 'translate-x-[2px]'}  // 右气孔 0px ≠ 左气孔 2px
+```
+
+✅ Good:
+```tsx
+className={ON ? 'translate-x-[18px]' : 'translate-x-0.5'}  // 左右各 2px
+```
+
+**实证**：SettingsModal 视觉刷新任务，trellis-check 子代理抓到本 bug 并自修 3 处（`SettingsModal.tsx:443 / 576 / 626`）。
+
+---
 
 ### Common Mistake: 用 `title[0]` 取折叠态首字符导致 emoji 半字符
 
