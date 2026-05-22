@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 12
+- **Total Sessions**: 13
 - **Last Active**: 2026-05-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~408 | Active |
+| `journal-1.md` | ~441 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 13 | 2026-05-22 | Header 顶栏精简：移除历史/删除/设置三按钮 | `38459ac` | `main` |
 | 12 | 2026-05-22 | 底栏一键清空：X 按钮 + 重置全部 pill | `0e354fd` | `main` |
 | 11 | 2026-05-22 | support-http-ip-deploy: 正式支持 IP+HTTP 直连部署模式 + 沉淀 SW 契约 5 | `496a79f` | `main` |
 | 10 | 2026-05-22 | 风格预设功能：底栏 pill 接入实际选择 + 原型链键防护 | `94c3659` | `main` |

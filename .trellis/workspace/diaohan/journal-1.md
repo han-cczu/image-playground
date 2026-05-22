@@ -406,3 +406,36 @@ Hardened local data export/import, URL bootstrap secrets, concurrent generation 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: Header 顶栏精简：移除历史/删除/设置三按钮
+
+**Date**: 2026-05-22
+**Task**: Header 顶栏精简：移除历史/删除/设置三按钮
+**Branch**: `main`
+
+### Summary
+
+用户指出 Header 右上历史(占位)、删除当前对话(Sidebar 已有)、设置(Sidebar 底部已有)三按钮冗余/无功能，统一移除。Header 仅保留主题切换，并清理掉对应 store selector 与 ARCHIVE_CONVERSATION_ID import。tsc -b + 155 单测全过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `38459ac` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
