@@ -373,3 +373,36 @@ Hardened local data export/import, URL bootstrap secrets, concurrent generation 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: 底栏一键清空：X 按钮 + 重置全部 pill
+
+**Date**: 2026-05-22
+**Task**: 底栏一键清空：X 按钮 + 重置全部 pill
+**Branch**: `main`
+
+### Summary
+
+底栏新增 2 个清空入口：textarea 右上角 absolute X 按钮（仅 prompt 非空时显示、点击立即清文字+归 1 行+重聚焦、无确认弹窗），以及 pill 行最右的重置 pill（disabled 走 PILL_DISABLED 灰色避免误点 hover 亮色、可点时点击弹 ConfirmDialog 二次确认、确认后清 prompt+参考图+mask draft）。单文件 +78/-10 改动，复用 setPrompt / clearInputImages / clearMaskDraft 已有 store action，零 schema 改动。trellis-check 抓到对话框 message 文案精准性问题（原会列空类目如 0 张参考图）已自修，改为动态拼装 parts 数组。3 个非阻塞 open issue（X 覆盖长 prompt 末字符 / 移动端 textarea 选词 toolbar 冲突 / rAF 冗余）记入 PRD 已接受 trade-off。155 tests 全过，单文件单 commit。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0e354fd` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
