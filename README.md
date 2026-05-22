@@ -4,6 +4,8 @@
 
 在线访问：[https://image-playground.diaohan111.workers.dev/](https://image-playground.diaohan111.workers.dev/)
 
+也可以用 [Docker 一键自部署](#-docker-部署) 到自己的服务器（含 CORS 代理 + 自动 HTTPS）。
+
 ---
 
 ## ✨ 核心特性
@@ -118,3 +120,96 @@ https://image-playground.diaohan111.workers.dev/?apiUrl={address}#apiKey={key}
 - **状态管理**：[Zustand](https://zustand.docs.pmnd.rs/)
 - **拖拽交互**：[dnd-kit](https://dndkit.com/)
 - **本地数据**：IndexedDB Blob 存储 + localStorage
+
+---
+
+## 🐳 Docker 部署
+
+项目自带多阶段 `Dockerfile`、`nginx.conf`、`docker-compose.yml`、`Caddyfile`、`cors-proxy.conf`，可一键部署到任意支持 Docker 的服务器（VPS / 自建机），与现有 `npm run deploy`（Cloudflare Workers）路径互不影响。
+
+> ⚠️ 浏览器需要 **HTTPS** 才能完整启用 Service Worker、IndexedDB Blob、剪贴板 API 等能力；建议直接用下方 docker-compose 全栈方案（自带 Caddy 自动证书）。
+
+### 方式 A：单容器（快速试跑，无 HTTPS）
+
+```bash
+# 在仓库根目录
+docker build -t image-playground .
+docker run -d --name image-playground -p 8080:80 image-playground
+# 访问 http://localhost:8080
+```
+
+镜像基于 `nginx:alpine`，体积约 30 MB 左右，已内置：
+
+- SPA fallback（`try_files ... /index.html`）
+- `/sw.js` 强制 `Cache-Control: no-cache, no-store, must-revalidate`（保留 kill-switch 逃生通道）
+- `/assets/*` 长缓存 + `immutable`
+- gzip 启用
+- `/healthz` 健康检查
+
+### 方式 B：docker-compose 全栈（推荐，含 HTTPS + CORS 代理）
+
+包含三个服务：
+
+| 服务 | 作用 |
+|---|---|
+| `app` | nginx:alpine 托管前端静态产物 |
+| `cors-proxy` | nginx:alpine 反代到上游图像/文本 API，补 CORS 响应头 |
+| `caddy` | 对外反向代理 + 自动 Let's Encrypt HTTPS 证书 |
+
+**步骤**：
+
+1. 把代码 clone 到服务器，进入仓库根目录。
+2. 编辑 `Caddyfile`，把两处 `your-domain.com` / `cors.your-domain.com` 改成你自己的域名（需提前把 A/AAAA 记录指向当前服务器公网 IP）：
+
+   ```caddyfile
+   your-domain.com {
+       reverse_proxy app:80
+   }
+   cors.your-domain.com {
+       reverse_proxy cors-proxy:80
+   }
+   ```
+
+3. （可选）编辑 `cors-proxy.conf`，把 `$upstream` 改成你需要代理的 API：
+
+   ```nginx
+   # 默认：OpenAI
+   set $upstream      "https://api.openai.com";
+   set $upstream_host "api.openai.com";
+
+   # 切换 Gemini：
+   # set $upstream      "https://generativelanguage.googleapis.com";
+   # set $upstream_host "generativelanguage.googleapis.com";
+   ```
+
+4. 启动：
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+5. 首次访问 `https://your-domain.com`，Caddy 会自动签发证书。
+
+### 在 SettingsModal 配合 CORS 代理使用
+
+打开 ⚙️ 设置，把当前 profile 的 **API 地址** 改成你刚才部署的 CORS 代理子域名：
+
+| 上游 | 填入的 API 地址 |
+|---|---|
+| OpenAI / OpenAI 兼容 | `https://cors.your-domain.com/v1` |
+| Google Gemini | `https://cors.your-domain.com/v1beta` |
+| 自定义网关 | `https://cors.your-domain.com/<你的 path 前缀>` |
+
+之后浏览器所有图像 API 请求都会走该子域名转发，绕开上游 CORS 限制。
+
+> 同一个 CORS 代理容器一次只能对应一个上游 origin。如果你想同时代理多家，可在 `docker-compose.yml` 里复制一份 `cors-proxy` 服务并指向不同的 `*.conf`，再在 `Caddyfile` 里加一个新 vhost（如 `cors-gemini.your-domain.com`）。
+
+### 维护与升级
+
+- 拉取新代码后 `docker compose up -d --build` 即可滚动更新；旧版本 Service Worker 通过 `__CACHE_NAME__` 注入机制自动失效。
+- 仅修改 `cors-proxy.conf` 时：`docker compose restart cors-proxy`。
+- 仅修改 `Caddyfile` 时：`docker compose restart caddy`。
+
+### 与 Cloudflare Workers 部署的关系
+
+Docker 部署是**完全独立**的路径，不会影响 `wrangler.jsonc` / `npm run deploy`。两套部署可以并存。

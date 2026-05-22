@@ -100,6 +100,52 @@ HTML 引用的资源文件名（如 `index-abc123.js`）就已经被新部署删
 
 ---
 
+### 契约 4：`/sw.js` 在 HTTP 层必须完全跳过条件请求 / 304 短路
+
+`/sw.js` 的客户端逻辑（契约 1-3）只解决「浏览器一旦拿到新 sw.js 就能 install/activate 新版本」的问题。但浏览器**能否拿到新 sw.js** 取决于上一跳的 HTTP 缓存行为。**任何 HTTP 层的 304 / etag / If-Modified-Since 短路都会让 kill-switch 失效**——即使原始服务器已经更新，CDN/反代/浏览器条件请求看到 `ETag` 匹配就返回 304，浏览器拿到的还是旧 sw.js。
+
+**核心规则**：
+1. `Cache-Control: no-cache, no-store, must-revalidate`（强制每次走原始服务器）
+2. **额外**：禁 ETag 与 Last-Modified 响应头（防止 304 条件请求）
+3. **额外**：禁 `If-Modified-Since` 请求转发到上游
+4. 任何反代层（CDN / Caddy / nginx / Cloudflare）不能在 `/sw.js` 之上加任何 cache layer
+
+只做规则 1 是**不够的**：no-cache 告诉客户端"必须走原始服务器验证"，但客户端依然会带 `If-None-Match` / `If-Modified-Since` 头，服务器看到匹配仍可能返回 304，客户端就用本地副本——本地副本就是旧 sw.js。
+
+**部署模板**（nginx 示例）：
+
+```nginx
+location = /sw.js {
+  add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+  add_header Pragma "no-cache" always;
+  expires 0;
+  etag off;                  # 禁响应 ETag
+  if_modified_since off;     # 忽略请求 If-Modified-Since
+  try_files $uri =404;
+}
+```
+
+Caddy 示例：
+
+```
+@sw path /sw.js
+header @sw Cache-Control "no-cache, no-store, must-revalidate"
+header @sw -ETag
+header @sw -Last-Modified
+```
+
+**Prevention**：任何静态部署平台（Cloudflare Workers Assets / Vercel / Netlify / 自建 nginx/caddy）接入时，**先验证** `/sw.js` 响应头不含 `ETag` / `Last-Modified`，且条件请求始终返回 200 + 新内容。可用：
+
+```bash
+# 期望：每次都 200，response body 不同（BUILD_ID 不同）
+curl -i https://your-domain/sw.js
+curl -i -H 'If-None-Match: "abc"' https://your-domain/sw.js   # 不能返回 304
+```
+
+**实证**：commit Docker 部署任务的 `nginx.conf` `location = /sw.js`。
+
+---
+
 ## Common Mistake
 
 ### Wrong vs Correct
@@ -282,6 +328,7 @@ caches.open(CACHE_NAME).then((c) => c.match('./index.html'))
 - [ ] `scripts/inject-sw-build-id.mjs` 单测全过（`npm test`）
 - [ ] `npm run build` 成功结束，无 `inject-sw-build-id` 抛错
 - [ ] （部署后）在浏览器实际验证 AC2 / AC3 / AC4：能否正常拿到新部署、kill-switch 是否能救回旧 SW、离线是否仍有 index.html 兜底
+- [ ] **（HTTP 层）** `curl -i <url>/sw.js` 响应头含 `Cache-Control: no-cache, no-store, must-revalidate`，**不**含 `ETag` / `Last-Modified`；带 `If-None-Match` 的条件请求不能返回 304（契约 4）
 
 ---
 

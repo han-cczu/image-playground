@@ -1,0 +1,48 @@
+# image-playground 反向代理 + 自动 HTTPS。
+# Caddy 会基于下方 vhost 的域名自动向 Let's Encrypt 申请并续期证书。
+#
+# 修改步骤：
+#   1) 把 your-domain.com 改成你真实部署的主域名
+#   2) 把 cors.your-domain.com 改成你的 CORS 子域名（与主站同根域，证书会一起签发）
+#   3) 确保你已经把上述两个域名的 A / AAAA 记录指向当前服务器公网 IP
+#   4) docker compose up -d
+#
+# 本地调试：可以把下面两段都注释掉，启用文件末尾的 ":80 { reverse_proxy app:80 }" 段
+# 即可用 http://localhost 访问，但 PWA / Service Worker / IndexedDB 等特性需要 HTTPS 才能完整工作。
+
+# ---- 主站 ----
+your-domain.com {
+    encode gzip zstd
+
+    # 强制 HTTPS 安全响应头（Caddy 已默认开启 HSTS，不再重复添加）
+    header {
+        # 防止被 iframe 嵌入（按需放开）
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # 移除 server 头泄露
+        -Server
+    }
+
+    reverse_proxy app:80
+}
+
+# ---- CORS 代理（可选）----
+# 配合 cors-proxy.conf 的 $upstream 使用。
+# 在 SettingsModal 的「API 地址」里直接填 https://cors.your-domain.com/v1
+# 即可让浏览器走该子域名转发请求到上游图像 API。
+cors.your-domain.com {
+    encode gzip
+
+    header {
+        -Server
+    }
+
+    reverse_proxy cors-proxy:80
+}
+
+# ---- 本地无域名调试（可选，默认注释）----
+# 取消下面一段注释、并把上面两段注释掉，即可用 http://<服务器IP> 访问 app（无 HTTPS）。
+# :80 {
+#     reverse_proxy app:80
+# }

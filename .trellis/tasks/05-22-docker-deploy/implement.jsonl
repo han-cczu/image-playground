@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/frontend/service-worker.md", "reason": "Service Worker kill-switch 契约：sw.js 必须 no-cache，否则旧版本锁死浏览器。Dockerfile + nginx.conf 的缓存头必须严格遵守这条契约，否则 prod Docker 部署会重新引入 kill-switch 失效问题"}
