@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
+- **Total Sessions**: 9
 - **Last Active**: 2026-05-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~276 | Active |
+| `journal-1.md` | ~309 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-05-22 | docker-deploy: 加 Docker 部署栈 + 沉淀 sw.js HTTP 层契约 4 | `625653f` | `main` |
 | 8 | 2026-05-22 | react-error-boundary: 区域级 ErrorBoundary + hydration normalize hotfix + spec 沉淀 | `15597dc`, `9361f0d` | `main` |
 | 7 | 2026-05-22 | SettingsModal 视觉美化：对齐主页 ikun 风格 | `74248ea`, `1541561` | `main` |
 | 6 | 2026-05-22 | ui-ikun-style-refresh: 引入 Conversation + sidebar/EmptyState/底栏改造 + spec 沉淀 | `eea442a`, `e6a2584`, `b236e09`, `08f3b52` | `main` |

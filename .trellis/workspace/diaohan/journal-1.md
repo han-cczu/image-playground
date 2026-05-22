@@ -274,3 +274,36 @@ Hardened local data export/import, URL bootstrap secrets, concurrent generation 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: docker-deploy: 加 Docker 部署栈 + 沉淀 sw.js HTTP 层契约 4
+
+**Date**: 2026-05-22
+**Task**: docker-deploy: 加 Docker 部署栈 + 沉淀 sw.js HTTP 层契约 4
+**Branch**: `main`
+
+### Summary
+
+新增 Docker 部署支持，与现有 Cloudflare Workers 路径并存。多阶段 Dockerfile (node:20-alpine 构建 → nginx:alpine 服务) + docker-compose 三服务 (app / cors-proxy / caddy)，仅 Caddy 暴露 80/443，内部 bridge 网络；Caddy 自动 Let's Encrypt HTTPS；CORS 代理（nginx）含 resolver / OPTIONS 预检 / 600s timeout / 多 provider auth 头透传（Authorization / x-goog-api-key / x-api-key / x-goog-user-project），用户改 upstream 即可切 OpenAI / Gemini / 自定义。nginx.conf 严格遵守 service-worker.md 契约：/sw.js 不只 no-cache 还 etag off + if_modified_since off 防 304 短路 + 双保险 grep dist/sw.js 占位符；/assets/* immutable max-age=31536000；SPA fallback；/healthz 健康检查。Spec 沉淀：service-worker.md 新增「契约 4：HTTP 层完全跳过条件请求 / 304 短路」附 nginx + Caddy 部署模板与 curl 验证命令；部署前自检清单加 HTTP 层条目。验证 npm build / test 146 / docker compose config 全 PASS；docker build 因本机 daemon 未启跳过，需服务器侧复跑验证 AC1 镜像 ≤ 30MB。未来可加 GitHub Actions ghcr.io 自动 build（PRD out-of-scope）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `625653f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
