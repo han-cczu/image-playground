@@ -14,6 +14,7 @@ import {
   persistConversationMigration,
 } from './db'
 import { callImageApi } from './api'
+import { buildFinalPrompt } from './stylePresets'
 import { validateMaskMatchesImage } from './image/canvasImage'
 import { orderInputImagesForMask } from './image/mask'
 import { getChangedParams, normalizeParamsForSettings } from './api/paramCompatibility'
@@ -438,9 +439,12 @@ async function executeTask(taskId: string) {
       if (!maskDataUrl) throw new Error('遮罩图片已不存在')
     }
 
+    // 风格预设：把英文修饰词作为前缀拼到 prompt，task.prompt 本身保持用户原始输入不变
+    const finalPrompt = buildFinalPrompt(task.prompt, task.params.stylePreset)
+
     const result = await callImageApi({
       settings,
-      prompt: task.prompt,
+      prompt: finalPrompt,
       params: task.params,
       inputImageDataUrls: inputDataUrls,
       maskDataUrl,
@@ -468,7 +472,7 @@ async function executeTask(taskId: string) {
       return acc
     }, {})
     const promptWasRevised = result.revisedPrompts?.some(
-      (revisedPrompt) => revisedPrompt?.trim() && revisedPrompt.trim() !== task.prompt.trim(),
+      (revisedPrompt) => revisedPrompt?.trim() && revisedPrompt.trim() !== finalPrompt.trim(),
     )
     const hasRevisedPromptValue = result.revisedPrompts?.some((revisedPrompt) => revisedPrompt?.trim())
     if (taskProvider === 'openai' && activeProfile.provider === 'openai' && !activeProfile.codexCli) {

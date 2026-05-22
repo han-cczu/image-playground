@@ -9,6 +9,8 @@ import { calculateImageSize, normalizeImageSize, type SizeTier } from '../../lib
 import { DEFAULT_PARAMS } from '../../types'
 import SelectionActionBar from './SelectionActionBar'
 import AdvancedParamsPopover from './AdvancedParamsPopover'
+import StylePickerPopover from './StylePickerPopover'
+import { STYLE_PRESETS, isStylePresetKey } from '../../lib/stylePresets'
 import SizePickerModal from '../SizePickerModal'
 import ViewportTooltip from '../ViewportTooltip'
 
@@ -349,6 +351,7 @@ export default function InputBar() {
 
   // pill / popover 锚点
   const modelPillRef = useRef<HTMLButtonElement>(null)
+  const stylePillRef = useRef<HTMLButtonElement>(null)
   const resolutionPillRef = useRef<HTMLButtonElement>(null)
   const advancedButtonRef = useRef<HTMLButtonElement>(null)
 
@@ -365,7 +368,7 @@ export default function InputBar() {
   const [touchDragPreview, setTouchDragPreview] = useState<{ src: string; x: number; y: number } | null>(null)
 
   /** 顶部 pill 弹出层互斥 */
-  type OpenMenu = 'model' | 'resolution' | 'advanced' | null
+  type OpenMenu = 'model' | 'style' | 'resolution' | 'advanced' | null
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
 
   const handleRef = useRef<HTMLDivElement>(null)
@@ -976,20 +979,36 @@ export default function InputBar() {
           )}
         </div>
 
-        {/* 风格 pill（占位，无业务） */}
-        <button
-          type="button"
-          disabled
-          aria-disabled="true"
-          title="风格预设功能尚未上线"
-          className={PILL_DISABLED}
-        >
-          <svg className="h-3.5 w-3.5 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M12 19l9-7-9-7-9 7 9 7z" />
-            <path d="M12 12v7" />
-          </svg>
-          <span>无风格</span>
-        </button>
+        {/* 风格 pill */}
+        <div className="relative">
+          <button
+            ref={stylePillRef}
+            type="button"
+            onClick={() => setOpenMenu((v) => (v === 'style' ? null : 'style'))}
+            className={PILL_BASE}
+            aria-haspopup="dialog"
+            aria-expanded={openMenu === 'style'}
+            title={`风格预设：${
+              params.stylePreset && isStylePresetKey(params.stylePreset)
+                ? STYLE_PRESETS[params.stylePreset].label
+                : '无风格'
+            }`}
+          >
+            <svg className="h-3.5 w-3.5 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 19l9-7-9-7-9 7 9 7z" />
+              <path d="M12 12v7" />
+            </svg>
+            <span>
+              {params.stylePreset && isStylePresetKey(params.stylePreset)
+                ? STYLE_PRESETS[params.stylePreset].label
+                : '无风格'}
+            </span>
+            <Chevron />
+          </button>
+          {openMenu === 'style' && (
+            <StylePickerPopover anchorRef={stylePillRef} onClose={() => setOpenMenu(null)} />
+          )}
+        </div>
 
         {/* 比例 pill */}
         <button

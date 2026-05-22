@@ -65,6 +65,8 @@ export interface TaskParams {
   output_compression: number | null
   moderation: 'auto' | 'low'
   n: number
+  /** 风格预设 key（命中 STYLE_PRESETS 时在请求前作为英文前缀拼到 prompt）；undefined = 无风格 */
+  stylePreset?: string
 }
 
 export const DEFAULT_PARAMS: TaskParams = {

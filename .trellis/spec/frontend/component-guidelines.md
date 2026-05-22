@@ -385,3 +385,18 @@ return (
 ```
 
 **实证**：ErrorBoundary 实现任务 `src/App.tsx`。trellis-check 复核明确确认这一决策正确。详见同文件 [Pattern: Region-scoped React Error Boundary with `display: contents` wrapper](#pattern-region-scoped-react-error-boundary-with-display-contents-wrapper)。
+
+---
+
+## Backlog
+
+### TODO（未来 a11y 任务）：4 个 InputBar popover 统一缺关闭后焦点返回 anchor 按钮的能力
+
+`src/components/InputBar/` 下的 4 个 popover —— `ModelMenu` / `ResolutionMenu` / `AdvancedParamsPopover` / `StylePickerPopover` —— 在 Esc / outside-click / 完成选择后只调用 `onClose()` 关闭 popover，**未将焦点显式返回触发它的 pill 按钮**。键盘用户用 Tab 打开 popover、Esc 关闭后，焦点会丢失（落到 body 或不可预期的位置），需要重新 Tab 一圈才能继续。
+
+未来 a11y 任务统一升级方案：
+1. 每个 popover 在 `onClose` 流程中调用 `anchorRef.current?.focus()` 把焦点交还 pill。
+2. 顺手补 popover 内部键盘导航（↑↓ 切换选项、Enter 选中、Home/End 跳首尾），与 WAI-ARIA Authoring Practices 的 menu / listbox 模式对齐。
+3. 4 个 popover 一次性升级，避免局部体验割裂。
+
+本任务（05-22-pill）只对齐 4 个 popover 的 ARIA 语义（统一用 `aria-haspopup="dialog"` + `<button>` 原生语义），**不做**焦点返回与键盘导航，属于历史债务，单独 a11y 任务再统一处理。
