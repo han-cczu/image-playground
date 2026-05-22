@@ -604,3 +604,36 @@ FavoriteCategoryMenu 创建态追加 8 色预设色板（FAVORITE_CATEGORY_COLOR
 ### Next Steps
 
 - None - task complete
+
+
+## Session 19: Sidebar 折叠态 Logo hover 显示 chevron 展开角标
+
+**Date**: 2026-05-22
+**Task**: Sidebar 折叠态 Logo hover 显示 chevron 展开角标
+**Branch**: `main`
+
+### Summary
+
+折叠态 Sidebar 缺显式展开提示，给紫色 Logo 方块右下角加 hover-only chevron 角标：absolute -bottom-1 -right-1，h-4 w-4 圆形 white/dark:gray-800 底 + 1px ring + shadow，opacity-0→100 transition 150ms。button 加 group 类启用 group-hover，保留原蓝色 ring。装饰 SVG aria-hidden + focusable=false；button aria-label='展开 sidebar' 不动。注意：因并行窗口先 commit，本任务代码改动被并入 commit 6425e2c (gallery feature)，未单独 feat commit；trellis-implement + trellis-check 双代理完成，tsc + 170 单测全过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6425e2c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

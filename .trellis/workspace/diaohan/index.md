@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 18
+- **Total Sessions**: 19
 - **Last Active**: 2026-05-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~606 | Active |
+| `journal-1.md` | ~639 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 19 | 2026-05-22 | Sidebar 折叠态 Logo hover 显示 chevron 展开角标 | `6425e2c` | `main` |
 | 18 | 2026-05-22 | 新建分类支持选颜色 —— 8 色预设色板 + 按现有分类数轮转默认色 | `8631b9a` | `main` |
 | 17 | 2026-05-22 | 图库视图：Sidebar 顶部独立入口跨对话查看全部任务 | `6425e2c` | `main` |
 | 16 | 2026-05-22 | InputBar 模型 pill 升级为两段式 | `db7edc7` | `main` |
