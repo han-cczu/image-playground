@@ -1,1 +1,3 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "审查 Logo 变 button 后 aria-label / hover 视觉 / 键盘可达性是否完整"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "审查代码标准合规与 findReusableEmptyConversation 纯函数测试覆盖"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "审查 conversations 派生逻辑模式一致性（sortedConversations / taskCountByConversation 用法）"}
