@@ -571,3 +571,36 @@ Sidebar 折叠态两个 UX 痛点修复。Bug 1：折叠后 md:w-14 容器只有
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: 新建分类支持选颜色 —— 8 色预设色板 + 按现有分类数轮转默认色
+
+**Date**: 2026-05-22
+**Task**: 新建分类支持选颜色 —— 8 色预设色板 + 按现有分类数轮转默认色
+**Branch**: `main`
+
+### Summary
+
+FavoriteCategoryMenu 创建态追加 8 色预设色板（FAVORITE_CATEGORY_COLORS）；默认选中色按 favoriteCategories.length % 8 轮转减少撞色；ring-2 选中态 + role=radiogroup/radio a11y；关闭菜单 / Esc / 进入创建态时重置 draftColor。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8631b9a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
