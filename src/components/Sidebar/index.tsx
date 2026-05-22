@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useStore } from '../../store'
-import { normalizeConversations } from '../../lib/conversations'
+import { findReusableEmptyConversation, normalizeConversations } from '../../lib/conversations'
 import ConversationItem from './ConversationItem'
 
 interface SidebarProps {
@@ -10,10 +10,10 @@ interface SidebarProps {
   onMobileClose: () => void
 }
 
-/** 简易 Logo（图标 + 文字），与品牌色一致。 */
-function Logo({ collapsed }: { collapsed: boolean }) {
-  return (
-    <div className="flex items-center gap-2">
+/** 简易 Logo（图标 + 文字），与品牌色一致。折叠态变为可点击的展开入口。 */
+function Logo({ collapsed, onToggle }: { collapsed: boolean; onToggle?: () => void }) {
+  const inner = (
+    <>
       <span
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-purple-500 text-white"
         aria-hidden="true"
@@ -34,8 +34,25 @@ function Logo({ collapsed }: { collapsed: boolean }) {
           </span>
         </div>
       )}
-    </div>
+    </>
   )
+
+  // 折叠态：Logo 变 button，点击展开（弥补原 toggle button 被布局挤掉的问题）
+  if (collapsed && onToggle) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex items-center gap-2 rounded-lg p-0.5 transition hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-500/50"
+        title="展开 sidebar"
+        aria-label="展开 sidebar"
+      >
+        {inner}
+      </button>
+    )
+  }
+  // 展开态：保持原 div 语义
+  return <div className="flex items-center gap-2">{inner}</div>
 }
 
 export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
@@ -108,6 +125,13 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
   }
 
   const handleCreate = () => {
+    // 避免连按 + 堆积同名空"新对话"：若已存在可复用的空对话，直接切过去
+    const reusable = findReusableEmptyConversation(sortedConversations, taskCountByConversation)
+    if (reusable) {
+      setActiveConversation(reusable.id)
+      onMobileClose()
+      return
+    }
     createConversation()
     onMobileClose()
   }
@@ -137,24 +161,22 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
         aria-label="对话列表"
         className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-gray-200 bg-white outline-none transition-[transform,width] duration-200 dark:border-white/[0.08] dark:bg-gray-950 md:static md:z-0 md:h-screen ${widthClass} ${mobileTransform}`}
       >
-        {/* 顶部：Logo + 折叠按钮 */}
+        {/* 顶部：Logo + 折叠按钮。折叠态时 Logo 自身承担"展开"入口，toggle button 不再渲染，避免双入口冲突。 */}
         <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-3 py-3 dark:border-white/[0.06]">
-          <Logo collapsed={sidebarCollapsed} />
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            className="hidden h-8 w-8 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200 md:flex"
-            title={sidebarCollapsed ? '展开 sidebar' : '折叠 sidebar'}
-            aria-label={sidebarCollapsed ? '展开 sidebar' : '折叠 sidebar'}
-          >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              {sidebarCollapsed ? (
-                <path d="M9 18l6-6-6-6" />
-              ) : (
+          <Logo collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
+          {!sidebarCollapsed && (
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              className="hidden h-8 w-8 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200 md:flex"
+              title="折叠 sidebar"
+              aria-label="折叠 sidebar"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M15 18l-6-6 6-6" />
-              )}
-            </svg>
-          </button>
+              </svg>
+            </button>
+          )}
         </div>
 
         {/* 新建对话 */}

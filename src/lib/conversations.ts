@@ -69,6 +69,34 @@ export function normalizeConversations(
   })
 }
 
+/**
+ * 找到「可复用的空新对话」——避免连按 + 堆积同名空对话。
+ *
+ * 判定标准：
+ *  1. 标题等于 defaultTitle（默认 '新对话'），即用户未重命名
+ *  2. 该对话下任务数为 0（taskCountByConversation 不含该 id 或值为 0）
+ *  3. 不是 archive 对话（"历史记录"）
+ *
+ * 多个候选时取 createdAt 最大的（最近创建的）。
+ */
+export function findReusableEmptyConversation(
+  conversations: Conversation[],
+  taskCountByConversation: Map<string, number>,
+  defaultTitle = '新对话',
+): Conversation | null {
+  const candidates = conversations.filter(
+    (c) =>
+      c.title === defaultTitle &&
+      !isArchiveConversation(c.id) &&
+      (taskCountByConversation.get(c.id) ?? 0) === 0,
+  )
+  if (candidates.length === 0) return null
+  // createdAt 降序，取最新
+  return candidates.reduce((latest, curr) =>
+    curr.createdAt > latest.createdAt ? curr : latest,
+  )
+}
+
 /** 取 prompt 前 N 字符作为对话标题（去掉换行、压缩空白）。 */
 export function deriveConversationTitleFromPrompt(prompt: string, maxLen = 24): string {
   const compact = prompt.replace(/\s+/g, ' ').trim()
