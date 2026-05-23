@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
+- **Total Sessions**: 23
 - **Last Active**: 2026-05-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~739 | Active |
+| `journal-1.md` | ~772 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-05-23 | README 完全重写 —— Why & Quickstart 前置 + 特性 / Docker 用 details 折叠 | `aeb331f` | `main` |
 | 22 | 2026-05-23 | 高级参数图标换成 sliders 横向滑杆 —— 避免与侧边栏设置齿轮撞图 | `6381d10` | `main` |
 | 21 | 2026-05-23 | 补完生成卡片脉冲边框动画 + tooltip 文案修正 | `5acbff4`, `f85310e` | `main` |
 | 20 | 2026-05-23 | README 同步：补齐近期 8 项功能 + 修错误指引 | `fa6ca96` | `main` |

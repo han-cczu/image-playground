@@ -737,3 +737,36 @@ InputBar 高级参数按钮原本和 Sidebar 底部设置按钮共用 lucide-cog
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: README 完全重写 —— Why & Quickstart 前置 + 特性 / Docker 用 details 折叠
+
+**Date**: 2026-05-23
+**Task**: README 完全重写 —— Why & Quickstart 前置 + 特性 / Docker 用 details 折叠
+**Branch**: `main`
+
+### Summary
+
+把 285 行扁平 README 重写为 338 行分层结构：新增 Why Image Playground 段落（5 bullet 差异化定位）；新增 Quickstart 三路径（在线 / npm dev / Docker 一行）前置到 Features 前；5 大核心特性 + Docker 4 种部署 + 维护章节共 10 个 details 折叠块降低首屏视觉负担；Hero 下加 screenshot 占位注释。事实点全保留（demo URL / Docker 4 模式 / Provider 表 / URL 参数 / kill-switch 等）。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `aeb331f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
