@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "校验 aria-label / title / dark mode / strokeWidth 视觉一致性"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "通用代码质量校验"}

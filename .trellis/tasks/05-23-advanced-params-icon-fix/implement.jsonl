@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "icon-only button 必须有 aria-label / title 等组件规范，确认替换 path 后这些属性都保留"}
