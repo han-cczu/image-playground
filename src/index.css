@@ -85,6 +85,9 @@ input[type="number"] {
   0%, 100% { border-color: #3b82f6; }
   50% { border-color: #93c5fd; }
 }
+.generating {
+  animation: pulse-border 1.5s ease-in-out infinite;
+}
 .hide-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
