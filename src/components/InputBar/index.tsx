@@ -1,5 +1,4 @@
 import { useRef, useEffect, useState, useMemo, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import { useStore, submitTask, addImageFromFile } from '../../store'
 import { getChangedParams, normalizeParamsForSettings } from '../../lib/api/paramCompatibility'
 import { getActiveApiProfile } from '../../lib/api/apiProfiles'
@@ -14,12 +13,12 @@ import { STYLE_PRESETS, isStylePresetKey } from '../../lib/stylePresets'
 import SizePickerModal from '../SizePickerModal'
 import ViewportTooltip from '../ViewportTooltip'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { useImageHintTimer } from './hooks/useImageHintTimer'
 import { useAutoResizeTextarea } from './hooks/useAutoResizeTextarea'
 import { useDragDropFiles } from './hooks/useDragDropFiles'
 import { useMobileGestures } from './hooks/useMobileGestures'
 import ModelMenu from './ModelMenu'
 import ResolutionMenu from './ResolutionMenu'
+import ImageGrid from './ImageGrid'
 
 /** 通用悬浮气泡提示 */
 function ButtonTooltip({ visible, text }: { visible: boolean; text: ReactNode }) {
@@ -143,23 +142,13 @@ export default function InputBar() {
   const [optimizeHover, setOptimizeHover] = useState(false)
   const [showSizePicker, setShowSizePicker] = useState(false)
   const [maskPreviewUrl, setMaskPreviewUrl] = useState('')
-  const [imageDragIndex, setImageDragIndex] = useState<number | null>(null)
-  const [imageDragOverIndex, setImageDragOverIndex] = useState<number | null>(null)
-  const [touchDragPreview, setTouchDragPreview] = useState<{ src: string; x: number; y: number } | null>(null)
 
   /** 顶部 pill 弹出层互斥 */
   type OpenMenu = 'model' | 'style' | 'resolution' | 'advanced' | null
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
 
-  const imageDragIndexRef = useRef<number | null>(null)
-  const imageTouchDragRef = useRef({ index: null as number | null, startX: 0, startY: 0, moved: false })
-  const imageDragOverIndexRef = useRef<number | null>(null)
-  const imageDragPreviewRef = useRef<HTMLElement | null>(null)
-  const suppressImageClickRef = useRef(false)
-  const maskConflictNoticeShownRef = useRef(false)
   const isMobile = useIsMobile()
   const { mobileCollapsed, setMobileCollapsed, dragHandleRef: handleRef } = useMobileGestures({ isMobile })
-  const { imageHintId, showHint: showImageHint, hideHint: hideImageHint, startHintTouch: startImageHintTouch } = useImageHintTimer()
   const { adjustHeight: adjustTextareaHeight } = useAutoResizeTextarea({
     textareaRef,
     imagesRef,
@@ -268,308 +257,6 @@ export default function InputBar() {
       e.preventDefault()
       submitTask()
     }
-  }
-
-  const getTouchDropIndex = (touch: React.Touch) => {
-    const target = document
-      .elementFromPoint(touch.clientX, touch.clientY)
-      ?.closest<HTMLElement>('[data-input-image-index]')
-    if (!target) return null
-    const idx = Number(target.dataset.inputImageIndex)
-    if (!Number.isInteger(idx)) return null
-    const rect = target.getBoundingClientRect()
-    return touch.clientX < rect.left + rect.width / 2 ? idx : idx + 1
-  }
-
-  const normalizeImageDropIndex = (idx: number) => {
-    const minIdx = maskTargetImage ? 1 : 0
-    return Math.max(minIdx, Math.min(inputImages.length, idx))
-  }
-
-  const isBeforeMaskDropArea = (clientX: number) => {
-    if (!maskTargetImage) return false
-    const maskEl = document.querySelector<HTMLElement>('[data-input-image-index="0"]')
-    if (!maskEl) return false
-    const rect = maskEl.getBoundingClientRect()
-    return clientX < rect.left + rect.width / 2
-  }
-
-  const resetImageDrag = () => {
-    setImageDragIndex(null)
-    setImageDragOverIndex(null)
-    imageDragIndexRef.current = null
-    imageDragOverIndexRef.current = null
-    imageTouchDragRef.current = { index: null, startX: 0, startY: 0, moved: false }
-    setTouchDragPreview(null)
-    imageDragPreviewRef.current?.remove()
-    imageDragPreviewRef.current = null
-    hideImageHint()
-  }
-
-  useEffect(() => {
-    if (!touchDragPreview) return
-    const previousOverflow = document.body.style.overflow
-    const previousOverscroll = document.body.style.overscrollBehavior
-    document.body.style.overflow = 'hidden'
-    document.body.style.overscrollBehavior = 'none'
-    return () => {
-      document.body.style.overflow = previousOverflow
-      document.body.style.overscrollBehavior = previousOverscroll
-    }
-  }, [touchDragPreview])
-
-  const getDataTransferDragIndex = (e: React.DragEvent) => {
-    const value = e.dataTransfer.getData('text/plain')
-    const idx = Number(value)
-    return Number.isInteger(idx) ? idx : null
-  }
-
-  const setImageDragTarget = (idx: number | null, clientX?: number) => {
-    const fromIdx = imageDragIndexRef.current
-    if (fromIdx !== null && maskTargetImage && (idx === 0 || (clientX != null && isBeforeMaskDropArea(clientX)))) {
-      showImageHint(maskTargetImage.id)
-      imageDragOverIndexRef.current = null
-      setImageDragOverIndex(null)
-      return
-    }
-
-    if (fromIdx !== null) hideImageHint()
-    const normalizedIdx = idx == null ? null : normalizeImageDropIndex(idx)
-    const isNoopTarget = fromIdx !== null && normalizedIdx !== null && (normalizedIdx === fromIdx || normalizedIdx === fromIdx + 1)
-    const nextIdx = isNoopTarget ? null : normalizedIdx
-    imageDragOverIndexRef.current = nextIdx
-    setImageDragOverIndex(nextIdx)
-  }
-
-  const renderImageThumb = (img: (typeof inputImages)[number], idx: number) => {
-    const isMaskTarget = maskDraft?.targetImageId === img.id
-    const canEdit = !maskTargetImage || isMaskTarget
-    const imageHintText = isMaskTarget
-      ? '遮罩图必须为第一张图'
-      : maskTargetImage
-        ? '只能有一张遮罩图'
-        : ''
-    const displaySrc = isMaskTarget && maskPreviewUrl ? maskPreviewUrl : img.dataUrl
-    const isImageDragging = imageDragIndex === idx
-    const isLast = idx === inputImages.length - 1
-    const showDropBefore = imageDragOverIndex === idx && imageDragIndex !== idx
-    const showDropAfter = imageDragOverIndex === inputImages.length && isLast && imageDragIndex !== idx
-
-    const handleDragStart = (e: React.DragEvent) => {
-      if (isMaskTarget) {
-        e.preventDefault()
-        return
-      }
-      hideImageHint()
-      imageDragIndexRef.current = idx
-      setImageDragIndex(idx)
-      e.dataTransfer.effectAllowed = 'move'
-      e.dataTransfer.setData('text/plain', String(idx))
-      const preview = document.createElement('div')
-      preview.style.cssText = 'position:fixed;left:-1000px;top:-1000px;width:52px;height:52px;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.25);'
-      const previewImg = document.createElement('img')
-      previewImg.src = displaySrc
-      previewImg.style.cssText = 'width:52px;height:52px;object-fit:cover;display:block;'
-      preview.appendChild(previewImg)
-      document.body.appendChild(preview)
-      imageDragPreviewRef.current = preview
-      e.dataTransfer.setDragImage(preview, 26, 26)
-    }
-
-    const handleDragOver = (e: React.DragEvent) => {
-      e.preventDefault()
-      e.dataTransfer.dropEffect = 'move'
-      const fromIdx = imageDragIndexRef.current
-      if (fromIdx === null || fromIdx === idx) return
-      const rect = e.currentTarget.getBoundingClientRect()
-      setImageDragTarget(e.clientX < rect.left + rect.width / 2 ? idx : idx + 1, e.clientX)
-    }
-
-    const handleDrop = (e: React.DragEvent) => {
-      e.preventDefault()
-      const fromIdx = imageDragIndexRef.current ?? getDataTransferDragIndex(e)
-      const toIdx = imageDragOverIndexRef.current
-      if (fromIdx !== null && toIdx !== null) {
-        moveInputImage(fromIdx, toIdx)
-      }
-      resetImageDrag()
-    }
-
-    const handleTouchStart = (e: React.TouchEvent) => {
-      if (isMaskTarget) {
-        startImageHintTouch(img.id)
-        return
-      }
-      const touch = e.touches[0]
-      imageDragIndexRef.current = idx
-      imageTouchDragRef.current = { index: idx, startX: touch.clientX, startY: touch.clientY, moved: false }
-      setTouchDragPreview(null)
-    }
-
-    const handleTouchMove = (e: React.TouchEvent) => {
-      const touch = e.touches[0]
-      const touchDrag = imageTouchDragRef.current
-      if (touchDrag.index === null) return
-
-      touchDrag.moved = true
-      hideImageHint()
-      suppressImageClickRef.current = true
-      e.preventDefault()
-      setImageDragIndex(touchDrag.index)
-      setTouchDragPreview({ src: displaySrc, x: touch.clientX, y: touch.clientY })
-      const dropIndex = getTouchDropIndex(touch)
-      setImageDragTarget(dropIndex, touch.clientX)
-    }
-
-    const handleTouchEnd = (e: React.TouchEvent) => {
-      const touchDrag = imageTouchDragRef.current
-      hideImageHint()
-      if (touchDrag.index !== null && imageDragOverIndexRef.current !== null) {
-        e.preventDefault()
-        moveInputImage(touchDrag.index, imageDragOverIndexRef.current)
-        window.setTimeout(() => {
-          suppressImageClickRef.current = false
-        }, 0)
-      }
-      resetImageDrag()
-    }
-
-    const handleTouchCancel = () => {
-      suppressImageClickRef.current = false
-      hideImageHint()
-      resetImageDrag()
-    }
-
-    return (
-      <div
-        key={img.id}
-        data-input-image-index={idx}
-        className={`relative group inline-block shrink-0 transition-opacity ${isImageDragging ? 'opacity-40' : ''}`}
-        style={{ touchAction: isMaskTarget ? 'auto' : 'none' }}
-        draggable={!isMobile && !isMaskTarget}
-        onMouseEnter={() => imageHintText && (!isMobile || isMaskTarget) && showImageHint(img.id)}
-        onMouseLeave={hideImageHint}
-        onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-        onDragEnd={resetImageDrag}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onTouchCancel={handleTouchCancel}
-      >
-        <ButtonTooltip
-          visible={imageHintId === img.id && Boolean(imageHintText) && (!isMobile || isMaskTarget)}
-          text={imageHintText}
-        />
-        {showDropBefore && (
-          <div className="absolute -left-[5px] top-0 bottom-0 w-[2px] bg-blue-500 rounded-full z-40 shadow-sm pointer-events-none" />
-        )}
-        {showDropAfter && (
-          <div className="absolute -right-[5px] top-0 bottom-0 w-[2px] bg-blue-500 rounded-full z-40 shadow-sm pointer-events-none" />
-        )}
-        <div
-          className={`relative w-[52px] h-[52px] rounded-xl overflow-hidden shadow-sm cursor-grab active:cursor-grabbing select-none ${
-            isMaskTarget
-              ? 'border-2 border-blue-500'
-              : 'border border-gray-200 dark:border-white/[0.08]'
-          }`}
-          onClick={() => {
-            if (suppressImageClickRef.current) return
-            if (isMaskTarget) {
-              setMaskEditorImageId(img.id)
-              return
-            }
-            if (isMobile && maskTargetImage && !maskConflictNoticeShownRef.current) {
-              maskConflictNoticeShownRef.current = true
-              showToast('只能有一张遮罩图', 'info')
-            }
-            setLightboxImageId(img.id, inputImages.map((i) => i.id))
-          }}
-        >
-          {displaySrc && (
-            <img
-              src={displaySrc}
-              className="w-full h-full object-cover hover:opacity-90 transition-opacity pointer-events-none"
-              alt=""
-            />
-          )}
-          {isMaskTarget && (
-            <span className="absolute left-1 top-1 rounded bg-blue-500/90 px-1.5 py-0.5 text-[8px] leading-none text-white font-bold tracking-wider backdrop-blur-sm z-10 pointer-events-none">
-              MASK
-            </span>
-          )}
-          {canEdit && (
-            <button
-              className="absolute inset-0 w-full h-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer z-20 focus:outline-none border-none"
-              onClick={(e) => {
-                e.stopPropagation()
-                setMaskEditorImageId(img.id)
-              }}
-              title={isMaskTarget ? '编辑遮罩' : '添加遮罩'}
-            >
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-              </svg>
-            </button>
-          )}
-        </div>
-        {!isMaskTarget && (
-          <span
-            className="absolute -top-2 -right-2 w-[22px] h-[22px] rounded-full bg-red-500 text-white flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600 z-30"
-            onClick={(e) => {
-              e.stopPropagation()
-              removeInputImage(idx)
-            }}
-          >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </span>
-        )}
-      </div>
-    )
-  }
-
-  const renderClearAllButton = () => (
-    <button
-      onClick={() =>
-        setConfirmDialog({
-          title: maskTargetImage ? '清空全部输入图' : '清空参考图',
-          message: maskTargetImage
-            ? `确定要清空遮罩主图、${referenceImages.length} 张参考图和当前遮罩吗？`
-            : `确定要清空全部 ${inputImages.length} 张参考图吗？`,
-          action: () => clearInputImages(),
-        })
-      }
-      className="w-[52px] h-[52px] rounded-xl border border-dashed border-gray-300 dark:border-white/[0.08] flex flex-col items-center justify-center gap-0.5 text-gray-400 dark:text-gray-500 hover:text-red-500 hover:border-red-300 hover:bg-red-50/50 dark:hover:bg-red-950/30 transition-all cursor-pointer flex-shrink-0"
-      title={maskTargetImage ? '清空遮罩主图、参考图和遮罩' : '清空全部参考图'}
-    >
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-      </svg>
-      <span className="text-[8px] leading-none">{maskTargetImage ? '清空全部' : '清空'}</span>
-    </button>
-  )
-
-  const renderImageThumbs = () => {
-    return (
-      <div ref={imagesRef}>
-        <div className="grid grid-cols-[repeat(auto-fill,52px)] justify-between gap-x-2 gap-y-3 mb-3">
-          {inputImages.map((img, idx) => renderImageThumb(img, idx))}
-          {renderClearAllButton()}
-        </div>
-        {touchDragPreview?.src && createPortal(
-          <div
-            className="fixed z-[140] h-[52px] w-[52px] overflow-hidden rounded-xl shadow-xl pointer-events-none opacity-90"
-            style={{ left: touchDragPreview.x, top: touchDragPreview.y, transform: 'translate(-50%, -50%)' }}
-          >
-            <img src={touchDragPreview.src} className="h-full w-full object-cover" alt="" />
-          </div>,
-          document.body,
-        )}
-      </div>
-    )
   }
 
   /** 顶部 pill 行（模型 / 风格 / 比例 / 分辨率 / 优化 + 上传 + 高级） */
@@ -807,6 +494,25 @@ export default function InputBar() {
     )
   }
 
+  const imageGridElement = (
+    <ImageGrid
+      inputImages={inputImages}
+      maskTargetImage={maskTargetImage}
+      maskDraft={maskDraft}
+      maskPreviewUrl={maskPreviewUrl}
+      referenceImages={referenceImages}
+      isMobile={isMobile}
+      imagesRef={imagesRef}
+      onMove={moveInputImage}
+      onRemove={removeInputImage}
+      onClearAll={clearInputImages}
+      onClickImage={setLightboxImageId}
+      onEditMask={setMaskEditorImageId}
+      onConfirmClearAll={setConfirmDialog}
+      onMaskConflictNotice={(message) => showToast(message, 'info')}
+    />
+  )
+
   /**
    * 底栏在桌面端 sidebar 占位时的水平偏移：
    *   - 展开态 sidebar 宽 256px (md:w-64)，把 InputBar 中线右移一半 = 128px
@@ -895,7 +601,7 @@ export default function InputBar() {
               <>
                 <div className={`collapse-section${mobileCollapsed ? ' collapsed' : ''}`}>
                   <div className="collapse-inner">
-                    {renderImageThumbs()}
+                    {imageGridElement}
                   </div>
                 </div>
                 {mobileCollapsed && (
@@ -905,7 +611,7 @@ export default function InputBar() {
                 )}
               </>
             ) : (
-              renderImageThumbs()
+              imageGridElement
             )
           )}
 
