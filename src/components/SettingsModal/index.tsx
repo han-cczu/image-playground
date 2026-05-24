@@ -17,10 +17,11 @@ import {
 } from '../../lib/api/apiProfiles'
 import type { ApiProfile, AppSettings } from '../../types'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
-import { FAVORITE_CATEGORY_COLORS } from '../../lib/favoriteCategories'
 import { ProfileSelector } from './ProfileSelector'
 import { ApiProfileSection } from './ApiProfileSection'
 import { OptimizerSection } from './OptimizerSection'
+import { FavoriteCategorySection } from './FavoriteCategorySection'
+import { DataManagementSection } from './DataManagementSection'
 
 function newId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -37,12 +38,9 @@ export default function SettingsModal() {
   const updateFavoriteCategory = useStore((s) => s.updateFavoriteCategory)
   const deleteFavoriteCategory = useStore((s) => s.deleteFavoriteCategory)
   const moveFavoriteCategory = useStore((s) => s.moveFavoriteCategory)
-  const importInputRef = useRef<HTMLInputElement>(null)
-
   const [draft, setDraft] = useState<AppSettings>(normalizeSettings(settings))
   const [timeoutInput, setTimeoutInput] = useState(String(getActiveApiProfile(settings).timeout))
   const [showProfileMenu, setShowProfileMenu] = useState(false)
-  const [pendingImportMode, setPendingImportMode] = useState<ImportMode>('merge')
   const [optimizerTimeoutInput, setOptimizerTimeoutInput] = useState(
     String(normalizeSettings(settings).promptOptimizer.timeout),
   )
@@ -228,20 +226,6 @@ export default function SettingsModal() {
     }
   }
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      await runImport(file, pendingImportMode)
-    }
-    e.target.value = ''
-    setPendingImportMode('merge')
-  }
-
-  const selectImportFile = (mode: ImportMode) => {
-    setPendingImportMode(mode)
-    importInputRef.current?.click()
-  }
-
   const handleClearAllData = async () => {
     await clearAllData()
     const nextDraft = normalizeSettings(useStore.getState().settings)
@@ -396,155 +380,39 @@ export default function SettingsModal() {
             <h4 className="mb-4 text-base font-semibold text-gray-800 dark:text-gray-200">
               收藏分类
             </h4>
-            <div className="space-y-3">
-              {favoriteCategories.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-gray-200/70 px-3 py-3 text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
-                  暂无分类。可从顶部分类入口或收藏记录时新建。
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {favoriteCategories.map((category, index) => (
-                    <div
-                      key={category.id}
-                      className="rounded-xl border border-gray-200/70 bg-white/50 p-3 dark:border-white/[0.08] dark:bg-white/[0.03]"
-                    >
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="color"
-                          value={category.color}
-                          onChange={(e) => updateFavoriteCategory(category.id, { color: e.target.value })}
-                          className="h-8 w-8 shrink-0 cursor-pointer rounded-lg border border-gray-200/70 bg-transparent p-0.5 dark:border-white/[0.08]"
-                          aria-label="分类颜色"
-                          title="分类颜色"
-                        />
-                        <input
-                          value={category.name}
-                          onChange={(e) => updateFavoriteCategory(category.id, { name: e.target.value })}
-                          className="min-w-0 flex-1 rounded-lg border border-gray-200/70 bg-white/70 px-2.5 py-1.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
-                          aria-label="分类名称"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => moveFavoriteCategory(category.id, -1)}
-                          disabled={index === 0}
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-                          aria-label="上移分类"
-                          title="上移分类"
-                        >
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => moveFavoriteCategory(category.id, 1)}
-                          disabled={index === favoriteCategories.length - 1}
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-                          aria-label="下移分类"
-                          title="下移分类"
-                        >
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteCategory(category.id, category.name)}
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
-                          aria-label="删除分类"
-                          title="删除分类"
-                        >
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {FAVORITE_CATEGORY_COLORS.map((color) => (
-                          <button
-                            key={color}
-                            type="button"
-                            onClick={() => updateFavoriteCategory(category.id, { color })}
-                            className={`h-5 w-5 rounded-full border transition ${
-                              category.color.toLowerCase() === color.toLowerCase()
-                                ? 'border-gray-800 ring-2 ring-gray-300 dark:border-white dark:ring-white/20'
-                                : 'border-white/80 hover:scale-110 dark:border-white/20'
-                            }`}
-                            style={{ backgroundColor: color }}
-                            aria-label={`选择颜色 ${color}`}
-                            title={color}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <FavoriteCategorySection
+              categories={favoriteCategories}
+              onUpdate={updateFavoriteCategory}
+              onMove={moveFavoriteCategory}
+              onDelete={handleDeleteCategory}
+            />
           </section>
 
           <section className="rounded-2xl bg-gray-50/40 dark:bg-white/[0.02] p-5">
             <h4 className="mb-4 text-base font-semibold text-gray-800 dark:text-gray-200">
               数据管理
             </h4>
-            <div className="space-y-3">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => exportData()}
-                  className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  导出
-                </button>
-                <button
-                  onClick={() => selectImportFile('merge')}
-                  className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                  </svg>
-                  合并导入
-                </button>
-                <button
-                  onClick={() =>
-                    setConfirmDialog({
-                      title: '替换导入',
-                      message: '替换导入会先清空本地任务记录和图片，再导入备份。设置会按安全规则合并，已有密钥不会被空密钥覆盖。',
-                      confirmText: '选择备份',
-                      tone: 'warning',
-                      action: () => selectImportFile('replace'),
-                    })
-                  }
-                  className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 006.34 4.34L4 6.68M4 15a8 8 0 0013.66 4.66L20 17.32" />
-                  </svg>
-                  替换导入
-                </button>
-                <input
-                  ref={importInputRef}
-                  type="file"
-                  accept=".zip"
-                  className="hidden"
-                  onChange={handleImport}
-                />
-              </div>
-              <button
-                onClick={() =>
-                  setConfirmDialog({
-                    title: '清空所有数据',
-                    message: '确定要清空所有任务记录、图片数据和供应商配置吗？此操作不可恢复。',
-                    action: () => handleClearAllData(),
-                  })
-                }
-                className="w-full rounded-xl border border-red-200/80 bg-red-50/50 px-4 py-2.5 text-sm text-red-500 transition hover:bg-red-100/80 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20"
-              >
-                清空所有数据
-              </button>
-            </div>
+            <DataManagementSection
+              onExport={() => exportData()}
+              onImport={runImport}
+              onClearAll={handleClearAllData}
+              onConfirmReplaceImport={(proceed) =>
+                setConfirmDialog({
+                  title: '替换导入',
+                  message: '替换导入会先清空本地任务记录和图片，再导入备份。设置会按安全规则合并，已有密钥不会被空密钥覆盖。',
+                  confirmText: '选择备份',
+                  tone: 'warning',
+                  action: proceed,
+                })
+              }
+              onConfirmClearAll={(proceed) =>
+                setConfirmDialog({
+                  title: '清空所有数据',
+                  message: '确定要清空所有任务记录、图片数据和供应商配置吗？此操作不可恢复。',
+                  action: proceed,
+                })
+              }
+            />
           </section>
 
           <div className="pt-5 border-t border-gray-100 dark:border-white/[0.08] flex items-center justify-end gap-2">
