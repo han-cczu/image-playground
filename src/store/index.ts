@@ -8,25 +8,25 @@ import type {
   InputImage,
   MaskDraft,
   TaskRecord,
-} from './types'
-import { DEFAULT_PARAMS } from './types'
-import { DEFAULT_SETTINGS, normalizeSettings } from './lib/api/apiProfiles'
+} from '../types'
+import { DEFAULT_PARAMS } from '../types'
+import { DEFAULT_SETTINGS, normalizeSettings } from '../lib/api/apiProfiles'
 import {
   DEFAULT_FAVORITE_CATEGORY_COLOR,
   DEFAULT_FAVORITE_CATEGORY_ID,
   createDefaultFavoriteCategory,
   normalizeFavoriteCategories,
-} from './lib/favoriteCategories'
+} from '../lib/favoriteCategories'
 import {
   ARCHIVE_CONVERSATION_ID,
   genConversationId,
   isArchiveConversation,
-} from './lib/conversations'
+} from '../lib/conversations'
 import {
   deleteConversation as dbDeleteConversation,
   putConversation,
   putTask,
-} from './lib/db'
+} from '../lib/db'
 
 type PersistedStoreState = Partial<AppState> & {
   favoriteCategoriesInitialized?: boolean
@@ -594,7 +594,7 @@ export const useStore = create<AppState>()(
 export {
   getCachedImage,
   ensureImageCached,
-} from './lib/imageCache'
+} from '../lib/imageCache'
 
 export {
   getCodexCliPromptKey,
@@ -614,10 +614,10 @@ export {
   updateTaskInStore,
   addImageFromFile,
   addImageFromUrl,
-} from './lib/taskRuntime'
+} from '../lib/taskRuntime'
 
 export {
   exportData,
   importData,
   clearAllData,
-} from './lib/exportImport'
+} from '../lib/exportImport'
