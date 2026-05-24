@@ -28,6 +28,7 @@ import {
 } from '../lib/db'
 import { createFiltersSlice, type FiltersSlice } from './slices/filters'
 import { createSettingsSlice, type SettingsSlice } from './slices/settings'
+import { createUiSlice, type UiSlice } from './slices/ui'
 
 type PersistedStoreState = Partial<AppState> & {
   favoriteCategoriesInitialized?: boolean
@@ -108,7 +109,7 @@ export function mergePersistedStoreState(
 
 // ===== Store 类型 =====
 
-export type AppState = FiltersSlice & SettingsSlice & AppStateRest
+export type AppState = FiltersSlice & SettingsSlice & UiSlice & AppStateRest
 
 interface AppStateRest {
   // 输入
@@ -152,49 +153,6 @@ interface AppStateRest {
   renameConversation: (id: string, title: string) => Promise<void>
   deleteConversationWithTasks: (id: string) => void
   setActiveConversation: (id: string | null) => void
-
-  // Sidebar
-  sidebarCollapsed: boolean
-  toggleSidebar: () => void
-  setSidebarCollapsed: (v: boolean) => void
-
-  // Insecure context banner（HTTP + IP 模式提示）
-  dismissedInsecureContextBanner: boolean
-  setDismissedInsecureContextBanner: (v: boolean) => void
-
-  // 图库视图：跨对话查看全部 task
-  galleryView: boolean
-  setGalleryView: (view: boolean) => void
-
-  // UI
-  detailTaskId: string | null
-  setDetailTaskId: (id: string | null) => void
-  lightboxImageId: string | null
-  lightboxImageList: string[]
-  setLightboxImageId: (id: string | null, list?: string[]) => void
-  showSettings: boolean
-  setShowSettings: (v: boolean) => void
-  showPromptOptimizer: boolean
-  setShowPromptOptimizer: (v: boolean) => void
-
-  // Toast
-  toast: { message: string; type: 'info' | 'success' | 'error' } | null
-  showToast: (message: string, type?: 'info' | 'success' | 'error') => void
-
-  // Confirm dialog
-  confirmDialog: {
-    title: string
-    message: string
-    confirmText?: string
-    showCancel?: boolean
-    icon?: 'info'
-    minConfirmDelayMs?: number
-    messageAlign?: 'left' | 'center'
-    tone?: 'danger' | 'warning'
-    action: () => void
-    cancelAction?: () => void
-  } | null
-  setConfirmDialog: (d: AppState['confirmDialog']) => void
 }
 
 export const useStore = create<AppState>()(
@@ -433,49 +391,9 @@ export const useStore = create<AppState>()(
       },
       setActiveConversation: (id) => set({ activeConversationId: id }),
 
-      // Sidebar
-      sidebarCollapsed: false,
-      toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
-      setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
-
-      // Insecure context banner
-      dismissedInsecureContextBanner: false,
-      setDismissedInsecureContextBanner: (dismissedInsecureContextBanner) =>
-        set({ dismissedInsecureContextBanner }),
-
-      // Gallery view
-      galleryView: false,
-      setGalleryView: (galleryView) => set({ galleryView }),
+      ...createUiSlice(set, get, store),
 
       ...createFiltersSlice(set, get, store),
-
-      // UI
-      detailTaskId: null,
-      setDetailTaskId: (id) => set({ detailTaskId: id }),
-      lightboxImageId: null,
-      lightboxImageList: [],
-      setLightboxImageId: (lightboxImageId, list) =>
-        set(() => ({
-          lightboxImageId,
-          ...(list !== undefined ? { lightboxImageList: list } : {}),
-        })),
-      showSettings: false,
-      setShowSettings: (showSettings) => set({ showSettings }),
-      showPromptOptimizer: false,
-      setShowPromptOptimizer: (showPromptOptimizer) => set({ showPromptOptimizer }),
-
-      // Toast
-      toast: null,
-      showToast: (message, type = 'info') => {
-        set({ toast: { message, type } })
-        setTimeout(() => {
-          if (get().toast?.message === message) set({ toast: null })
-        }, 3000)
-      },
-
-      // Confirm
-      confirmDialog: null,
-      setConfirmDialog: (confirmDialog) => set({ confirmDialog }),
     }),
     {
       name: 'image-playground',
