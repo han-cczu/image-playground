@@ -5,7 +5,6 @@
 #  - 第二阶段不带任何 node 依赖，最终镜像 ≈ nginx:alpine 基础 (~25MB) + dist (~数 MB)。
 #  - 必须执行 `npm run build`，触发 scripts/inject-sw-build-id.mjs，
 #    把 dist/sw.js 中的 __CACHE_NAME__ 占位符替换为 image-playground-<hash>-<ts>。
-#    详见 .trellis/spec/frontend/service-worker.md 契约 1。
 
 # ---------- Stage 1: build ----------
 FROM node:20-alpine AS builder

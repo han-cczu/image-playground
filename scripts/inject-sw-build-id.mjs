@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 构建后处理：把 dist/sw.js 中的 __CACHE_NAME__ 占位符替换为 image-playground-<git-hash>-<timestamp>。
-// 设计理由见 .trellis/spec/frontend/service-worker.md（每次部署必须生成全新 CACHE_NAME，否则旧 SW 不会 activate 清缓存）。
+// 设计理由：每次部署必须生成全新 CACHE_NAME，否则旧 SW 不会 activate 清缓存。
 import { execSync } from 'node:child_process'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
