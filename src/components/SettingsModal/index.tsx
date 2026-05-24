@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { ModelListDropdown } from './ModelListDropdown'
 import { normalizeBaseUrl } from '../../lib/api'
 import { isApiProxyAvailable, readClientDevProxyConfig } from '../../lib/api/devProxy'
 import { listModels } from '../../lib/api/listModels'
@@ -54,7 +55,6 @@ export default function SettingsModal() {
   const [modelList, setModelList] = useState<string[] | null>(null)
   const [modelListError, setModelListError] = useState<string | null>(null)
   const [pendingImportMode, setPendingImportMode] = useState<ImportMode>('merge')
-  const modelFieldRef = useRef<HTMLDivElement>(null)
 
   // 提示词优化 API 相关 state
   const [showOptimizerApiKey, setShowOptimizerApiKey] = useState(false)
@@ -65,7 +65,6 @@ export default function SettingsModal() {
   const [optimizerModelListLoading, setOptimizerModelListLoading] = useState(false)
   const [optimizerModelList, setOptimizerModelList] = useState<string[] | null>(null)
   const [optimizerModelListError, setOptimizerModelListError] = useState<string | null>(null)
-  const optimizerModelFieldRef = useRef<HTMLDivElement>(null)
 
   const apiProxyAvailable = isApiProxyAvailable(readClientDevProxyConfig())
   const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
@@ -234,17 +233,6 @@ export default function SettingsModal() {
     setModelListError(null)
   }, [activeProfile.id, activeProfile.baseUrl, activeProfile.apiKey])
 
-  useEffect(() => {
-    if (!modelListOpen) return
-    const onMouseDown = (e: MouseEvent) => {
-      if (modelFieldRef.current && !modelFieldRef.current.contains(e.target as Node)) {
-        setModelListOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onMouseDown)
-    return () => document.removeEventListener('mousedown', onMouseDown)
-  }, [modelListOpen])
-
   const fetchModelList = useCallback(async () => {
     if (activeProfile.provider !== 'openai') return
     setModelListOpen(true)
@@ -268,17 +256,6 @@ export default function SettingsModal() {
     setOptimizerModelList(null)
     setOptimizerModelListError(null)
   }, [draft.promptOptimizer.baseUrl, draft.promptOptimizer.apiKey])
-
-  useEffect(() => {
-    if (!optimizerModelListOpen) return
-    const onMouseDown = (e: MouseEvent) => {
-      if (optimizerModelFieldRef.current && !optimizerModelFieldRef.current.contains(e.target as Node)) {
-        setOptimizerModelListOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onMouseDown)
-    return () => document.removeEventListener('mousedown', onMouseDown)
-  }, [optimizerModelListOpen])
 
   const fetchOptimizerModelList = useCallback(async () => {
     setOptimizerModelListOpen(true)
@@ -697,73 +674,18 @@ export default function SettingsModal() {
                 <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
                   模型 ID
                 </span>
-                <div ref={modelFieldRef} className="relative">
-                  <div className="flex items-stretch gap-2">
-                    <input
-                      value={activeProfile.model}
-                      onChange={(e) => updateActiveProfile({ model: e.target.value })}
-                      type="text"
-                      placeholder={activeProfile.provider === 'gemini' ? DEFAULT_GEMINI_MODEL : getDefaultModelForMode(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode)}
-                      className="flex-1 min-w-0 rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                    />
-                    {activeProfile.provider === 'openai' && (
-                      <button
-                        type="button"
-                        onClick={fetchModelList}
-                        disabled={modelListLoading}
-                        title="从 API 拉取模型列表"
-                        aria-label="从 API 拉取模型列表"
-                        className="flex-shrink-0 rounded-xl border border-gray-200/70 bg-white/60 px-2.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-                      >
-                        <svg
-                          className={`w-4 h-4 ${modelListLoading ? 'animate-spin' : ''}`}
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth={2}
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          viewBox="0 0 24 24"
-                        >
-                          <path d="M21 12a9 9 0 0 1-15.5 6.36L3 21" />
-                          <path d="M3 12a9 9 0 0 1 15.5-6.36L21 3" />
-                          <path d="M21 3v6h-6" />
-                          <path d="M3 21v-6h6" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-                  {modelListOpen && (
-                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] py-1 max-h-60 overflow-y-auto ring-1 ring-black/5 dark:ring-white/10 animate-dropdown-down">
-                      {modelListLoading ? (
-                        <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">加载中…</div>
-                      ) : modelListError ? (
-                        <div className="px-3 py-2 text-xs text-red-500 dark:text-red-400 break-all">
-                          {modelListError}
-                          <div className="mt-1 text-gray-400 dark:text-gray-500">可继续手动填写模型 ID。</div>
-                        </div>
-                      ) : modelList && modelList.length > 0 ? (
-                        modelList.map((id) => (
-                          <div
-                            key={id}
-                            onClick={() => {
-                              updateActiveProfile({ model: id })
-                              setModelListOpen(false)
-                            }}
-                            className={`px-3 py-2 text-xs cursor-pointer transition-colors break-all ${
-                              id === activeProfile.model
-                                ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium'
-                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/[0.06]'
-                            }`}
-                          >
-                            {id}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">暂无可用模型</div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <ModelListDropdown
+                  value={activeProfile.model}
+                  onChange={(model) => updateActiveProfile({ model })}
+                  onFetch={fetchModelList}
+                  isLoading={modelListLoading}
+                  isOpen={modelListOpen}
+                  onOpenChange={setModelListOpen}
+                  modelList={modelList}
+                  error={modelListError}
+                  placeholder={activeProfile.provider === 'gemini' ? DEFAULT_GEMINI_MODEL : getDefaultModelForMode(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode)}
+                  showFetchButton={activeProfile.provider === 'openai'}
+                />
                 <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                   {activeProfile.provider === 'gemini' ? (
                     <>使用 Google 多模态图像模型，例如 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_GEMINI_MODEL}</code>。不支持遮罩与 quality 参数；多图生成会并发拆单。</>
@@ -844,71 +766,17 @@ export default function SettingsModal() {
 
               <label className="block">
                 <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">模型 ID</span>
-                <div ref={optimizerModelFieldRef} className="relative">
-                  <div className="flex items-stretch gap-2">
-                    <input
-                      value={draft.promptOptimizer.model}
-                      onChange={(e) => updatePromptOptimizer({ model: e.target.value })}
-                      type="text"
-                      placeholder="gpt-4o-mini"
-                      className="flex-1 min-w-0 rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                    />
-                    <button
-                      type="button"
-                      onClick={fetchOptimizerModelList}
-                      disabled={optimizerModelListLoading}
-                      title="从 API 拉取模型列表"
-                      aria-label="从 API 拉取模型列表"
-                      className="flex-shrink-0 rounded-xl border border-gray-200/70 bg-white/60 px-2.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-                    >
-                      <svg
-                        className={`w-4 h-4 ${optimizerModelListLoading ? 'animate-spin' : ''}`}
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        viewBox="0 0 24 24"
-                      >
-                        <path d="M21 12a9 9 0 0 1-15.5 6.36L3 21" />
-                        <path d="M3 12a9 9 0 0 1 15.5-6.36L21 3" />
-                        <path d="M21 3v6h-6" />
-                        <path d="M3 21v-6h6" />
-                      </svg>
-                    </button>
-                  </div>
-                  {optimizerModelListOpen && (
-                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] py-1 max-h-60 overflow-y-auto ring-1 ring-black/5 dark:ring-white/10 animate-dropdown-down">
-                      {optimizerModelListLoading ? (
-                        <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">加载中…</div>
-                      ) : optimizerModelListError ? (
-                        <div className="px-3 py-2 text-xs text-red-500 dark:text-red-400 break-all">
-                          {optimizerModelListError}
-                          <div className="mt-1 text-gray-400 dark:text-gray-500">可继续手动填写模型 ID。</div>
-                        </div>
-                      ) : optimizerModelList && optimizerModelList.length > 0 ? (
-                        optimizerModelList.map((id) => (
-                          <div
-                            key={id}
-                            onClick={() => {
-                              updatePromptOptimizer({ model: id })
-                              setOptimizerModelListOpen(false)
-                            }}
-                            className={`px-3 py-2 text-xs cursor-pointer transition-colors break-all ${
-                              id === draft.promptOptimizer.model
-                                ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium'
-                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/[0.06]'
-                            }`}
-                          >
-                            {id}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">暂无可用模型</div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <ModelListDropdown
+                  value={draft.promptOptimizer.model}
+                  onChange={(model) => updatePromptOptimizer({ model })}
+                  onFetch={fetchOptimizerModelList}
+                  isLoading={optimizerModelListLoading}
+                  isOpen={optimizerModelListOpen}
+                  onOpenChange={setOptimizerModelListOpen}
+                  modelList={optimizerModelList}
+                  error={optimizerModelListError}
+                  placeholder="gpt-4o-mini"
+                />
               </label>
 
               <label className="block">
