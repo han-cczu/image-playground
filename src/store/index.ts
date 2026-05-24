@@ -27,6 +27,7 @@ import {
   putConversation,
   putTask,
 } from '../lib/db'
+import { createFiltersSlice, type FiltersSlice } from './slices/filters'
 
 type PersistedStoreState = Partial<AppState> & {
   favoriteCategoriesInitialized?: boolean
@@ -107,7 +108,9 @@ export function mergePersistedStoreState(
 
 // ===== Store 类型 =====
 
-export interface AppState {
+export type AppState = FiltersSlice & AppStateRest
+
+interface AppStateRest {
   // 设置
   settings: AppSettings
   setSettings: (s: Partial<AppSettings>) => void
@@ -169,22 +172,6 @@ export interface AppState {
   galleryView: boolean
   setGalleryView: (view: boolean) => void
 
-  // 搜索和筛选
-  searchQuery: string
-  setSearchQuery: (q: string) => void
-  filterStatus: 'all' | 'running' | 'done' | 'error'
-  setFilterStatus: (status: AppState['filterStatus']) => void
-  filterFavorite: boolean
-  setFilterFavorite: (f: boolean) => void
-  filterFavoriteCategoryId: string | null
-  setFilterFavoriteCategoryId: (id: string | null) => void
-
-  // 多选
-  selectedTaskIds: string[]
-  setSelectedTaskIds: (ids: string[] | ((prev: string[]) => string[])) => void
-  toggleTaskSelection: (id: string, force?: boolean) => void
-  clearSelection: () => void
-
   // UI
   detailTaskId: string | null
   setDetailTaskId: (id: string | null) => void
@@ -218,7 +205,7 @@ export interface AppState {
 
 export const useStore = create<AppState>()(
   persist(
-    (set, get) => ({
+    (set, get, store) => ({
       // Settings
       settings: { ...DEFAULT_SETTINGS },
       setSettings: (s) => set((st) => {
@@ -511,35 +498,7 @@ export const useStore = create<AppState>()(
       galleryView: false,
       setGalleryView: (galleryView) => set({ galleryView }),
 
-      // Search & filter
-      searchQuery: '',
-      setSearchQuery: (q) => set({ searchQuery: q }),
-      filterStatus: 'all',
-      setFilterStatus: (status) => set({ filterStatus: status }),
-      filterFavorite: false,
-      setFilterFavorite: (f) => set({
-        filterFavorite: f,
-        ...(f ? { filterFavoriteCategoryId: null } : {}),
-      }),
-      filterFavoriteCategoryId: null,
-      setFilterFavoriteCategoryId: (id) => set({
-        filterFavoriteCategoryId: id,
-        ...(id ? { filterFavorite: false } : {}),
-      }),
-
-      // Selection
-      selectedTaskIds: [],
-      setSelectedTaskIds: (ids) => set((s) => ({
-        selectedTaskIds: typeof ids === 'function' ? ids(s.selectedTaskIds) : ids,
-      })),
-      toggleTaskSelection: (id, force) => set((s) => {
-        const isSelected = s.selectedTaskIds.includes(id)
-        const shouldSelect = force === undefined ? !isSelected : force
-        if (shouldSelect && !isSelected) return { selectedTaskIds: [...s.selectedTaskIds, id] }
-        if (!shouldSelect && isSelected) return { selectedTaskIds: s.selectedTaskIds.filter((x) => x !== id) }
-        return s
-      }),
-      clearSelection: () => set({ selectedTaskIds: [] }),
+      ...createFiltersSlice(set, get, store),
 
       // UI
       detailTaskId: null,
