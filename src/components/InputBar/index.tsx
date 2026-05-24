@@ -17,6 +17,7 @@ import SizePickerModal from '../SizePickerModal'
 import ViewportTooltip from '../ViewportTooltip'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useImageHintTimer } from './hooks/useImageHintTimer'
+import { useAutoResizeTextarea } from './hooks/useAutoResizeTextarea'
 
 /** 通用悬浮气泡提示 */
 function ButtonTooltip({ visible, text }: { visible: boolean; text: ReactNode }) {
@@ -612,7 +613,6 @@ export default function InputBar() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const imagesRef = useRef<HTMLDivElement>(null)
-  const prevHeightRef = useRef(42)
 
   // pill / popover 锚点
   const modelPillRef = useRef<HTMLButtonElement>(null)
@@ -646,6 +646,11 @@ export default function InputBar() {
   const dragCounter = useRef(0)
   const isMobile = useIsMobile()
   const { imageHintId, showHint: showImageHint, hideHint: hideImageHint, startHintTouch: startImageHintTouch } = useImageHintTimer()
+  const { adjustHeight: adjustTextareaHeight } = useAutoResizeTextarea({
+    textareaRef,
+    imagesRef,
+    deps: { prompt, imageCount: inputImages.length, hasMask: Boolean(maskDraft), maskPreviewUrl },
+  })
 
   const canSubmit = prompt.trim() && settings.apiKey
   const optimizerKeyConfigured = Boolean(settings.promptOptimizer.apiKey.trim())
@@ -815,45 +820,6 @@ export default function InputBar() {
       document.removeEventListener('drop', handleDrop)
     }
   }, [])
-
-  const adjustTextareaHeight = useCallback(() => {
-    const el = textareaRef.current
-    if (!el) return
-
-    const imagesHeight = imagesRef.current?.offsetHeight ?? 0
-    const fixedOverhead = imagesHeight + 140
-    const maxH = Math.max(window.innerHeight * 0.4 - fixedOverhead, 80)
-
-    el.style.transition = 'none'
-    el.style.height = '0'
-    el.style.overflowY = 'hidden'
-    const scrollH = el.scrollHeight
-    const minH = 42
-    const desired = Math.max(scrollH, minH)
-    const targetH = desired > maxH ? maxH : desired
-
-    el.style.height = prevHeightRef.current + 'px'
-    void el.offsetHeight
-
-    el.style.transition = 'height 150ms ease, border-color 200ms, box-shadow 200ms'
-    el.style.height = targetH + 'px'
-    el.style.overflowY = desired > maxH ? 'auto' : 'hidden'
-
-    prevHeightRef.current = targetH
-  }, [])
-
-  useEffect(() => {
-    adjustTextareaHeight()
-  }, [prompt, adjustTextareaHeight])
-
-  useEffect(() => {
-    adjustTextareaHeight()
-  }, [inputImages.length, Boolean(maskDraft), maskPreviewUrl, adjustTextareaHeight])
-
-  useEffect(() => {
-    window.addEventListener('resize', adjustTextareaHeight)
-    return () => window.removeEventListener('resize', adjustTextareaHeight)
-  }, [adjustTextareaHeight])
 
   // 移动端拖动条手势
   useEffect(() => {
