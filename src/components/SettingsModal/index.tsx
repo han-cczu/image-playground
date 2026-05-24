@@ -8,8 +8,6 @@ import {
   DEFAULT_OPENAI_PROFILE_ID,
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_GEMINI_MODEL,
-  DEFAULT_IMAGES_MODEL,
-  DEFAULT_RESPONSES_MODEL,
   DEFAULT_SETTINGS,
   getActiveApiProfile,
   normalizePromptOptimizer,
@@ -22,6 +20,7 @@ import { ApiProfileSection } from './ApiProfileSection'
 import { OptimizerSection } from './OptimizerSection'
 import { FavoriteCategorySection } from './FavoriteCategorySection'
 import { DataManagementSection } from './DataManagementSection'
+import { getDefaultModelForMode } from './helpers'
 
 function newId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -48,9 +47,6 @@ export default function SettingsModal() {
   const apiProxyAvailable = isApiProxyAvailable(readClientDevProxyConfig())
   const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
   const apiProxyEnabled = apiProxyAvailable && activeProfile.provider === 'openai' && activeProfile.apiProxy
-
-  const getDefaultModelForMode = (apiMode: AppSettings['apiMode']) =>
-    apiMode === 'responses' ? DEFAULT_RESPONSES_MODEL : DEFAULT_IMAGES_MODEL
 
   const wasSettingsOpenRef = useRef(false)
 

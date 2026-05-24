@@ -13,7 +13,6 @@ export interface ProfileSelectorProps {
   onSelect: (id: string) => void
   onCreate: () => void
   onDelete: (id: string) => void
-  disabled?: boolean
 }
 
 export function ProfileSelector({
