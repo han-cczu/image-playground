@@ -7,15 +7,13 @@ import { storeImage } from '../../lib/db'
 import { prepareMaskTargetDataUrl, replaceMaskTargetImage } from '../../lib/image/maskPreprocess'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
 import {
-  clampViewTransform,
   clientPointToCanvasPoint,
-  getComfortableInitialTransform,
   getPinchTransform,
-  zoomAtPoint,
   type Point,
   type ViewTransform,
 } from '../../lib/image/viewportTransform'
 import { useMaskHistory } from './hooks/useMaskHistory'
+import { useCanvasViewport } from './hooks/useCanvasViewport'
 
 type Tool = 'brush' | 'eraser'
 
@@ -128,14 +126,12 @@ export default function MaskEditorModal() {
   const saveTokenRef = useRef(0)
   const sessionIdRef = useRef(0)
   const activeSessionIdRef = useRef(0)
-  const viewTransformRef = useRef<ViewTransform>(DEFAULT_VIEW_TRANSFORM)
 
   const [sourceDataUrl, setSourceDataUrl] = useState('')
   const [size, setSize] = useState<CanvasSize | null>(null)
   const [tool, setTool] = useState<Tool>('brush')
   const [brushSize, setBrushSize] = useState(64)
   const [showBrushControls, setShowBrushControls] = useState(false)
-  const [viewTransform, setViewTransform] = useState<ViewTransform>(DEFAULT_VIEW_TRANSFORM)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [hoverPoint, setHoverPoint] = useState<Point | null>(null)
@@ -144,6 +140,9 @@ export default function MaskEditorModal() {
   const [isPanning, setIsPanning] = useState(false)
   const [sliderAnchor, setSliderAnchor] = useState<SliderAnchor | null>(null)
   const [showMaskInfo, setShowMaskInfo] = useState(false)
+
+  const viewport = useCanvasViewport({ size, baseFrameRef, stageRef })
+  const { viewTransform, viewTransformRef, commitViewTransform, resetViewTransform, isZoomed } = viewport
 
   const history = useMaskHistory({
     maskCanvasRef,
@@ -196,31 +195,6 @@ export default function MaskEditorModal() {
         showToast('已移除遮罩', 'success')
       },
     })
-  }
-
-  function commitViewTransform(nextTransform: ViewTransform) {
-    const frame = baseFrameRef.current
-    const clamped = frame
-      ? clampViewTransform(nextTransform, { width: frame.clientWidth, height: frame.clientHeight })
-      : nextTransform
-    viewTransformRef.current = clamped
-    setViewTransform(clamped)
-  }
-
-  function resetViewTransform() {
-    const frame = baseFrameRef.current
-    const stage = stageRef.current
-    const isCompactLayout = window.matchMedia('(max-width: 1023px)').matches
-    if (!frame || !stage) {
-      commitViewTransform(DEFAULT_VIEW_TRANSFORM)
-      return
-    }
-
-    commitViewTransform(getComfortableInitialTransform(
-      { width: frame.clientWidth, height: frame.clientHeight },
-      { width: stage.clientWidth, height: stage.clientHeight },
-      isCompactLayout,
-    ))
   }
 
   function cancelActiveStroke() {
@@ -433,8 +407,7 @@ export default function MaskEditorModal() {
       pinchGestureRef.current = null
       panGestureRef.current = null
       setIsPanning(false)
-      viewTransformRef.current = DEFAULT_VIEW_TRANSFORM
-      setViewTransform(DEFAULT_VIEW_TRANSFORM)
+      commitViewTransform(DEFAULT_VIEW_TRANSFORM)
       undoStackRef.current = []
       redoStackRef.current = []
       syncHistoryState()
@@ -580,23 +553,11 @@ export default function MaskEditorModal() {
     return () => document.removeEventListener('pointerdown', closeBrushControls, true)
   }, [showBrushControls])
 
-  useEffect(() => {
-    const frame = baseFrameRef.current
-    if (!frame || typeof ResizeObserver === 'undefined') return
-
-    const observer = new ResizeObserver(() => {
-      commitViewTransform(viewTransformRef.current)
-    })
-    observer.observe(frame)
-    return () => observer.disconnect()
-  }, [size])
-
   if (!imageId) return null
 
   const isReady = Boolean(sourceDataUrl && size && !isLoading)
   const canUndo = history.canUndo && isReady && !isSaving
   const canRedo = history.canRedo && isReady && !isSaving
-  const isZoomed = viewTransform.scale > 1.01 || Math.abs(viewTransform.x) > 1 || Math.abs(viewTransform.y) > 1
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!isReady || isSaving || (event.pointerType !== 'touch' && event.button !== 0)) return
@@ -686,18 +647,10 @@ export default function MaskEditorModal() {
     if (!frame) return
 
     event.preventDefault()
-    const rect = frame.getBoundingClientRect()
-    const point = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    }
-    const scaleFactor = Math.exp(-event.deltaY * 0.002)
-    commitViewTransform(zoomAtPoint(
-      viewTransformRef.current,
-      point,
-      viewTransformRef.current.scale * scaleFactor,
-      { width: frame.clientWidth, height: frame.clientHeight },
-    ))
+    viewport.zoomAtPoint(
+      { x: event.clientX, y: event.clientY },
+      Math.exp(-event.deltaY * 0.002),
+    )
   }
 
   const finishStroke = (event: ReactPointerEvent<HTMLCanvasElement>) => {
