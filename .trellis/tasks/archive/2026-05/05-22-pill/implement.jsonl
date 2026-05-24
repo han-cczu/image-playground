@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "已沉淀的关键 patterns：popover 互斥 openMenu 模式（新增 'style' literal）、popover Esc + outside-click + cleanup、icon-only button aria-label、装饰 SVG aria-hidden。新 StylePickerPopover 必须遵循"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "code quality contracts；特别是 src/lib/** 不可用 window.* 前缀（新建 src/lib/stylePresets.ts 时遵守 + 单测可在 node 直接跑）"}
-{"file": ".trellis/spec/frontend/state-management.md", "reason": "zustand 单字段订阅约定 / params 持久化路径；扩 TaskParams.stylePreset 时保持订阅风格一致"}

@@ -1,1 +1,0 @@
-{"file": ".trellis/spec/frontend/service-worker.md", "reason": "审查 nginx.conf 是否给 /sw.js 配了 no-cache 头；caddy 反代是否未引入缓存层；docker-compose 是否破坏 sw.js 的更新通道"}

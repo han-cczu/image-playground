@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "装饰 SVG 必须 aria-hidden=true + focusable=false；icon-only button aria-label 约束"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "icon-only button aria-label 与暗色模式兼容（对比度 / dark: 配色）"}

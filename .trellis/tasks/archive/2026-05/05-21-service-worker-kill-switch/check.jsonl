@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "验证代码符合项目质量标准与禁用模式"}
-{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "验证新增文件放置位置正确"}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "验证 build 脚本注入的占位符与 sw.js 运行时引用一致；验证 sw.js 改动不破坏 main.tsx 的注册路径"}

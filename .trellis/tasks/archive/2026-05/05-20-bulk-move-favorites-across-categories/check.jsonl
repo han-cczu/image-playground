@@ -1,5 +1,0 @@
-{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index for review scope."}
-{"file": ".trellis/spec/frontend/state-management.md", "reason": "Verify bulk-action short-circuit semantics and Common Mistakes (forEach + void clearSelection ordering) are not regressed by the new menu-item path."}
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Review FavoriteCategoryMenu prop additions and SelectionActionBar trigger toggling for consistency with project component conventions."}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Confirm local-first data safety unaffected; ensure existing favorite-category tests stay green."}
-{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Validate the new optional props are typed safely without runtime ambiguity."}

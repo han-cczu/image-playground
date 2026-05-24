@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/frontend/state-management.md", "reason": "本任务要扩展 AppSettings (新增 promptOptimizer 字段) 和 zustand store；需要遵循项目已有的 settings normalize / persist 模式"}
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "新增 PromptOptimizerModal 组件 + InputBar 上的 ✨ 按钮，需要符合现有组件 / props / Modal 风格"}
-{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "新文件落点：src/lib/api/optimizePromptApi.ts、src/components/PromptOptimizerModal.tsx，需要符合目录约定"}
-{"file": ".trellis/spec/frontend/type-safety.md", "reason": "PromptOptimizerConfig / SSE delta 解析涉及类型守卫与 unknown 处理"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "AbortController、错误消息、toast 提示等禁用模式与项目约束"}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "SettingsModal 现有 listModels 按钮、密钥 show/hide、dirty 检测应被复用，避免重复实现"}

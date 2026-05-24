@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "校验：选中态 ring / a11y label / Esc 关闭重置 draftColor 等组件规范是否满足"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "通用代码质量校验项"}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "校验色板圆点是否复用了现有圆点样式，未引入冗余写法"}

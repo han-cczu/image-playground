@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "复核回退 UI 是否符合 Styling Patterns 与 Accessibility 强制项；class component 写法是否对齐项目其他组件风格"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "审查新组件是否仍满足 icon-only button aria-label / Esc+outside+cleanup 等 Required Patterns（虽 boundary 非 popover 但 ConfirmDialog 触发处仍要遵守）"}

@@ -1,7 +1,0 @@
-{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index for review scope."}
-{"file": ".trellis/spec/frontend/state-management.md", "reason": "Review category state, task assignment persistence, and runtime safety."}
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Review modal, selector, and management UI integration."}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Review required tests and local-first data safety."}
-{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Review TypeScript field modeling and compatibility with legacy records."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Review data flow across storage, export/import, and UI layers."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Review shared logic and duplication risks."}

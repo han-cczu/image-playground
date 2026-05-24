@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Header 修改属于组件层；需要遵守 icon button a11y 必备项（aria-label / title）等约定"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "本任务涉及移除 store selector / import，需保证不留 unused 引用；同时遵守 icon-button aria-label 规则"}

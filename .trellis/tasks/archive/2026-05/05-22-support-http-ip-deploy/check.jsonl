@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/frontend/service-worker.md", "reason": "审查 SW 注册条件是否与契约 1-4 一致；新增契约 5 写入是否完整"}
-{"file": ".trellis/spec/frontend/state-management.md", "reason": "审查 dismissedInsecureContextBanner 是否在 mergePersistedStoreState 默认值处理；持久化字段是否走 normalize"}
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "审查 InsecureContextBanner 是否符合 a11y / token / 不被 ErrorBoundary 包裹的反模式"}

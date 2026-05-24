@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/frontend/service-worker.md", "reason": "本任务直接动 SW 注册入口（main.tsx）与新增契约 5；必须读 service-worker.md 完整契约清单（1-4）确保不破坏现有约束"}
-{"file": ".trellis/spec/frontend/state-management.md", "reason": "新增持久化字段 dismissedInsecureContextBanner，要遵守 mergePersistedStoreState normalize 规则（避免再制造一次老用户白屏炸弹）"}
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "InsecureContextBanner 必须遵守 a11y 强制项（role、aria-label）、不被 ErrorBoundary 包裹（recovery surface anti-pattern）、与 EmptyState/Toast 同 token"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "新增组件 + store 字段不踩 forbidden / required patterns"}

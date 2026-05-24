@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "审查 popover/aria-label/aria-hidden/互斥 openMenu 等约束在新代码里是否完整"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "审查代码标准合规"}
-{"file": ".trellis/spec/frontend/state-management.md", "reason": "审查 zustand 订阅风格 + params 持久化兼容性（旧用户 stylePreset 缺失场景）"}

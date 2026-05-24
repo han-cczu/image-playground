@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "装饰 SVG 必须 aria-hidden=true + focusable=false；为 OpenAI logo 渲染遵守该规则"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "保持 icon SVG 的 a11y 与暗色模式兼容（currentColor）规范"}
