@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { normalizeBaseUrl } from '../lib/api'
-import { isApiProxyAvailable, readClientDevProxyConfig } from '../lib/api/devProxy'
-import { listModels } from '../lib/api/listModels'
-import { useStore, exportData, importData, clearAllData } from '../store'
-import type { ImportMode } from '../lib/exportImport'
+import { normalizeBaseUrl } from '../../lib/api'
+import { isApiProxyAvailable, readClientDevProxyConfig } from '../../lib/api/devProxy'
+import { listModels } from '../../lib/api/listModels'
+import { useStore, exportData, importData, clearAllData } from '../../store'
+import type { ImportMode } from '../../lib/exportImport'
 import {
   createDefaultOpenAIProfile,
   DEFAULT_GEMINI_BASE_URL,
@@ -17,11 +17,11 @@ import {
   normalizePromptOptimizer,
   normalizeSettings,
   switchApiProfileProvider,
-} from '../lib/api/apiProfiles'
-import type { ApiProfile, AppSettings, OpenAIProfile } from '../types'
-import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { FAVORITE_CATEGORY_COLORS } from '../lib/favoriteCategories'
-import Select from './Select'
+} from '../../lib/api/apiProfiles'
+import type { ApiProfile, AppSettings, OpenAIProfile } from '../../types'
+import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
+import { FAVORITE_CATEGORY_COLORS } from '../../lib/favoriteCategories'
+import Select from '../Select'
 
 function newId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
