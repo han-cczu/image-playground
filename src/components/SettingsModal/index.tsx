@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { ModelListDropdown } from './ModelListDropdown'
+import { normalizeTimeout } from './useTimeoutInput'
 import { normalizeBaseUrl } from '../../lib/api'
 import { isApiProxyAvailable, readClientDevProxyConfig } from '../../lib/api/devProxy'
 import { listModels } from '../../lib/api/listModels'
@@ -785,11 +786,7 @@ export default function SettingsModal() {
                   value={optimizerTimeoutInput}
                   onChange={(e) => setOptimizerTimeoutInput(e.target.value)}
                   onBlur={() => {
-                    const next = Number(optimizerTimeoutInput)
-                    const normalized =
-                      optimizerTimeoutInput.trim() === '' || Number.isNaN(next) || next <= 0
-                        ? draft.promptOptimizer.timeout
-                        : next
+                    const normalized = normalizeTimeout(optimizerTimeoutInput, draft.promptOptimizer.timeout)
                     setOptimizerTimeoutInput(String(normalized))
                     if (normalized !== draft.promptOptimizer.timeout) {
                       updatePromptOptimizer({ timeout: normalized })
