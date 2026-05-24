@@ -16,6 +16,11 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       '@typescript-eslint/no-explicit-any': 'warn',
+      // _ 前缀的参数/变量/catch 视为有意未用(全计划约定:未用参数加 _ 前缀豁免)
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
       // react-hooks v7 的 React Compiler 系规则对本项目(未启用 Compiler)过于激进,现有正常
       // 工作的代码大量命中(effect 内 setState、render 期写 ref 等)。重构期降为 warn:仍可见、
       // 可防回归,但不阻断、不强制改写既有逻辑。真正阻断的 rules-of-hooks 保持默认 error。

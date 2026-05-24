@@ -4,7 +4,6 @@ import { normalizeImageSize } from '../image/size'
 
 export const MAX_OPENAI_OUTPUT_IMAGES = 10
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function getOutputImageLimitForSettings(_settings: AppSettings) {
   return MAX_OPENAI_OUTPUT_IMAGES
 }
