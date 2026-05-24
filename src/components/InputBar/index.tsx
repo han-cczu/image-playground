@@ -1,60 +1,23 @@
-import { useRef, useEffect, useState, useMemo, type ReactNode } from 'react'
+import { useRef, useEffect, useState, useMemo } from 'react'
 import { useStore, submitTask, addImageFromFile } from '../../store'
 import { getChangedParams, normalizeParamsForSettings } from '../../lib/api/paramCompatibility'
-import { getActiveApiProfile } from '../../lib/api/apiProfiles'
 import { createMaskPreviewDataUrl } from '../../lib/image/canvasImage'
 import { filterAndSortTasks } from '../../lib/taskFilters'
 import { normalizeImageSize, type SizeTier } from '../../lib/image/size'
 import { DEFAULT_PARAMS } from '../../types'
 import SelectionActionBar from './SelectionActionBar'
-import AdvancedParamsPopover from './AdvancedParamsPopover'
-import StylePickerPopover from './StylePickerPopover'
-import { STYLE_PRESETS, isStylePresetKey } from '../../lib/stylePresets'
 import SizePickerModal from '../SizePickerModal'
-import ViewportTooltip from '../ViewportTooltip'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useAutoResizeTextarea } from './hooks/useAutoResizeTextarea'
 import { useDragDropFiles } from './hooks/useDragDropFiles'
 import { useMobileGestures } from './hooks/useMobileGestures'
-import ModelMenu from './ModelMenu'
-import ResolutionMenu from './ResolutionMenu'
 import ImageGrid from './ImageGrid'
-
-/** 通用悬浮气泡提示 */
-function ButtonTooltip({ visible, text }: { visible: boolean; text: ReactNode }) {
-  return (
-    <ViewportTooltip visible={visible} className="z-10 whitespace-nowrap">
-      {text}
-    </ViewportTooltip>
-  )
-}
+import PillRow from './PillRow'
+import TextareaInput from './TextareaInput'
+import SubmitButton from './SubmitButton'
 
 /** API 支持的最大参考图数量 */
 const API_MAX_IMAGES = 16
-
-/** 底栏 pill 通用样式 */
-const PILL_BASE =
-  'inline-flex items-center gap-1 rounded-full border border-gray-200/70 bg-white/60 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors shadow-sm hover:bg-white dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300 dark:hover:bg-white/[0.08]'
-const PILL_DISABLED =
-  'inline-flex items-center gap-1 rounded-full border border-gray-200/70 bg-gray-100/60 px-3 py-1.5 text-xs font-medium text-gray-400 shadow-sm cursor-not-allowed dark:border-white/[0.06] dark:bg-white/[0.03] dark:text-gray-500'
-
-/** 简易 chevron 图标 */
-function Chevron({ disabled = false }: { disabled?: boolean }) {
-  return (
-    <svg
-      className={`h-3 w-3 ${disabled ? 'opacity-40' : 'opacity-70'}`}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M6 9l6 6 6-6" />
-    </svg>
-  )
-}
 
 /** 从 size 字符串推断当前 tier（1K/2K/4K/auto/custom） */
 function detectTier(size: string): SizeTier | 'auto' | 'custom' {
@@ -98,7 +61,6 @@ export default function InputBar() {
   const inputImages = useStore((s) => s.inputImages)
   const removeInputImage = useStore((s) => s.removeInputImage)
   const clearInputImages = useStore((s) => s.clearInputImages)
-  const clearMaskDraft = useStore((s) => s.clearMaskDraft)
   const params = useStore((s) => s.params)
   const setParams = useStore((s) => s.setParams)
   const settings = useStore((s) => s.settings)
@@ -131,21 +93,9 @@ export default function InputBar() {
   const cardRef = useRef<HTMLDivElement>(null)
   const imagesRef = useRef<HTMLDivElement>(null)
 
-  // pill / popover 锚点
-  const modelPillRef = useRef<HTMLButtonElement>(null)
-  const stylePillRef = useRef<HTMLButtonElement>(null)
-  const resolutionPillRef = useRef<HTMLButtonElement>(null)
-  const advancedButtonRef = useRef<HTMLButtonElement>(null)
-
   const [submitHover, setSubmitHover] = useState(false)
-  const [attachHover, setAttachHover] = useState(false)
-  const [optimizeHover, setOptimizeHover] = useState(false)
   const [showSizePicker, setShowSizePicker] = useState(false)
   const [maskPreviewUrl, setMaskPreviewUrl] = useState('')
-
-  /** 顶部 pill 弹出层互斥 */
-  type OpenMenu = 'model' | 'style' | 'resolution' | 'advanced' | null
-  const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
 
   const isMobile = useIsMobile()
   const { mobileCollapsed, setMobileCollapsed, dragHandleRef: handleRef } = useMobileGestures({ isMobile })
@@ -172,7 +122,6 @@ export default function InputBar() {
     ? inputImages.filter((img) => img.id !== maskTargetImage.id)
     : inputImages
 
-  const activeProfile = getActiveApiProfile(settings)
   const displaySize = normalizeImageSize(params.size) || DEFAULT_PARAMS.size
   const ratioLabel = formatRatioLabel(displaySize)
   const tierLabel = formatTierLabel(displaySize)
@@ -259,240 +208,19 @@ export default function InputBar() {
     }
   }
 
-  /** 顶部 pill 行（模型 / 风格 / 比例 / 分辨率 / 优化 + 上传 + 高级） */
-  const renderPillRow = () => {
-    const modelText = activeProfile.model || activeProfile.name || '未配置'
-    return (
-      <div className="flex flex-wrap items-center gap-1.5">
-        {/* 模型 pill */}
-        <div className="relative">
-          <button
-            ref={modelPillRef}
-            type="button"
-            onClick={() => setOpenMenu((v) => (v === 'model' ? null : 'model'))}
-            className={PILL_BASE}
-            aria-haspopup="dialog"
-            aria-expanded={openMenu === 'model'}
-            title={`当前模型：${modelText}`}
-          >
-            <svg className="h-3.5 w-3.5 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="3" y="3" width="18" height="18" rx="3" />
-              <path d="M3 9h18" />
-              <path d="M9 21V9" />
-            </svg>
-            <span className="max-w-[140px] truncate">{modelText}</span>
-            <Chevron />
-          </button>
-          {openMenu === 'model' && (
-            <ModelMenu anchorRef={modelPillRef} onClose={() => setOpenMenu(null)} />
-          )}
-        </div>
-
-        {/* 风格 pill */}
-        <div className="relative">
-          <button
-            ref={stylePillRef}
-            type="button"
-            onClick={() => setOpenMenu((v) => (v === 'style' ? null : 'style'))}
-            className={PILL_BASE}
-            aria-haspopup="dialog"
-            aria-expanded={openMenu === 'style'}
-            title={`风格预设：${
-              params.stylePreset && isStylePresetKey(params.stylePreset)
-                ? STYLE_PRESETS[params.stylePreset].label
-                : '无风格'
-            }`}
-          >
-            <svg className="h-3.5 w-3.5 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 19l9-7-9-7-9 7 9 7z" />
-              <path d="M12 12v7" />
-            </svg>
-            <span>
-              {params.stylePreset && isStylePresetKey(params.stylePreset)
-                ? STYLE_PRESETS[params.stylePreset].label
-                : '无风格'}
-            </span>
-            <Chevron />
-          </button>
-          {openMenu === 'style' && (
-            <StylePickerPopover anchorRef={stylePillRef} onClose={() => setOpenMenu(null)} />
-          )}
-        </div>
-
-        {/* 比例 pill */}
-        <button
-          type="button"
-          onClick={() => {
-            setOpenMenu(null)
-            setShowSizePicker(true)
-          }}
-          className={PILL_BASE}
-          title={`图像比例：${ratioLabel}`}
-        >
-          <svg className="h-3.5 w-3.5 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <rect x="3" y="6" width="18" height="12" rx="2" />
-          </svg>
-          <span>{ratioLabel}</span>
-          <Chevron />
-        </button>
-
-        {/* 分辨率 pill */}
-        <div className="relative">
-          <button
-            ref={resolutionPillRef}
-            type="button"
-            onClick={() => setOpenMenu((v) => (v === 'resolution' ? null : 'resolution'))}
-            className={PILL_BASE}
-            aria-haspopup="dialog"
-            aria-expanded={openMenu === 'resolution'}
-            title={`输出分辨率：${tierLabel}`}
-          >
-            <svg className="h-3.5 w-3.5 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M4 4h6v6H4z" />
-              <path d="M14 4h6v6h-6z" />
-              <path d="M4 14h6v6H4z" />
-              <path d="M14 14h6v6h-6z" />
-            </svg>
-            <span>{tierLabel}</span>
-            <Chevron />
-          </button>
-          {openMenu === 'resolution' && (
-            <ResolutionMenu anchorRef={resolutionPillRef} onClose={() => setOpenMenu(null)} />
-          )}
-        </div>
-
-        {/* 优化 pill */}
-        <div
-          className="relative"
-          onMouseEnter={() => setOptimizeHover(true)}
-          onMouseLeave={() => setOptimizeHover(false)}
-        >
-          <ButtonTooltip visible={Boolean(optimizeTooltipText) && optimizeHover} text={optimizeTooltipText} />
-          <button
-            type="button"
-            onClick={() => canOptimize && setShowPromptOptimizer(true)}
-            disabled={!canOptimize}
-            className={canOptimize ? PILL_BASE : PILL_DISABLED}
-            title="AI 提示词优化"
-            aria-label="AI 提示词优化"
-          >
-            <svg className="h-3.5 w-3.5 opacity-80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-            </svg>
-            <span>优化</span>
-          </button>
-        </div>
-
-        <div className="ml-auto flex items-center gap-1.5">
-          {/* 重置全部输入 */}
-          {(() => {
-            const promptLen = prompt.trim().length
-            const canReset = promptLen > 0 || inputImages.length > 0 || maskDraft != null
-            const parts: string[] = []
-            if (promptLen > 0) parts.push(`文字（${promptLen} 字符）`)
-            if (inputImages.length > 0) parts.push(`${inputImages.length} 张参考图`)
-            if (maskDraft) parts.push('1 个遮罩')
-            const resetMessage = `将清空：${parts.join('、')}。继续？`
-            return (
-              <button
-                type="button"
-                disabled={!canReset}
-                onClick={() =>
-                  setConfirmDialog({
-                    title: '重置全部输入',
-                    message: resetMessage,
-                    action: () => {
-                      setPrompt('')
-                      clearInputImages()
-                      clearMaskDraft()
-                    },
-                  })
-                }
-                className={
-                  canReset
-                    ? `${PILL_BASE} hover:bg-red-50/50 hover:text-red-500 dark:hover:bg-red-950/30 dark:hover:text-red-400`
-                    : PILL_DISABLED
-                }
-                aria-label="重置全部输入"
-                title={canReset ? '清空文字、参考图与遮罩' : '当前没有可重置的内容'}
-              >
-                <svg
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                </svg>
-                <span>重置</span>
-              </button>
-            )
-          })()}
-
-          {/* 上传 */}
-          <div
-            className="relative"
-            onMouseEnter={() => setAttachHover(true)}
-            onMouseLeave={() => setAttachHover(false)}
-          >
-            <ButtonTooltip visible={atImageLimit && attachHover} text={`参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加`} />
-            <button
-              type="button"
-              onClick={() => !atImageLimit && fileInputRef.current?.click()}
-              className={atImageLimit ? PILL_DISABLED : PILL_BASE}
-              title={atImageLimit ? `已达上限 ${API_MAX_IMAGES} 张` : '上传参考图'}
-              aria-label="上传参考图"
-            >
-              <svg className="h-3.5 w-3.5 opacity-80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <path d="M17 8l-5-5-5 5" />
-                <path d="M12 3v12" />
-              </svg>
-              <span>上传</span>
-            </button>
-          </div>
-
-          {/* 高级参数 */}
-          <div className="relative">
-            <button
-              ref={advancedButtonRef}
-              type="button"
-              onClick={() => setOpenMenu((v) => (v === 'advanced' ? null : 'advanced'))}
-              className={`inline-flex h-[30px] w-[30px] items-center justify-center rounded-full border border-gray-200/70 bg-white/60 text-gray-500 shadow-sm transition-colors hover:bg-white dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300 dark:hover:bg-white/[0.08] ${
-                openMenu === 'advanced' ? 'ring-1 ring-blue-300 dark:ring-blue-500/40' : ''
-              }`}
-              aria-haspopup="dialog"
-              aria-expanded={openMenu === 'advanced'}
-              aria-label="高级参数"
-              title="高级参数（quality / format / 数量 等）"
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <line x1="21" x2="14" y1="4" y2="4" />
-                <line x1="10" x2="3" y1="4" y2="4" />
-                <line x1="21" x2="12" y1="12" y2="12" />
-                <line x1="8" x2="3" y1="12" y2="12" />
-                <line x1="21" x2="16" y1="20" y2="20" />
-                <line x1="12" x2="3" y1="20" y2="20" />
-                <line x1="14" x2="14" y1="2" y2="6" />
-                <line x1="8" x2="8" y1="10" y2="14" />
-                <line x1="16" x2="16" y1="18" y2="22" />
-              </svg>
-            </button>
-            {openMenu === 'advanced' && (
-              <AdvancedParamsPopover
-                anchorRef={advancedButtonRef}
-                onClose={() => setOpenMenu(null)}
-              />
-            )}
-          </div>
-        </div>
-      </div>
-    )
-  }
+  const pillRowElement = (
+    <PillRow
+      ratioLabel={ratioLabel}
+      tierLabel={tierLabel}
+      canOptimize={canOptimize}
+      optimizeTooltipText={optimizeTooltipText}
+      atImageLimit={atImageLimit}
+      apiMaxImages={API_MAX_IMAGES}
+      onOpenSizePicker={() => setShowSizePicker(true)}
+      onOptimize={() => setShowPromptOptimizer(true)}
+      onAttach={() => fileInputRef.current?.click()}
+    />
+  )
 
   const imageGridElement = (
     <ImageGrid
@@ -588,11 +316,11 @@ export default function InputBar() {
           {isMobile ? (
             <div className={`collapse-section${mobileCollapsed ? ' collapsed' : ''}`}>
               <div className="collapse-inner">
-                <div className="mb-3">{renderPillRow()}</div>
+                <div className="mb-3">{pillRowElement}</div>
               </div>
             </div>
           ) : (
-            <div className="mb-3">{renderPillRow()}</div>
+            <div className="mb-3">{pillRowElement}</div>
           )}
 
           {/* 输入图片行（移动端可折叠） */}
@@ -617,57 +345,23 @@ export default function InputBar() {
 
           {/* 输入框 + 发送 */}
           <div className="flex items-end gap-2">
-            <div className="relative flex-1">
-              <textarea
-                ref={textareaRef}
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={handleKeyDown}
-                rows={1}
-                placeholder="描述你想要的图片，支持粘贴图片..."
-                aria-label="描述图片"
-                className="w-full px-4 py-3 rounded-2xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] text-sm focus:outline-none leading-relaxed resize-none shadow-sm transition-[border-color,box-shadow] duration-200"
-              />
-              {prompt.trim().length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPrompt('')
-                    requestAnimationFrame(() => adjustTextareaHeight())
-                    textareaRef.current?.focus()
-                  }}
-                  className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-white/[0.06] dark:hover:text-gray-300 transition-colors"
-                  aria-label="清空输入"
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              )}
-            </div>
-            <div
-              className="relative flex shrink-0 items-end pb-0.5"
-              onMouseEnter={() => setSubmitHover(true)}
-              onMouseLeave={() => setSubmitHover(false)}
-            >
-              <ButtonTooltip visible={!settings.apiKey && submitHover} text="尚未完成 API 配置，请点 sidebar 底部齿轮按钮打开设置" />
-              <button
-                type="button"
-                onClick={() => settings.apiKey ? submitTask() : setShowSettings(true)}
-                disabled={settings.apiKey ? !canSubmit : false}
-                className={`flex h-11 w-11 items-center justify-center rounded-2xl shadow-sm transition-all hover:shadow ${
-                  !settings.apiKey
-                    ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
-                    : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
-                }`}
-                title={settings.apiKey ? (maskDraft ? '遮罩编辑 (Ctrl+Enter)' : '生成 (Ctrl+Enter)') : '请先配置 API'}
-                aria-label={maskDraft ? '提交遮罩编辑' : '提交生成'}
-              >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12l14-7-3 7 3 7-14-7z" />
-                </svg>
-              </button>
-            </div>
+            <TextareaInput
+              value={prompt}
+              onChange={setPrompt}
+              onKeyDown={handleKeyDown}
+              onClear={() => setPrompt('')}
+              textareaRef={textareaRef}
+              adjustHeight={adjustTextareaHeight}
+            />
+            <SubmitButton
+              canSubmit={Boolean(canSubmit)}
+              hasMask={Boolean(maskDraft)}
+              hover={submitHover}
+              onHoverChange={setSubmitHover}
+              onSubmit={submitTask}
+              onOpenSettings={() => setShowSettings(true)}
+              needsConfig={!settings.apiKey}
+            />
           </div>
 
           <input
