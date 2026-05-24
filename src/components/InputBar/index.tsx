@@ -19,6 +19,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { useImageHintTimer } from './hooks/useImageHintTimer'
 import { useAutoResizeTextarea } from './hooks/useAutoResizeTextarea'
 import { useDragDropFiles } from './hooks/useDragDropFiles'
+import { useMobileGestures } from './hooks/useMobileGestures'
 
 /** 通用悬浮气泡提示 */
 function ButtonTooltip({ visible, text }: { visible: boolean; text: ReactNode }) {
@@ -624,7 +625,6 @@ export default function InputBar() {
   const [submitHover, setSubmitHover] = useState(false)
   const [attachHover, setAttachHover] = useState(false)
   const [optimizeHover, setOptimizeHover] = useState(false)
-  const [mobileCollapsed, setMobileCollapsed] = useState(false)
   const [showSizePicker, setShowSizePicker] = useState(false)
   const [maskPreviewUrl, setMaskPreviewUrl] = useState('')
   const [imageDragIndex, setImageDragIndex] = useState<number | null>(null)
@@ -635,8 +635,6 @@ export default function InputBar() {
   type OpenMenu = 'model' | 'style' | 'resolution' | 'advanced' | null
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
 
-  const handleRef = useRef<HTMLDivElement>(null)
-  const dragTouchRef = useRef({ startY: 0, moved: false })
   const imageDragIndexRef = useRef<number | null>(null)
   const imageTouchDragRef = useRef({ index: null as number | null, startX: 0, startY: 0, moved: false })
   const imageDragOverIndexRef = useRef<number | null>(null)
@@ -644,6 +642,7 @@ export default function InputBar() {
   const suppressImageClickRef = useRef(false)
   const maskConflictNoticeShownRef = useRef(false)
   const isMobile = useIsMobile()
+  const { mobileCollapsed, setMobileCollapsed, dragHandleRef: handleRef } = useMobileGestures({ isMobile })
   const { imageHintId, showHint: showImageHint, hideHint: hideImageHint, startHintTouch: startImageHintTouch } = useImageHintTimer()
   const { adjustHeight: adjustTextareaHeight } = useAutoResizeTextarea({
     textareaRef,
@@ -754,34 +753,6 @@ export default function InputBar() {
       submitTask()
     }
   }
-
-  // 移动端拖动条手势
-  useEffect(() => {
-    const el = handleRef.current
-    if (!el) return
-    const onTouchStart = (e: TouchEvent) => {
-      dragTouchRef.current = { startY: e.touches[0].clientY, moved: false }
-    }
-    const onTouchMove = (e: TouchEvent) => {
-      const dy = e.touches[0].clientY - dragTouchRef.current.startY
-      if (Math.abs(dy) > 10) dragTouchRef.current.moved = true
-      if (dy > 30) setMobileCollapsed(true)
-      if (dy < -30) setMobileCollapsed(false)
-    }
-    const onTouchEnd = () => {
-      if (!dragTouchRef.current.moved) {
-        setMobileCollapsed((v) => !v)
-      }
-    }
-    el.addEventListener('touchstart', onTouchStart, { passive: true })
-    el.addEventListener('touchmove', onTouchMove, { passive: true })
-    el.addEventListener('touchend', onTouchEnd)
-    return () => {
-      el.removeEventListener('touchstart', onTouchStart)
-      el.removeEventListener('touchmove', onTouchMove)
-      el.removeEventListener('touchend', onTouchEnd)
-    }
-  }, [])
 
   const getTouchDropIndex = (touch: React.Touch) => {
     const target = document
