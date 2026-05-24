@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeTimeout } from './useTimeoutInput'
+import { normalizeTimeout } from './timeout'
 
 describe('normalizeTimeout', () => {
   const fallback = 60
@@ -32,7 +32,7 @@ describe('normalizeTimeout', () => {
     expect(normalizeTimeout(' 45 ', fallback)).toBe(45)
   })
 
-  it('truncates decimal to integer', () => {
-    expect(normalizeTimeout('30.9', fallback)).toBe(30)
+  it('preserves decimal (no truncation)', () => {
+    expect(normalizeTimeout('30.9', fallback)).toBe(30.9)
   })
 })

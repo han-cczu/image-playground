@@ -6,7 +6,7 @@ import {
 } from '../../lib/api/apiProfiles'
 import type { AppSettings, OpenAIProfile } from '../../types'
 import { ModelListDropdown } from './ModelListDropdown'
-import { normalizeTimeout } from './useTimeoutInput'
+import { normalizeTimeout } from './timeout'
 
 export interface OptimizerSectionProps {
   optimizer: AppSettings['promptOptimizer']
