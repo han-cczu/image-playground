@@ -3,7 +3,7 @@ import { useStore, submitTask, addImageFromFile } from '../../store'
 import { getChangedParams, normalizeParamsForSettings } from '../../lib/api/paramCompatibility'
 import { createMaskPreviewDataUrl } from '../../lib/image/canvasImage'
 import { filterAndSortTasks } from '../../lib/taskFilters'
-import { normalizeImageSize, type SizeTier } from '../../lib/image/size'
+import { normalizeImageSize, detectTier } from '../../lib/image/size'
 import { DEFAULT_PARAMS } from '../../types'
 import SelectionActionBar from './SelectionActionBar'
 import SizePickerModal from '../SizePickerModal'
@@ -18,21 +18,6 @@ import SubmitButton from './SubmitButton'
 
 /** API 支持的最大参考图数量 */
 const API_MAX_IMAGES = 16
-
-/** 从 size 字符串推断当前 tier（1K/2K/4K/auto/custom） */
-function detectTier(size: string): SizeTier | 'auto' | 'custom' {
-  const trimmed = (size || '').trim()
-  if (!trimmed || trimmed === 'auto') return 'auto'
-  const m = trimmed.match(/^\s*(\d+)\s*[xX×]\s*(\d+)\s*$/)
-  if (!m) return 'custom'
-  const w = Number(m[1])
-  const h = Number(m[2])
-  const longSide = Math.max(w, h)
-  // 阈值在两档分辨率之间取中点
-  if (longSide <= 1536) return '1K'
-  if (longSide <= 2944) return '2K'
-  return '4K'
-}
 
 /** 友好显示的比例标签（在底栏 pill 上显示） */
 function formatRatioLabel(size: string): string {
@@ -98,7 +83,7 @@ export default function InputBar() {
   const [maskPreviewUrl, setMaskPreviewUrl] = useState('')
 
   const isMobile = useIsMobile()
-  const { mobileCollapsed, setMobileCollapsed, dragHandleRef: handleRef } = useMobileGestures({ isMobile })
+  const { mobileCollapsed, setMobileCollapsed, dragHandleRef: handleRef } = useMobileGestures()
   const { adjustHeight: adjustTextareaHeight } = useAutoResizeTextarea({
     textareaRef,
     imagesRef,
@@ -193,7 +178,6 @@ export default function InputBar() {
 
   const { isDragging } = useDragDropFiles({
     onFiles: (files) => handleFilesRef.current(files),
-    atImageLimit,
   })
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

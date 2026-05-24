@@ -2,9 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 
 export function useDragDropFiles(args: {
   onFiles: (files: File[]) => void
-  atImageLimit: boolean
 }): { isDragging: boolean } {
-  const { onFiles, atImageLimit: _atImageLimit } = args
+  const { onFiles } = args
   const [isDragging, setIsDragging] = useState(false)
   const dragCounter = useRef(0)
   const onFilesRef = useRef(onFiles)

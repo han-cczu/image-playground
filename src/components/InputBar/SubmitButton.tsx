@@ -1,14 +1,4 @@
-import type { ReactNode } from 'react'
-import ViewportTooltip from '../ViewportTooltip'
-
-/** 通用悬浮气泡提示 */
-function ButtonTooltip({ visible, text }: { visible: boolean; text: ReactNode }) {
-  return (
-    <ViewportTooltip visible={visible} className="z-10 whitespace-nowrap">
-      {text}
-    </ViewportTooltip>
-  )
-}
+import ButtonTooltip from './ButtonTooltip'
 
 export interface SubmitButtonProps {
   canSubmit: boolean

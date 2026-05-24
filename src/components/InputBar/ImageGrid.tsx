@@ -244,7 +244,7 @@ export default function ImageGrid({
     }
   }
 
-  const renderClearAllButton = () => (
+  const clearAllButton = (
     <button
       onClick={() =>
         onConfirmClearAll({
@@ -290,14 +290,13 @@ export default function ImageGrid({
               onEditMask={onEditMask}
               dragHandlers={dragHandlers}
               hintHandlers={{
-                onTouchStart: () => startImageHintTouch(img.id),
                 onHintShow: () => imageHintText && (!isMobile || isMaskTarget) && showImageHint(img.id),
                 onHintHide: hideImageHint,
               }}
             />
           )
         })}
-        {renderClearAllButton()}
+        {clearAllButton}
       </div>
       {touchDragPreview?.src && createPortal(
         <div

@@ -1,11 +1,10 @@
 import { useState, useRef, useEffect, type Dispatch, type SetStateAction } from 'react'
 
-export function useMobileGestures(args: { isMobile: boolean }): {
+export function useMobileGestures(): {
   mobileCollapsed: boolean
   setMobileCollapsed: Dispatch<SetStateAction<boolean>>
   dragHandleRef: React.RefObject<HTMLDivElement | null>
 } {
-  const { isMobile: _isMobile } = args
   const [mobileCollapsed, setMobileCollapsed] = useState(false)
   const dragHandleRef = useRef<HTMLDivElement>(null)
   const dragTouchRef = useRef({ startY: 0, moved: false })

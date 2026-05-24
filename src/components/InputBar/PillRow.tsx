@@ -1,21 +1,12 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useRef, useState } from 'react'
 import { useStore } from '../../store'
 import { getActiveApiProfile } from '../../lib/api/apiProfiles'
 import { STYLE_PRESETS, isStylePresetKey } from '../../lib/stylePresets'
-import ViewportTooltip from '../ViewportTooltip'
 import ModelMenu from './ModelMenu'
 import ResolutionMenu from './ResolutionMenu'
 import StylePickerPopover from './StylePickerPopover'
 import AdvancedParamsPopover from './AdvancedParamsPopover'
-
-/** 通用悬浮气泡提示 */
-function ButtonTooltip({ visible, text }: { visible: boolean; text: ReactNode }) {
-  return (
-    <ViewportTooltip visible={visible} className="z-10 whitespace-nowrap">
-      {text}
-    </ViewportTooltip>
-  )
-}
+import ButtonTooltip from './ButtonTooltip'
 
 /** 底栏 pill 通用样式 */
 const PILL_BASE =

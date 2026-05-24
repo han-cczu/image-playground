@@ -1,33 +1,6 @@
 import { useRef, useEffect } from 'react'
 import { useStore } from '../../store'
-import { calculateImageSize, normalizeImageSize, type SizeTier } from '../../lib/image/size'
-
-/** 从 size 字符串推断当前 tier（1K/2K/4K/auto/custom） */
-function detectTier(size: string): SizeTier | 'auto' | 'custom' {
-  const trimmed = (size || '').trim()
-  if (!trimmed || trimmed === 'auto') return 'auto'
-  const m = trimmed.match(/^\s*(\d+)\s*[xX×]\s*(\d+)\s*$/)
-  if (!m) return 'custom'
-  const w = Number(m[1])
-  const h = Number(m[2])
-  const longSide = Math.max(w, h)
-  // 阈值在两档分辨率之间取中点
-  if (longSide <= 1536) return '1K'
-  if (longSide <= 2944) return '2K'
-  return '4K'
-}
-
-/** 从 size 字符串推断比例字符串（保留简化形式以便复用 calculateImageSize） */
-function detectRatioFromSize(size: string): string | null {
-  const trimmed = (size || '').trim()
-  if (!trimmed || trimmed === 'auto') return null
-  const m = trimmed.match(/^\s*(\d+)\s*[xX×]\s*(\d+)\s*$/)
-  if (!m) return null
-  const w = Number(m[1])
-  const h = Number(m[2])
-  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null
-  return `${w}:${h}`
-}
+import { calculateImageSize, normalizeImageSize, detectTier, detectRatioFromSize, type SizeTier } from '../../lib/image/size'
 
 /**
  * 分辨率 pill 弹出菜单：自动 / 1K / 2K / 4K。

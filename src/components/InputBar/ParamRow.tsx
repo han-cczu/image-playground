@@ -1,18 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import { DEFAULT_PARAMS } from '../../types'
 import { getOutputImageLimitForSettings } from '../../lib/api/paramCompatibility'
 import { normalizeImageSize } from '../../lib/image/size'
 import Select from '../Select'
-import ViewportTooltip from '../ViewportTooltip'
-
-function ButtonTooltip({ visible, text }: { visible: boolean; text: ReactNode }) {
-  return (
-    <ViewportTooltip visible={visible} className="z-10 whitespace-nowrap">
-      {text}
-    </ViewportTooltip>
-  )
-}
+import ButtonTooltip from './ButtonTooltip'
 
 const SELECT_CLASS =
   'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-xs transition-all duration-200 shadow-sm'

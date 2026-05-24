@@ -1,15 +1,5 @@
-import type { ReactNode } from 'react'
 import type { InputImage } from '../../types'
-import ViewportTooltip from '../ViewportTooltip'
-
-/** 通用悬浮气泡提示 */
-function ButtonTooltip({ visible, text }: { visible: boolean; text: ReactNode }) {
-  return (
-    <ViewportTooltip visible={visible} className="z-10 whitespace-nowrap">
-      {text}
-    </ViewportTooltip>
-  )
-}
+import ButtonTooltip from './ButtonTooltip'
 
 /** 单张缩略图需要的拖拽 / 触摸回调集合（由 ImageGrid 提供） */
 export interface ImageDragHandlers {
@@ -45,7 +35,7 @@ export interface ImageThumbProps {
   onRemove: (index: number) => void
   onEditMask: (id: string) => void
   dragHandlers: ImageDragHandlers
-  hintHandlers: { onTouchStart: () => void; onHintShow: () => void; onHintHide: () => void }
+  hintHandlers: { onHintShow: () => void; onHintHide: () => void }
 }
 
 export default function ImageThumb({
