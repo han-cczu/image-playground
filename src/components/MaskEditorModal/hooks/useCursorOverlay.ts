@@ -1,10 +1,6 @@
 import { useEffect } from 'react'
 import type { Point, ViewTransform } from '../../../lib/image/viewportTransform'
-
-interface CanvasSize {
-  width: number
-  height: number
-}
+import type { CanvasSize } from '../types'
 
 /**
  * 笔刷光标叠加层。

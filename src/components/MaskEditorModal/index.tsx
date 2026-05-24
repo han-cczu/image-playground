@@ -4,10 +4,7 @@ import { canvasToBlob } from '../../lib/image/canvasImage'
 import { storeImage } from '../../lib/db'
 import { replaceMaskTargetImage } from '../../lib/image/maskPreprocess'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
-import {
-  type Point,
-  type ViewTransform,
-} from '../../lib/image/viewportTransform'
+import { type Point } from '../../lib/image/viewportTransform'
 import { useMaskHistory } from './hooks/useMaskHistory'
 import { useCanvasViewport } from './hooks/useCanvasViewport'
 import { useMaskCanvasInit } from './hooks/useMaskCanvasInit'
@@ -17,29 +14,8 @@ import CanvasViewport from './CanvasViewport'
 import BrushToolbar from './BrushToolbar'
 import BrushSizePanel from './BrushSizePanel'
 import MaskInfoPopover from './MaskInfoPopover'
-
-type Tool = 'brush' | 'eraser'
-
-interface CanvasSize {
-  width: number
-  height: number
-}
-
-interface SliderAnchor {
-  left: number
-  bottom: number
-}
-
-const DEFAULT_VIEW_TRANSFORM: ViewTransform = { scale: 1, x: 0, y: 0 }
-
-function fillWhiteMask(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) throw new Error('当前浏览器不支持 Canvas')
-  ctx.globalCompositeOperation = 'source-over'
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
-  ctx.fillStyle = '#fff'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-}
+import { fillWhiteMask } from './maskCanvas'
+import type { Tool, CanvasSize, SliderAnchor } from './types'
 
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -83,7 +59,7 @@ export default function MaskEditorModal() {
   const [showMaskInfo, setShowMaskInfo] = useState(false)
 
   const viewport = useCanvasViewport({ size, baseFrameRef, stageRef })
-  const { viewTransform, viewTransformRef, commitViewTransform, resetViewTransform, isZoomed } = viewport
+  const { viewTransform, viewTransformRef, resetViewTransform, isZoomed } = viewport
 
   const history = useMaskHistory({
     maskCanvasRef,
@@ -150,7 +126,8 @@ export default function MaskEditorModal() {
         previewFrameRef.current = null
       }
     },
-    resetViewportToDefault: () => commitViewTransform(DEFAULT_VIEW_TRANSFORM),
+    // resetViewportToDefault: 同步重置到 identity；resetViewTransform: rAF 内重置到舒适适配变换
+    resetViewportToDefault: viewport.resetViewportToDefault,
     resetViewTransform: () => resetViewTransform(),
     resetHistory: () => {
       undoStackRef.current = []
@@ -204,7 +181,7 @@ export default function MaskEditorModal() {
     previewFrameRef.current = window.requestAnimationFrame(renderPreviewNow)
   }
 
-  const updateCursor = (point: Point | null) => updateCursorRef.current(point)
+  const imperativeUpdateCursor = (point: Point | null) => updateCursorRef.current(point)
 
   function getViewportCenterCanvasPoint(): Point | null {
     const frame = baseFrameRef.current
@@ -298,7 +275,7 @@ export default function MaskEditorModal() {
 
     pointer.setIsPointerOverCanvas(false)
     pointer.setHoverPoint(null)
-    if (size) updateCursor(getViewportCenterCanvasPoint())
+    if (size) imperativeUpdateCursor(getViewportCenterCanvasPoint())
 
     setSliderAnchor({
       left: rect.left + rect.width / 2,
@@ -309,7 +286,7 @@ export default function MaskEditorModal() {
 
   const handleBrushSizeChange = (nextSize: number) => {
     setBrushSize(nextSize)
-    if (!isPointerOverCanvas && size) updateCursor(getViewportCenterCanvasPoint())
+    if (!isPointerOverCanvas && size) imperativeUpdateCursor(getViewportCenterCanvasPoint())
   }
 
   return (

@@ -8,13 +8,7 @@ import {
 } from '../../../lib/image/viewportTransform'
 import type { CanvasViewport } from './useCanvasViewport'
 import type { MaskHistory } from './useMaskHistory'
-
-type Tool = 'brush' | 'eraser'
-
-interface CanvasSize {
-  width: number
-  height: number
-}
+import type { Tool, CanvasSize, SliderAnchor } from '../types'
 
 interface PinchGesture {
   startTransform: ViewTransform
@@ -87,7 +81,7 @@ export function usePointerInteraction(args: {
   updateCursor: (point: Point | null) => void
   getViewportCenterCanvasPoint: () => Point | null
   setShowBrushControls: (value: boolean) => void
-  setSliderAnchor: (value: null) => void
+  setSliderAnchor: (value: SliderAnchor | null) => void
 }): PointerInteraction {
   const {
     maskCanvasRef,

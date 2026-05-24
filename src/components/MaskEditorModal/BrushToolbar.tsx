@@ -1,4 +1,4 @@
-type Tool = 'brush' | 'eraser'
+import type { Tool } from './types'
 
 interface BrushToolbarProps {
   tool: Tool

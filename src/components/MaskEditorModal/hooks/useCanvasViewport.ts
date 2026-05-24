@@ -6,11 +6,7 @@ import {
   type Point,
   type ViewTransform,
 } from '../../../lib/image/viewportTransform'
-
-interface CanvasSize {
-  width: number
-  height: number
-}
+import type { CanvasSize } from '../types'
 
 const DEFAULT_VIEW_TRANSFORM: ViewTransform = { scale: 1, x: 0, y: 0 }
 
@@ -18,6 +14,7 @@ export interface CanvasViewport {
   viewTransform: ViewTransform
   viewTransformRef: React.MutableRefObject<ViewTransform>
   commitViewTransform: (t: ViewTransform) => void
+  resetViewportToDefault: () => void
   resetViewTransform: () => void
   zoomAtPoint: (clientPoint: Point, factor: number) => void
   isZoomed: boolean
@@ -41,6 +38,10 @@ export function useCanvasViewport(args: {
     viewTransformRef.current = clamped
     setViewTransform(clamped)
   }, [baseFrameRef])
+
+  const resetViewportToDefault = useCallback(() => {
+    commitViewTransform(DEFAULT_VIEW_TRANSFORM)
+  }, [commitViewTransform])
 
   const resetViewTransform = useCallback(() => {
     const frame = baseFrameRef.current
@@ -92,6 +93,7 @@ export function useCanvasViewport(args: {
     viewTransform,
     viewTransformRef,
     commitViewTransform,
+    resetViewportToDefault,
     resetViewTransform,
     zoomAtPoint,
     isZoomed,

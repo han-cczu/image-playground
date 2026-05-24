@@ -3,22 +3,10 @@ import type { MaskDraft } from '../../../types'
 import { ensureImageCached } from '../../../store'
 import { loadImage } from '../../../lib/image/canvasImage'
 import { prepareMaskTargetDataUrl } from '../../../lib/image/maskPreprocess'
+import { fillWhiteMask } from '../maskCanvas'
+import type { CanvasSize } from '../types'
 
 type ShowToast = (message: string, type?: 'info' | 'success' | 'error') => void
-
-interface CanvasSize {
-  width: number
-  height: number
-}
-
-function fillWhiteMask(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) throw new Error('当前浏览器不支持 Canvas')
-  ctx.globalCompositeOperation = 'source-over'
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
-  ctx.fillStyle = '#fff'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-}
 
 function drawMaskImageToCanvas(maskImage: HTMLImageElement, maskCanvas: HTMLCanvasElement) {
   const maskAspect = maskImage.naturalWidth / maskImage.naturalHeight

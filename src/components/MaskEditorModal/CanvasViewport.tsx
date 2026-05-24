@@ -1,10 +1,6 @@
 import type { ReactNode, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react'
 import type { Point, ViewTransform } from '../../lib/image/viewportTransform'
-
-interface CanvasSize {
-  width: number
-  height: number
-}
+import type { CanvasSize } from './types'
 
 interface CanvasViewportProps {
   size: CanvasSize | null
@@ -62,29 +58,29 @@ export default function CanvasViewport({
           maxHeight: '100%',
         }}
       >
-          <div
-            className="absolute inset-0 will-change-transform"
-            style={{
-              transform: `matrix(${viewTransform.scale}, 0, 0, ${viewTransform.scale}, ${viewTransform.x}, ${viewTransform.y})`,
-              transformOrigin: '0 0',
-            }}
-          >
-            <canvas ref={imageCanvasRef} className="absolute inset-0 h-full w-full" />
-            <canvas ref={previewCanvasRef} className="absolute inset-0 h-full w-full pointer-events-none" />
-            <canvas
-              ref={maskCanvasRef}
-              className="absolute inset-0 h-full w-full touch-none select-none opacity-0"
-              style={{ cursor: isPanning ? 'grabbing' : isAltKeyPressed ? 'grab' : hoverPoint ? 'none' : 'crosshair' }}
-              onPointerDown={handlers.onPointerDown}
-              onPointerMove={handlers.onPointerMove}
-              onPointerUp={handlers.onPointerUp}
-              onPointerCancel={handlers.onPointerUp}
-              onLostPointerCapture={handlers.onPointerUp}
-              onPointerLeave={handlers.onPointerLeave}
-            />
-          </div>
+        <div
+          className="absolute inset-0 will-change-transform"
+          style={{
+            transform: `matrix(${viewTransform.scale}, 0, 0, ${viewTransform.scale}, ${viewTransform.x}, ${viewTransform.y})`,
+            transformOrigin: '0 0',
+          }}
+        >
+          <canvas ref={imageCanvasRef} className="absolute inset-0 h-full w-full" />
+          <canvas ref={previewCanvasRef} className="absolute inset-0 h-full w-full pointer-events-none" />
+          <canvas
+            ref={maskCanvasRef}
+            className="absolute inset-0 h-full w-full touch-none select-none opacity-0"
+            style={{ cursor: isPanning ? 'grabbing' : isAltKeyPressed ? 'grab' : hoverPoint ? 'none' : 'crosshair' }}
+            onPointerDown={handlers.onPointerDown}
+            onPointerMove={handlers.onPointerMove}
+            onPointerUp={handlers.onPointerUp}
+            onPointerCancel={handlers.onPointerUp}
+            onLostPointerCapture={handlers.onPointerUp}
+            onPointerLeave={handlers.onPointerLeave}
+          />
         </div>
-        <canvas ref={cursorCanvasRef} className="absolute inset-0 h-full w-full pointer-events-none" />
+      </div>
+      <canvas ref={cursorCanvasRef} className="absolute inset-0 h-full w-full pointer-events-none" />
       {children}
     </div>
   )
