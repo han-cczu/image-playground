@@ -15,6 +15,7 @@ import StylePickerPopover from './StylePickerPopover'
 import { STYLE_PRESETS, isStylePresetKey } from '../../lib/stylePresets'
 import SizePickerModal from '../SizePickerModal'
 import ViewportTooltip from '../ViewportTooltip'
+import { useIsMobile } from '../../hooks/useIsMobile'
 
 /** 通用悬浮气泡提示 */
 function ButtonTooltip({ visible, text }: { visible: boolean; text: ReactNode }) {
@@ -50,16 +51,6 @@ function Chevron({ disabled = false }: { disabled?: boolean }) {
       <path d="M6 9l6 6 6-6" />
     </svg>
   )
-}
-
-function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 640)
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < 640)
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-  return isMobile
 }
 
 /** 从 size 字符串推断当前 tier（1K/2K/4K/auto/custom） */
