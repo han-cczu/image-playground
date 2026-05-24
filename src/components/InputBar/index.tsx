@@ -16,6 +16,7 @@ import { STYLE_PRESETS, isStylePresetKey } from '../../lib/stylePresets'
 import SizePickerModal from '../SizePickerModal'
 import ViewportTooltip from '../ViewportTooltip'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { useImageHintTimer } from './hooks/useImageHintTimer'
 
 /** 通用悬浮气泡提示 */
 function ButtonTooltip({ visible, text }: { visible: boolean; text: ReactNode }) {
@@ -623,7 +624,6 @@ export default function InputBar() {
   const [submitHover, setSubmitHover] = useState(false)
   const [attachHover, setAttachHover] = useState(false)
   const [optimizeHover, setOptimizeHover] = useState(false)
-  const [imageHintId, setImageHintId] = useState<string | null>(null)
   const [mobileCollapsed, setMobileCollapsed] = useState(false)
   const [showSizePicker, setShowSizePicker] = useState(false)
   const [maskPreviewUrl, setMaskPreviewUrl] = useState('')
@@ -643,9 +643,9 @@ export default function InputBar() {
   const imageDragPreviewRef = useRef<HTMLElement | null>(null)
   const suppressImageClickRef = useRef(false)
   const maskConflictNoticeShownRef = useRef(false)
-  const imageHintTimerRef = useRef<number | null>(null)
   const dragCounter = useRef(0)
   const isMobile = useIsMobile()
+  const { imageHintId, showHint: showImageHint, hideHint: hideImageHint, startHintTouch: startImageHintTouch } = useImageHintTimer()
 
   const canSubmit = prompt.trim() && settings.apiKey
   const optimizerKeyConfigured = Boolean(settings.promptOptimizer.apiKey.trim())
@@ -677,12 +677,6 @@ export default function InputBar() {
     }
   }, [params, settings, setParams])
 
-  useEffect(() => () => {
-    if (imageHintTimerRef.current != null) {
-      window.clearTimeout(imageHintTimerRef.current)
-    }
-  }, [])
-
   useEffect(() => {
     let cancelled = false
     if (!maskDraft || !maskTargetImage) {
@@ -702,28 +696,6 @@ export default function InputBar() {
       cancelled = true
     }
   }, [maskDraft, maskTargetImage?.id, maskTargetImage?.dataUrl])
-
-  const clearImageHintTimer = () => {
-    if (imageHintTimerRef.current != null) {
-      window.clearTimeout(imageHintTimerRef.current)
-      imageHintTimerRef.current = null
-    }
-  }
-
-  const showImageHint = (id: string) => setImageHintId(id)
-
-  const hideImageHint = () => {
-    setImageHintId(null)
-    clearImageHintTimer()
-  }
-
-  const startImageHintTouch = (id: string) => {
-    clearImageHintTimer()
-    imageHintTimerRef.current = window.setTimeout(() => {
-      setImageHintId(id)
-      imageHintTimerRef.current = null
-    }, 450)
-  }
 
   const handleFiles = async (files: FileList | File[]) => {
     try {
@@ -1053,8 +1025,7 @@ export default function InputBar() {
       if (touchDrag.index === null) return
 
       touchDrag.moved = true
-      clearImageHintTimer()
-      setImageHintId(null)
+      hideImageHint()
       suppressImageClickRef.current = true
       e.preventDefault()
       setImageDragIndex(touchDrag.index)
@@ -1065,7 +1036,7 @@ export default function InputBar() {
 
     const handleTouchEnd = (e: React.TouchEvent) => {
       const touchDrag = imageTouchDragRef.current
-      clearImageHintTimer()
+      hideImageHint()
       if (touchDrag.index !== null && imageDragOverIndexRef.current !== null) {
         e.preventDefault()
         moveInputImage(touchDrag.index, imageDragOverIndexRef.current)
