@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { ensureImageCached, useStore } from '../../store'
-import { canvasToBlob, loadImage } from '../../lib/image/canvasImage'
+import { useStore } from '../../store'
+import { canvasToBlob } from '../../lib/image/canvasImage'
 import { storeImage } from '../../lib/db'
-import { prepareMaskTargetDataUrl, replaceMaskTargetImage } from '../../lib/image/maskPreprocess'
+import { replaceMaskTargetImage } from '../../lib/image/maskPreprocess'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
 import {
   clientPointToCanvasPoint,
@@ -14,6 +14,7 @@ import {
 } from '../../lib/image/viewportTransform'
 import { useMaskHistory } from './hooks/useMaskHistory'
 import { useCanvasViewport } from './hooks/useCanvasViewport'
+import { useMaskCanvasInit } from './hooks/useMaskCanvasInit'
 
 type Tool = 'brush' | 'eraser'
 
@@ -74,21 +75,6 @@ function fillWhiteMask(canvas: HTMLCanvasElement) {
   ctx.fillRect(0, 0, canvas.width, canvas.height)
 }
 
-function drawMaskImageToCanvas(maskImage: HTMLImageElement, maskCanvas: HTMLCanvasElement) {
-  const maskAspect = maskImage.naturalWidth / maskImage.naturalHeight
-  const canvasAspect = maskCanvas.width / maskCanvas.height
-  if (Math.abs(maskAspect - canvasAspect) > 0.001) {
-    throw new Error('遮罩尺寸与当前图片不一致')
-  }
-
-  const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true })
-  if (!maskCtx) throw new Error('当前浏览器不支持 Canvas')
-  maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height)
-  maskCtx.imageSmoothingEnabled = true
-  maskCtx.imageSmoothingQuality = 'high'
-  maskCtx.drawImage(maskImage, 0, 0, maskCanvas.width, maskCanvas.height)
-}
-
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -124,8 +110,6 @@ export default function MaskEditorModal() {
   const panGestureRef = useRef<PanGesture | null>(null)
   const previewFrameRef = useRef<number | null>(null)
   const saveTokenRef = useRef(0)
-  const sessionIdRef = useRef(0)
-  const activeSessionIdRef = useRef(0)
 
   const [sourceDataUrl, setSourceDataUrl] = useState('')
   const [size, setSize] = useState<CanvasSize | null>(null)
@@ -150,6 +134,47 @@ export default function MaskEditorModal() {
     fillWhiteMask: () => fillWhiteMask(maskCanvasRef.current!),
   })
   const { undoStackRef, redoStackRef, syncHistoryState } = history
+
+  const { activeSessionIdRef } = useMaskCanvasInit({
+    imageId,
+    maskDraft,
+    imageCanvasRef,
+    maskCanvasRef,
+    previewCanvasRef,
+    renderPreview: () => renderPreview(),
+    showToast,
+    setSourceDataUrl,
+    setSize,
+    setIsLoading,
+    setMaskEditorImageId,
+    cancelPreviewFrame: () => {
+      if (previewFrameRef.current != null) {
+        window.cancelAnimationFrame(previewFrameRef.current)
+        previewFrameRef.current = null
+      }
+    },
+    resetViewportToDefault: () => commitViewTransform(DEFAULT_VIEW_TRANSFORM),
+    resetViewTransform: () => resetViewTransform(),
+    resetHistory: () => {
+      undoStackRef.current = []
+      redoStackRef.current = []
+      syncHistoryState()
+    },
+    resetGestures: () => {
+      pointerPositionsRef.current.clear()
+      pinchGestureRef.current = null
+      panGestureRef.current = null
+      setIsPanning(false)
+    },
+    resetActiveStroke: () => {
+      activePointerIdRef.current = null
+      lastPointRef.current = null
+      pointerPositionsRef.current.clear()
+      pinchGestureRef.current = null
+      panGestureRef.current = null
+      setIsPanning(false)
+    },
+  })
 
   const close = () => {
     if (isSaving) return
@@ -376,135 +401,6 @@ export default function MaskEditorModal() {
     ctx.restore()
     renderPreview()
   }
-
-  useEffect(() => {
-    if (!imageId) {
-      activeSessionIdRef.current = 0
-      return
-    }
-
-    const nextSessionId = sessionIdRef.current + 1
-    sessionIdRef.current = nextSessionId
-    activeSessionIdRef.current = nextSessionId
-
-    return () => {
-      if (activeSessionIdRef.current === nextSessionId) {
-        activeSessionIdRef.current = 0
-      }
-    }
-  }, [imageId])
-
-  useEffect(() => {
-    if (!imageId) {
-      if (previewFrameRef.current != null) {
-        window.cancelAnimationFrame(previewFrameRef.current)
-        previewFrameRef.current = null
-      }
-      setSourceDataUrl('')
-      setSize(null)
-      setIsLoading(false)
-      pointerPositionsRef.current.clear()
-      pinchGestureRef.current = null
-      panGestureRef.current = null
-      setIsPanning(false)
-      commitViewTransform(DEFAULT_VIEW_TRANSFORM)
-      undoStackRef.current = []
-      redoStackRef.current = []
-      syncHistoryState()
-      return
-    }
-
-    const targetImageId = imageId
-    let cancelled = false
-    setIsLoading(true)
-    setSourceDataUrl('')
-    setSize(null)
-    undoStackRef.current = []
-    redoStackRef.current = []
-    syncHistoryState()
-
-    async function loadCanvases() {
-      try {
-        const dataUrl = await ensureImageCached(targetImageId)
-        if (cancelled) return
-        if (!dataUrl) {
-          showToast('图片已不存在，无法编辑遮罩', 'error')
-          setMaskEditorImageId(null)
-          return
-        }
-
-        const preparedTarget = await prepareMaskTargetDataUrl(dataUrl)
-        const image = await loadImage(preparedTarget.dataUrl)
-        if (cancelled) return
-
-        const nextSize = { width: preparedTarget.width, height: preparedTarget.height }
-        const imageCanvas = imageCanvasRef.current
-        const previewCanvas = previewCanvasRef.current
-        const maskCanvas = maskCanvasRef.current
-        if (!imageCanvas || !previewCanvas || !maskCanvas) return
-
-        for (const canvas of [imageCanvas, previewCanvas, maskCanvas]) {
-          canvas.width = nextSize.width
-          canvas.height = nextSize.height
-        }
-
-        const imageCtx = imageCanvas.getContext('2d')
-        if (!imageCtx) throw new Error('当前浏览器不支持 Canvas')
-        imageCtx.clearRect(0, 0, imageCanvas.width, imageCanvas.height)
-        imageCtx.drawImage(image, 0, 0)
-
-        fillWhiteMask(maskCanvas)
-
-        if (maskDraft?.targetImageId === targetImageId) {
-          try {
-            const draftImage = await loadImage(maskDraft.maskDataUrl)
-            if (cancelled) return
-            drawMaskImageToCanvas(draftImage, maskCanvas)
-          } catch (err) {
-            fillWhiteMask(maskCanvas)
-            showToast(
-              `遮罩草稿加载失败，已重置为空白遮罩：${err instanceof Error ? err.message : String(err)}`,
-              'error',
-            )
-          }
-        }
-
-        renderPreview()
-        setSourceDataUrl(preparedTarget.dataUrl)
-        setSize(nextSize)
-        if (preparedTarget.wasResized) {
-          showToast(
-            `已为遮罩编辑按官方要求调整图片尺寸：\n${preparedTarget.originalWidth}×${preparedTarget.originalHeight} → ${preparedTarget.width}×${preparedTarget.height}`,
-            'info',
-          )
-        }
-        requestAnimationFrame(() => resetViewTransform())
-      } catch (err) {
-        if (!cancelled) {
-          showToast(err instanceof Error ? err.message : String(err), 'error')
-          setMaskEditorImageId(null)
-        }
-      } finally {
-        if (!cancelled) setIsLoading(false)
-      }
-    }
-
-    void loadCanvases()
-
-    return () => {
-      cancelled = true
-      if (previewFrameRef.current != null) {
-        window.cancelAnimationFrame(previewFrameRef.current)
-        previewFrameRef.current = null
-      }
-      activePointerIdRef.current = null
-      lastPointRef.current = null
-      pointerPositionsRef.current.clear()
-      pinchGestureRef.current = null
-      panGestureRef.current = null
-      setIsPanning(false)
-    }
-  }, [imageId, maskDraft, setMaskEditorImageId, showToast])
 
   useEffect(() => {
     if (isAltKeyPressed) {
