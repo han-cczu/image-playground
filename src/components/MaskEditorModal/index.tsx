@@ -15,6 +15,7 @@ import {
   type Point,
   type ViewTransform,
 } from '../../lib/image/viewportTransform'
+import { useMaskHistory } from './hooks/useMaskHistory'
 
 type Tool = 'brush' | 'eraser'
 
@@ -123,8 +124,6 @@ export default function MaskEditorModal() {
   const pointerPositionsRef = useRef<Map<number, Point>>(new Map())
   const pinchGestureRef = useRef<PinchGesture | null>(null)
   const panGestureRef = useRef<PanGesture | null>(null)
-  const undoStackRef = useRef<ImageData[]>([])
-  const redoStackRef = useRef<ImageData[]>([])
   const previewFrameRef = useRef<number | null>(null)
   const saveTokenRef = useRef(0)
   const sessionIdRef = useRef(0)
@@ -139,13 +138,19 @@ export default function MaskEditorModal() {
   const [viewTransform, setViewTransform] = useState<ViewTransform>(DEFAULT_VIEW_TRANSFORM)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
-  const [historyState, setHistoryState] = useState({ undo: 0, redo: 0 })
   const [hoverPoint, setHoverPoint] = useState<Point | null>(null)
   const [isPointerOverCanvas, setIsPointerOverCanvas] = useState(false)
   const [isAltKeyPressed, setIsAltKeyPressed] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const [sliderAnchor, setSliderAnchor] = useState<SliderAnchor | null>(null)
   const [showMaskInfo, setShowMaskInfo] = useState(false)
+
+  const history = useMaskHistory({
+    maskCanvasRef,
+    renderPreview: () => renderPreview(),
+    fillWhiteMask: () => fillWhiteMask(maskCanvasRef.current!),
+  })
+  const { undoStackRef, redoStackRef, syncHistoryState } = history
 
   const close = () => {
     if (isSaving) return
@@ -221,11 +226,9 @@ export default function MaskEditorModal() {
   function cancelActiveStroke() {
     if (activePointerIdRef.current == null) return
 
-    const previous = undoStackRef.current.pop()
-    if (previous) restoreMask(previous)
+    history.cancelActiveStroke()
     activePointerIdRef.current = null
     lastPointRef.current = null
-    syncHistoryState()
   }
 
   function beginPinchGesture() {
@@ -264,13 +267,6 @@ export default function MaskEditorModal() {
       nextDistance: distance(pointers[0], pointers[1]),
       viewportSize: { width: frame.clientWidth, height: frame.clientHeight },
     }))
-  }
-
-  function syncHistoryState() {
-    setHistoryState({
-      undo: undoStackRef.current.length,
-      redo: redoStackRef.current.length,
-    })
   }
 
   function renderPreviewNow() {
@@ -371,26 +367,6 @@ export default function MaskEditorModal() {
       x: ((frame.clientWidth / 2 - transform.x) / transform.scale / frame.clientWidth) * maskCanvas.width,
       y: ((frame.clientHeight / 2 - transform.y) / transform.scale / frame.clientHeight) * maskCanvas.height,
     }
-  }
-
-  function pushUndoSnapshot() {
-    const canvas = maskCanvasRef.current
-    const ctx = canvas?.getContext('2d', { willReadFrequently: true })
-    if (!canvas || !ctx) return
-
-    undoStackRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height))
-    if (undoStackRef.current.length > 40) undoStackRef.current.shift()
-    redoStackRef.current = []
-    syncHistoryState()
-  }
-
-  function restoreMask(imageData: ImageData) {
-    const canvas = maskCanvasRef.current
-    const ctx = canvas?.getContext('2d', { willReadFrequently: true })
-    if (!canvas || !ctx) return
-
-    ctx.putImageData(imageData, 0, 0)
-    renderPreview()
   }
 
   function drawAt(point: Point, nextTool = tool) {
@@ -618,8 +594,8 @@ export default function MaskEditorModal() {
   if (!imageId) return null
 
   const isReady = Boolean(sourceDataUrl && size && !isLoading)
-  const canUndo = historyState.undo > 0 && isReady && !isSaving
-  const canRedo = historyState.redo > 0 && isReady && !isSaving
+  const canUndo = history.canUndo && isReady && !isSaving
+  const canRedo = history.canRedo && isReady && !isSaving
   const isZoomed = viewTransform.scale > 1.01 || Math.abs(viewTransform.x) > 1 || Math.abs(viewTransform.y) > 1
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -655,7 +631,7 @@ export default function MaskEditorModal() {
     }
 
     activePointerIdRef.current = event.pointerId
-    pushUndoSnapshot()
+    history.pushSnapshot()
     const point = getCanvasPoint(canvas, event)
     lastPointRef.current = point
     drawAt(point)
@@ -747,35 +723,13 @@ export default function MaskEditorModal() {
     }
   }
 
-  const handleUndo = () => {
-    const canvas = maskCanvasRef.current
-    const ctx = canvas?.getContext('2d', { willReadFrequently: true })
-    const previous = undoStackRef.current.pop()
-    if (!canvas || !ctx || !previous) return
+  const handleUndo = () => history.undo()
 
-    redoStackRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height))
-    restoreMask(previous)
-    syncHistoryState()
-  }
-
-  const handleRedo = () => {
-    const canvas = maskCanvasRef.current
-    const ctx = canvas?.getContext('2d', { willReadFrequently: true })
-    const next = redoStackRef.current.pop()
-    if (!canvas || !ctx || !next) return
-
-    undoStackRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height))
-    restoreMask(next)
-    syncHistoryState()
-  }
+  const handleRedo = () => history.redo()
 
   const handleClear = () => {
-    const canvas = maskCanvasRef.current
-    if (!canvas || !isReady || isSaving) return
-
-    pushUndoSnapshot()
-    fillWhiteMask(canvas)
-    renderPreview()
+    if (!maskCanvasRef.current || !isReady || isSaving) return
+    history.clear()
   }
 
   const handleSave = async () => {
