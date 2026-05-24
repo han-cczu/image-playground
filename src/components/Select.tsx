@@ -39,7 +39,6 @@ export default function Select({ value, onChange, options, disabled, className }
       const rect = triggerRef.current.getBoundingClientRect()
       const spaceAbove = rect.top
       const spaceBelow = window.innerHeight - rect.bottom
-      const estimatedMenuHeight = Math.min(options.length * 36 + 8, 240)
       setOpenUp(spaceAbove > spaceBelow)
     }
 
