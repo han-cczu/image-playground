@@ -18,6 +18,7 @@ import ViewportTooltip from '../ViewportTooltip'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useImageHintTimer } from './hooks/useImageHintTimer'
 import { useAutoResizeTextarea } from './hooks/useAutoResizeTextarea'
+import { useDragDropFiles } from './hooks/useDragDropFiles'
 
 /** 通用悬浮气泡提示 */
 function ButtonTooltip({ visible, text }: { visible: boolean; text: ReactNode }) {
@@ -620,7 +621,6 @@ export default function InputBar() {
   const resolutionPillRef = useRef<HTMLButtonElement>(null)
   const advancedButtonRef = useRef<HTMLButtonElement>(null)
 
-  const [isDragging, setIsDragging] = useState(false)
   const [submitHover, setSubmitHover] = useState(false)
   const [attachHover, setAttachHover] = useState(false)
   const [optimizeHover, setOptimizeHover] = useState(false)
@@ -643,7 +643,6 @@ export default function InputBar() {
   const imageDragPreviewRef = useRef<HTMLElement | null>(null)
   const suppressImageClickRef = useRef(false)
   const maskConflictNoticeShownRef = useRef(false)
-  const dragCounter = useRef(0)
   const isMobile = useIsMobile()
   const { imageHintId, showHint: showImageHint, hideHint: hideImageHint, startHintTouch: startImageHintTouch } = useImageHintTimer()
   const { adjustHeight: adjustTextareaHeight } = useAutoResizeTextarea({
@@ -739,6 +738,11 @@ export default function InputBar() {
   const handleFilesRef = useRef(handleFiles)
   handleFilesRef.current = handleFiles
 
+  const { isDragging } = useDragDropFiles({
+    onFiles: (files) => handleFilesRef.current(files),
+    atImageLimit,
+  })
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     await handleFilesRef.current(e.target.files || [])
     e.target.value = ''
@@ -750,76 +754,6 @@ export default function InputBar() {
       submitTask()
     }
   }
-
-  // 粘贴图片
-  useEffect(() => {
-    const handlePaste = (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items
-      if (!items) return
-      const imageFiles: File[] = []
-      for (const item of Array.from(items)) {
-        if (item.type.startsWith('image/')) {
-          const file = item.getAsFile()
-          if (file) imageFiles.push(file)
-        }
-      }
-      if (imageFiles.length > 0) {
-        e.preventDefault()
-        handleFilesRef.current(imageFiles)
-      }
-    }
-    document.addEventListener('paste', handlePaste)
-    return () => document.removeEventListener('paste', handlePaste)
-  }, [])
-
-  // 拖拽图片 - 监听整个页面
-  useEffect(() => {
-    const handleDragEnter = (e: DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      dragCounter.current++
-      if (e.dataTransfer?.types.includes('Files')) {
-        setIsDragging(true)
-      }
-    }
-
-    const handleDragOver = (e: DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-    }
-
-    const handleDragLeave = (e: DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      dragCounter.current--
-      if (dragCounter.current === 0) {
-        setIsDragging(false)
-      }
-    }
-
-    const handleDrop = (e: DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      dragCounter.current = 0
-      setIsDragging(false)
-      const files = e.dataTransfer?.files
-      if (files && files.length > 0) {
-        handleFilesRef.current(files)
-      }
-    }
-
-    document.addEventListener('dragenter', handleDragEnter)
-    document.addEventListener('dragover', handleDragOver)
-    document.addEventListener('dragleave', handleDragLeave)
-    document.addEventListener('drop', handleDrop)
-
-    return () => {
-      document.removeEventListener('dragenter', handleDragEnter)
-      document.removeEventListener('dragover', handleDragOver)
-      document.removeEventListener('dragleave', handleDragLeave)
-      document.removeEventListener('drop', handleDrop)
-    }
-  }, [])
 
   // 移动端拖动条手势
   useEffect(() => {
