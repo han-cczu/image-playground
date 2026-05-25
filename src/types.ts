@@ -46,6 +46,23 @@ export interface PromptOptimizerProfile extends PromptOptimizerConfig {
   name: string
 }
 
+/** 反推提示词 API 的独立配置（OpenAI 兼容 chat completions + vision） */
+export interface CaptionerConfig {
+  baseUrl: string
+  apiKey: string
+  model: string
+  /** 秒 */
+  timeout: number
+  /** 用户可自定义的反推系统提示词 */
+  systemPrompt: string
+}
+
+/** 反推提示词的命名配置（多配置切换用） */
+export interface CaptionerProfile extends CaptionerConfig {
+  id: string
+  name: string
+}
+
 export interface AppSettings {
   /** 旧版单配置字段：保留用于导入/查询参数兼容，实际请求以 active profile 为准 */
   baseUrl: string
@@ -63,6 +80,10 @@ export interface AppSettings {
   promptOptimizer: PromptOptimizerConfig
   optimizerProfiles: PromptOptimizerProfile[]
   activeOptimizerProfileId: string
+  /** 派生镜像：当前激活的反推配置 */
+  captioner: CaptionerConfig
+  captionerProfiles: CaptionerProfile[]
+  activeCaptionerProfileId: string
 }
 
 // ===== 任务参数 =====

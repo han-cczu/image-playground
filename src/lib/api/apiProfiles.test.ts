@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_CAPTIONER_PROFILE_ID,
+  DEFAULT_CAPTIONER_TIMEOUT,
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_GEMINI_MODEL,
   DEFAULT_IMAGES_MODEL,
@@ -9,7 +11,9 @@ import {
   DEFAULT_OPTIMIZER_SYSTEM_PROMPT,
   DEFAULT_OPTIMIZER_TIMEOUT,
   DEFAULT_SETTINGS,
+  createDefaultCaptionerProfile,
   createDefaultOptimizerProfile,
+  getActiveCaptionerProfile,
   getActiveOptimizerProfile,
   mergeImportedSettings,
   normalizeSettings,
@@ -415,5 +419,86 @@ describe('mergeImportedSettings - optimizer profiles', () => {
     })
     expect(merged.optimizerProfiles).toHaveLength(1)
     expect(merged.optimizerProfiles[0].baseUrl).toBe('https://imp/v1')
+  })
+})
+
+describe('captioner profiles 归一化与迁移', () => {
+  it('老数据（只有 captioner，无 captionerProfiles）迁移为单个默认配置', () => {
+    const result = normalizeSettings({
+      captioner: {
+        baseUrl: 'https://cap.example.com/v1',
+        apiKey: 'sk-cap',
+        model: 'gpt-4o',
+        timeout: 50,
+        systemPrompt: '反推系统提示词',
+      },
+    })
+    expect(result.captionerProfiles).toHaveLength(1)
+    expect(result.captionerProfiles[0]).toMatchObject({
+      id: DEFAULT_CAPTIONER_PROFILE_ID,
+      name: '默认',
+      baseUrl: 'https://cap.example.com/v1',
+      apiKey: 'sk-cap',
+      model: 'gpt-4o',
+      timeout: 50,
+      systemPrompt: '反推系统提示词',
+    })
+    expect(result.activeCaptionerProfileId).toBe(DEFAULT_CAPTIONER_PROFILE_ID)
+    expect(result.captioner).toEqual({
+      baseUrl: 'https://cap.example.com/v1',
+      apiKey: 'sk-cap',
+      model: 'gpt-4o',
+      timeout: 50,
+      systemPrompt: '反推系统提示词',
+    })
+  })
+
+  it('多个 captionerProfiles：activeCaptionerProfileId 命中时镜像派生该项', () => {
+    const result = normalizeSettings({
+      captionerProfiles: [
+        { id: 'a', name: 'A', baseUrl: 'https://a/v1', apiKey: 'ka', model: 'ma', timeout: 30, systemPrompt: 'sa' },
+        { id: 'b', name: 'B', baseUrl: 'https://b/v1', apiKey: 'kb', model: 'mb', timeout: 60, systemPrompt: 'sb' },
+      ],
+      activeCaptionerProfileId: 'b',
+    })
+    expect(result.captionerProfiles).toHaveLength(2)
+    expect(result.activeCaptionerProfileId).toBe('b')
+    expect(result.captioner.apiKey).toBe('kb')
+    expect(result.captioner.model).toBe('mb')
+  })
+
+  it('activeCaptionerProfileId 失效时兜底回第一个', () => {
+    const result = normalizeSettings({
+      captionerProfiles: [
+        { id: 'a', name: 'A', baseUrl: 'https://a/v1', apiKey: 'ka', model: 'ma', timeout: 30, systemPrompt: 'sa' },
+      ],
+      activeCaptionerProfileId: 'nope',
+    })
+    expect(result.activeCaptionerProfileId).toBe('a')
+    expect(result.captioner.apiKey).toBe('ka')
+  })
+
+  it('DEFAULT_SETTINGS 带一个默认反推配置', () => {
+    expect(DEFAULT_SETTINGS.captionerProfiles).toHaveLength(1)
+    expect(DEFAULT_SETTINGS.activeCaptionerProfileId).toBe(DEFAULT_CAPTIONER_PROFILE_ID)
+    expect(DEFAULT_SETTINGS.captionerProfiles[0].apiKey).toBe('')
+  })
+
+  it('createDefaultCaptionerProfile 可被 overrides 覆盖', () => {
+    const p = createDefaultCaptionerProfile({ id: 'x', name: '新配置' })
+    expect(p.id).toBe('x')
+    expect(p.name).toBe('新配置')
+    expect(p.timeout).toBe(DEFAULT_CAPTIONER_TIMEOUT)
+  })
+
+  it('getActiveCaptionerProfile 返回激活配置', () => {
+    const active = getActiveCaptionerProfile({
+      captionerProfiles: [
+        { id: 'a', name: 'A', baseUrl: 'https://a/v1', apiKey: 'ka', model: 'ma', timeout: 30, systemPrompt: 'sa' },
+        { id: 'b', name: 'B', baseUrl: 'https://b/v1', apiKey: 'kb', model: 'mb', timeout: 60, systemPrompt: 'sb' },
+      ],
+      activeCaptionerProfileId: 'b',
+    })
+    expect(active.id).toBe('b')
   })
 })
