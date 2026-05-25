@@ -356,3 +356,45 @@ describe('optimizer profiles 归一化与迁移', () => {
     expect(active.id).toBe('b')
   })
 })
+
+describe('mergeImportedSettings - optimizer profiles', () => {
+  it('current 仅默认优化器配置时，全量采用导入的优化器配置', () => {
+    const merged = mergeImportedSettings(DEFAULT_SETTINGS, {
+      optimizerProfiles: [
+        { id: 'imp-a', name: 'Imp A', baseUrl: 'https://a/v1', apiKey: 'ka', model: 'ma', timeout: 30, systemPrompt: 'sa' },
+        { id: 'imp-b', name: 'Imp B', baseUrl: 'https://b/v1', apiKey: 'kb', model: 'mb', timeout: 60, systemPrompt: 'sb' },
+      ],
+      activeOptimizerProfileId: 'imp-b',
+    })
+    expect(merged.optimizerProfiles).toHaveLength(2)
+    expect(merged.optimizerProfiles.map((p) => p.baseUrl).sort()).toEqual([
+      'https://a/v1',
+      'https://b/v1',
+    ])
+  })
+
+  it('current 已自定义优化器配置时，去重追加导入项并分配新 id，保留 current 激活项', () => {
+    const current = normalizeSettings({
+      profiles: [
+        { id: 'cur-img', name: 'Cur', provider: 'openai', baseUrl: 'https://img/v1', apiKey: 'ik', model: 'gpt-image-2', timeout: 600, apiMode: 'images', codexCli: false, apiProxy: false },
+      ],
+      activeProfileId: 'cur-img',
+      optimizerProfiles: [
+        { id: 'cur-opt', name: 'Cur Opt', baseUrl: 'https://cur/v1', apiKey: 'ck', model: 'cm', timeout: 30, systemPrompt: 'cs' },
+      ],
+      activeOptimizerProfileId: 'cur-opt',
+    })
+    const merged = mergeImportedSettings(current, {
+      optimizerProfiles: [
+        { id: 'dup', name: 'Dup', baseUrl: 'https://cur/v1', apiKey: 'ck', model: 'cm', timeout: 99, systemPrompt: 'x' },
+        { id: 'new', name: 'New', baseUrl: 'https://new/v1', apiKey: 'nk', model: 'nm', timeout: 45, systemPrompt: 'ns' },
+      ],
+      activeOptimizerProfileId: 'new',
+    })
+    expect(merged.optimizerProfiles).toHaveLength(2)
+    const baseUrls = merged.optimizerProfiles.map((p) => p.baseUrl).sort()
+    expect(baseUrls).toEqual(['https://cur/v1', 'https://new/v1'])
+    expect(merged.activeOptimizerProfileId).toBe('cur-opt')
+    expect(merged.optimizerProfiles.some((p) => p.id === 'new')).toBe(false)
+  })
+})
