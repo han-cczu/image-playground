@@ -25,6 +25,9 @@ export interface UiSlice {
   setShowSettings: (v: boolean) => void
   showPromptOptimizer: boolean
   setShowPromptOptimizer: (v: boolean) => void
+  /** 反推源图（base64 data URL）；非 null 即打开反推 modal */
+  captionSource: string | null
+  setCaptionSource: (src: string | null) => void
 
   // Toast
   toast: { message: string; type: 'info' | 'success' | 'error' } | null
@@ -75,6 +78,8 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   setShowSettings: (showSettings) => set({ showSettings }),
   showPromptOptimizer: false,
   setShowPromptOptimizer: (showPromptOptimizer) => set({ showPromptOptimizer }),
+  captionSource: null,
+  setCaptionSource: (captionSource) => set({ captionSource }),
 
   // Toast
   toast: null,
