@@ -9,6 +9,8 @@ export default function ImageContextMenu() {
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const setMaskEditorImageId = useStore((s) => s.setMaskEditorImageId)
+  const setCaptionSource = useStore((s) => s.setCaptionSource)
+  const captionerKeyConfigured = useStore((s) => Boolean(s.settings.captioner.apiKey.trim()))
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -126,11 +128,39 @@ export default function ImageContextMenu() {
     }
   }
 
+  const handleCaption = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setMenuInfo(null)
+    if (!captionerKeyConfigured) {
+      showToast('反推提示词 API 尚未配置，请在设置中配置后再试', 'error')
+      return
+    }
+    try {
+      const res = await fetch(menuInfo.src)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      if (!blob.type.startsWith('image/')) throw new Error('不是有效的图片文件')
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(blob)
+      })
+      setDetailTaskId(null)
+      setLightboxImageId(null)
+      setMaskEditorImageId(null)
+      setCaptionSource(dataUrl)
+    } catch (err) {
+      console.error(err)
+      showToast(`反推失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+    }
+  }
+
   // 保证菜单在视口内
   let left = menuInfo.x
   let top = menuInfo.y
   const MENU_WIDTH = 120
-  const MENU_HEIGHT = 128 // 三个按钮高度加 padding
+  const MENU_HEIGHT = 160 // 四个按钮高度加 padding
 
   if (left + MENU_WIDTH > window.innerWidth) {
     left -= MENU_WIDTH
@@ -172,6 +202,15 @@ export default function ImageContextMenu() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
         </svg>
         编辑
+      </button>
+      <button
+        onClick={handleCaption}
+        className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
+      >
+        <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h6m-6 8l-3-3V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2H8l-4 4z" />
+        </svg>
+        反推提示词
       </button>
     </div>
   )

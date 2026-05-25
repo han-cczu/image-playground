@@ -6,22 +6,27 @@ import type { ImportMode } from '../../lib/exportImport'
 import {
   createDefaultOpenAIProfile,
   createDefaultOptimizerProfile,
+  createDefaultCaptionerProfile,
   DEFAULT_OPENAI_PROFILE_ID,
   DEFAULT_OPTIMIZER_PROFILE_ID,
+  DEFAULT_CAPTIONER_PROFILE_ID,
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_GEMINI_MODEL,
   DEFAULT_SETTINGS,
   getActiveApiProfile,
   getActiveOptimizerProfile,
+  getActiveCaptionerProfile,
   normalizeOptimizerProfile,
+  normalizeCaptionerProfile,
   normalizeSettings,
 } from '../../lib/api/apiProfiles'
-import type { ApiProfile, AppSettings, PromptOptimizerProfile } from '../../types'
+import type { ApiProfile, AppSettings, CaptionerProfile, PromptOptimizerProfile } from '../../types'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
 import { ProfileSelector } from './ProfileSelector'
-import { OptimizerProfileSelector } from './OptimizerProfileSelector'
+import { NamedProfileSelector } from './NamedProfileSelector'
 import { ApiProfileSection } from './ApiProfileSection'
 import { OptimizerSection } from './OptimizerSection'
+import { CaptionerSection } from './CaptionerSection'
 import { FavoriteCategorySection } from './FavoriteCategorySection'
 import { DataManagementSection } from './DataManagementSection'
 import { getDefaultModelForMode } from './helpers'
@@ -48,12 +53,19 @@ export default function SettingsModal() {
     String(getActiveOptimizerProfile(settings).timeout),
   )
   const [showOptimizerProfileMenu, setShowOptimizerProfileMenu] = useState(false)
+  const [captionerTimeoutInput, setCaptionerTimeoutInput] = useState(
+    String(getActiveCaptionerProfile(settings).timeout),
+  )
+  const [showCaptionerProfileMenu, setShowCaptionerProfileMenu] = useState(false)
 
   const apiProxyAvailable = isApiProxyAvailable(readClientDevProxyConfig())
   const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
   const activeOptimizerProfile =
     draft.optimizerProfiles.find((profile) => profile.id === draft.activeOptimizerProfileId) ??
     draft.optimizerProfiles[0]
+  const activeCaptionerProfile =
+    draft.captionerProfiles.find((profile) => profile.id === draft.activeCaptionerProfileId) ??
+    draft.captionerProfiles[0]
   const apiProxyEnabled = apiProxyAvailable && activeProfile.provider === 'openai' && activeProfile.apiProxy
 
   const wasSettingsOpenRef = useRef(false)
@@ -92,8 +104,24 @@ export default function SettingsModal() {
       }
     }
 
+    const captionerTimeoutRaw = Number(captionerTimeoutInput)
+    const normalizedCaptionerTimeout =
+      captionerTimeoutInput.trim() === '' || Number.isNaN(captionerTimeoutRaw) || captionerTimeoutRaw <= 0
+        ? activeCaptionerProfile.timeout
+        : captionerTimeoutRaw
+    if (normalizedCaptionerTimeout !== activeCaptionerProfile.timeout) {
+      next = {
+        ...next,
+        captionerProfiles: next.captionerProfiles.map((profile) =>
+          profile.id === activeCaptionerProfile.id
+            ? { ...profile, timeout: normalizedCaptionerTimeout }
+            : profile,
+        ),
+      }
+    }
+
     return next
-  }, [draft, activeProfile.id, activeProfile.timeout, activeOptimizerProfile.id, activeOptimizerProfile.timeout, timeoutInput, optimizerTimeoutInput])
+  }, [draft, activeProfile.id, activeProfile.timeout, activeOptimizerProfile.id, activeOptimizerProfile.timeout, activeCaptionerProfile.id, activeCaptionerProfile.timeout, timeoutInput, optimizerTimeoutInput, captionerTimeoutInput])
 
   const isDirty = useMemo(
     () => JSON.stringify(buildFlushedDraft()) !== JSON.stringify(settings),
@@ -115,6 +143,7 @@ export default function SettingsModal() {
     setDraft(nextDraft)
     setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
     setOptimizerTimeoutInput(String(getActiveOptimizerProfile(nextDraft).timeout))
+    setCaptionerTimeoutInput(String(getActiveCaptionerProfile(nextDraft).timeout))
   }, [apiProxyAvailable, showSettings, settings])
 
   useEffect(() => {
@@ -124,6 +153,10 @@ export default function SettingsModal() {
   useEffect(() => {
     setOptimizerTimeoutInput(String(activeOptimizerProfile.timeout))
   }, [activeOptimizerProfile.id, activeOptimizerProfile.timeout])
+
+  useEffect(() => {
+    setCaptionerTimeoutInput(String(activeCaptionerProfile.timeout))
+  }, [activeCaptionerProfile.id, activeCaptionerProfile.timeout])
 
   const commitSettings = (nextDraft: AppSettings) => {
     const normalizedProfiles: ApiProfile[] = nextDraft.profiles.map((profile) => {
@@ -161,6 +194,19 @@ export default function SettingsModal() {
     const optimizerProfiles = normalizedOptimizerProfiles.length
       ? normalizedOptimizerProfiles
       : [fallbackOptimizer]
+    const normalizedCaptionerProfiles: CaptionerProfile[] = nextDraft.captionerProfiles.map((profile) =>
+      normalizeCaptionerProfile({
+        ...profile,
+        name: profile.name.trim() || (profile.id === DEFAULT_CAPTIONER_PROFILE_ID ? '默认' : '新配置'),
+        baseUrl: profile.baseUrl.trim(),
+        apiKey: profile.apiKey.trim(),
+        model: profile.model.trim(),
+      }),
+    )
+    const fallbackCaptioner = createDefaultCaptionerProfile({ id: newId('captioner') })
+    const captionerProfiles = normalizedCaptionerProfiles.length
+      ? normalizedCaptionerProfiles
+      : [fallbackCaptioner]
     const normalizedDraft = normalizeSettings({
       ...nextDraft,
       profiles: normalizedProfiles.length ? normalizedProfiles : [fallbackProfile],
@@ -171,9 +217,14 @@ export default function SettingsModal() {
       activeOptimizerProfileId: optimizerProfiles.some((profile) => profile.id === nextDraft.activeOptimizerProfileId)
         ? nextDraft.activeOptimizerProfileId
         : (optimizerProfiles[0]?.id ?? fallbackOptimizer.id),
+      captionerProfiles,
+      activeCaptionerProfileId: captionerProfiles.some((profile) => profile.id === nextDraft.activeCaptionerProfileId)
+        ? nextDraft.activeCaptionerProfileId
+        : (captionerProfiles[0]?.id ?? fallbackCaptioner.id),
     })
     setDraft(normalizedDraft)
     setOptimizerTimeoutInput(String(getActiveOptimizerProfile(normalizedDraft).timeout))
+    setCaptionerTimeoutInput(String(getActiveCaptionerProfile(normalizedDraft).timeout))
     setSettings(normalizedDraft)
   }
 
@@ -191,6 +242,7 @@ export default function SettingsModal() {
     setDraft(fresh)
     setTimeoutInput(String(getActiveApiProfile(fresh).timeout))
     setOptimizerTimeoutInput(String(getActiveOptimizerProfile(fresh).timeout))
+    setCaptionerTimeoutInput(String(getActiveCaptionerProfile(fresh).timeout))
   }, [settings])
 
   const handleClose = () => {
@@ -237,6 +289,15 @@ export default function SettingsModal() {
     }))
   }
 
+  const updateActiveCaptionerProfile = (patch: Partial<CaptionerProfile>) => {
+    setDraft((prev) => ({
+      ...prev,
+      captionerProfiles: prev.captionerProfiles.map((profile) =>
+        profile.id === activeCaptionerProfile.id ? { ...profile, ...patch } : profile,
+      ),
+    }))
+  }
+
   if (!showSettings) return null
 
   const runImport = async (file: File, mode: ImportMode) => {
@@ -246,6 +307,7 @@ export default function SettingsModal() {
       setDraft(nextDraft)
       setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
       setOptimizerTimeoutInput(String(getActiveOptimizerProfile(nextDraft).timeout))
+      setCaptionerTimeoutInput(String(getActiveCaptionerProfile(nextDraft).timeout))
       setShowProfileMenu(false)
     }
   }
@@ -256,6 +318,7 @@ export default function SettingsModal() {
     setDraft(nextDraft)
     setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
     setOptimizerTimeoutInput(String(getActiveOptimizerProfile(nextDraft).timeout))
+    setCaptionerTimeoutInput(String(getActiveCaptionerProfile(nextDraft).timeout))
     setShowProfileMenu(false)
   }
 
@@ -307,6 +370,32 @@ export default function SettingsModal() {
       optimizerProfiles: nextProfiles,
       activeOptimizerProfileId:
         draft.activeOptimizerProfileId === id ? nextProfiles[0].id : draft.activeOptimizerProfileId,
+    }))
+  }
+
+  const createCaptionerProfile = () => {
+    const profile = createDefaultCaptionerProfile({ id: newId('captioner'), name: '新配置' })
+    setDraft(normalizeSettings({
+      ...draft,
+      captionerProfiles: [...draft.captionerProfiles, profile],
+      activeCaptionerProfileId: profile.id,
+    }))
+    setShowCaptionerProfileMenu(false)
+  }
+
+  const switchCaptionerProfile = (id: string) => {
+    setDraft(normalizeSettings({ ...draft, activeCaptionerProfileId: id }))
+    setShowCaptionerProfileMenu(false)
+  }
+
+  const deleteCaptionerProfile = (id: string) => {
+    if (draft.captionerProfiles.length <= 1) return
+    const nextProfiles = draft.captionerProfiles.filter((item) => item.id !== id)
+    setDraft(normalizeSettings({
+      ...draft,
+      captionerProfiles: nextProfiles,
+      activeCaptionerProfileId:
+        draft.activeCaptionerProfileId === id ? nextProfiles[0].id : draft.activeCaptionerProfileId,
     }))
   }
 
@@ -419,7 +508,7 @@ export default function SettingsModal() {
               <h4 className="text-base font-semibold text-gray-800 dark:text-gray-200">
                 提示词优化 API
               </h4>
-              <OptimizerProfileSelector
+              <NamedProfileSelector
                 profiles={draft.optimizerProfiles}
                 activeProfileId={draft.activeOptimizerProfileId}
                 open={showOptimizerProfileMenu}
@@ -438,6 +527,33 @@ export default function SettingsModal() {
               onUpdate={updateActiveOptimizerProfile}
               timeoutInput={optimizerTimeoutInput}
               onTimeoutChange={setOptimizerTimeoutInput}
+            />
+          </section>
+
+          <section className="rounded-2xl bg-gray-50/40 dark:bg-white/[0.02] p-5">
+            <div className="mb-4 flex items-center justify-between gap-3 relative">
+              <h4 className="text-base font-semibold text-gray-800 dark:text-gray-200">
+                反推提示词 API
+              </h4>
+              <NamedProfileSelector
+                profiles={draft.captionerProfiles}
+                activeProfileId={draft.activeCaptionerProfileId}
+                open={showCaptionerProfileMenu}
+                onOpenChange={setShowCaptionerProfileMenu}
+                onSelect={switchCaptionerProfile}
+                onCreate={createCaptionerProfile}
+                onDelete={(id) => setConfirmDialog({
+                  title: '删除配置',
+                  message: `确定要删除配置「${draft.captionerProfiles.find((p) => p.id === id)?.name ?? id}」吗？`,
+                  action: () => deleteCaptionerProfile(id),
+                })}
+              />
+            </div>
+            <CaptionerSection
+              captioner={activeCaptionerProfile}
+              onUpdate={updateActiveCaptionerProfile}
+              timeoutInput={captionerTimeoutInput}
+              onTimeoutChange={setCaptionerTimeoutInput}
             />
           </section>
 

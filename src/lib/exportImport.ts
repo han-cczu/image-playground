@@ -66,6 +66,14 @@ export function redactSettingsForExport(settings: AppSettings): AppSettings {
       ...profile,
       apiKey: '',
     })),
+    captioner: {
+      ...normalized.captioner,
+      apiKey: '',
+    },
+    captionerProfiles: normalized.captionerProfiles.map((profile) => ({
+      ...profile,
+      apiKey: '',
+    })),
   }
 }
 

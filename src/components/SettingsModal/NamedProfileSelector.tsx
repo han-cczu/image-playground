@@ -1,7 +1,5 @@
-import type { PromptOptimizerProfile } from '../../types'
-
-export interface OptimizerProfileSelectorProps {
-  profiles: PromptOptimizerProfile[]
+export interface NamedProfileSelectorProps {
+  profiles: { id: string; name: string }[]
   activeProfileId: string
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -10,7 +8,7 @@ export interface OptimizerProfileSelectorProps {
   onDelete: (id: string) => void
 }
 
-export function OptimizerProfileSelector({
+export function NamedProfileSelector({
   profiles,
   activeProfileId,
   open,
@@ -18,7 +16,7 @@ export function OptimizerProfileSelector({
   onSelect,
   onCreate,
   onDelete,
-}: OptimizerProfileSelectorProps) {
+}: NamedProfileSelectorProps) {
   const activeProfile = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
 
   return (

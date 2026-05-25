@@ -14,6 +14,7 @@ import DetailModal from './components/DetailModal'
 import Lightbox from './components/Lightbox'
 import SettingsModal from './components/SettingsModal'
 import PromptOptimizerModal from './components/PromptOptimizerModal'
+import ImageCaptionModal from './components/ImageCaptionModal'
 import ConfirmDialog from './components/ConfirmDialog'
 import Toast from './components/Toast'
 import MaskEditorModal from './components/MaskEditorModal'
@@ -171,6 +172,9 @@ export default function App() {
       </ErrorBoundary>
       <ErrorBoundary region="modal">
         <PromptOptimizerModal />
+      </ErrorBoundary>
+      <ErrorBoundary region="modal">
+        <ImageCaptionModal />
       </ErrorBoundary>
       <ConfirmDialog />
       <Toast />

@@ -3,6 +3,8 @@ import type {
   ApiProfile,
   ApiProvider,
   AppSettings,
+  CaptionerConfig,
+  CaptionerProfile,
   GeminiProfile,
   OpenAIProfile,
   PromptOptimizerConfig,
@@ -32,6 +34,19 @@ Guidelines:
 - Add concrete visual details: subject, composition, lighting, color palette, materials, mood, camera/lens (if applicable), and art style.
 - Keep it under ~120 words. One paragraph.
 - If the user already wrote a high-quality English prompt, lightly polish it instead of rewriting.`
+
+export const DEFAULT_CAPTIONER_MODEL = 'gpt-4o-mini'
+export const DEFAULT_CAPTIONER_TIMEOUT = 60
+export const DEFAULT_CAPTIONER_PROFILE_ID = 'default-captioner'
+export const DEFAULT_CAPTIONER_SYSTEM_PROMPT = `You are an expert at reverse-engineering image-generation prompts from images.
+
+Look at the provided image and write a single, vivid, structured English prompt that could recreate it with a state-of-the-art image model (GPT Image, DALL·E, Midjourney, Stable Diffusion).
+
+Guidelines:
+- Output ONLY the prompt. No preface, no quotes, no commentary, no markdown.
+- Describe the main subject, composition, lighting, color palette, materials/textures, mood, and art style. Include camera/lens cues if it looks like a photo.
+- Be concrete and specific; avoid vague adjectives.
+- Keep it under ~120 words. One paragraph.`
 
 export function createDefaultPromptOptimizer(
   overrides: Partial<PromptOptimizerConfig> = {},
@@ -98,6 +113,71 @@ export function getActiveOptimizerProfile(
   return (
     normalized.optimizerProfiles.find((p) => p.id === normalized.activeOptimizerProfileId) ??
     normalized.optimizerProfiles[0]
+  )
+}
+
+export function createDefaultCaptioner(overrides: Partial<CaptionerConfig> = {}): CaptionerConfig {
+  return {
+    baseUrl: DEFAULT_BASE_URL,
+    apiKey: '',
+    model: DEFAULT_CAPTIONER_MODEL,
+    timeout: DEFAULT_CAPTIONER_TIMEOUT,
+    systemPrompt: DEFAULT_CAPTIONER_SYSTEM_PROMPT,
+    ...overrides,
+  }
+}
+
+export function normalizeCaptioner(input: unknown): CaptionerConfig {
+  const record = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
+  const defaults = createDefaultCaptioner()
+  return {
+    baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : defaults.baseUrl,
+    apiKey: typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
+    model: typeof record.model === 'string' && record.model.trim() ? record.model : defaults.model,
+    timeout:
+      typeof record.timeout === 'number' && Number.isFinite(record.timeout) && record.timeout > 0
+        ? record.timeout
+        : defaults.timeout,
+    systemPrompt:
+      typeof record.systemPrompt === 'string' && record.systemPrompt.trim()
+        ? record.systemPrompt
+        : defaults.systemPrompt,
+  }
+}
+
+export function createDefaultCaptionerProfile(
+  overrides: Partial<CaptionerProfile> = {},
+): CaptionerProfile {
+  return {
+    id: DEFAULT_CAPTIONER_PROFILE_ID,
+    name: '默认',
+    ...createDefaultCaptioner(),
+    ...overrides,
+  }
+}
+
+export function normalizeCaptionerProfile(input: unknown): CaptionerProfile {
+  const record = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
+  const config = normalizeCaptioner(record)
+  const id =
+    typeof record.id === 'string' && record.id.trim()
+      ? record.id
+      : `captioner-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+  const name = typeof record.name === 'string' && record.name.trim() ? record.name : '新配置'
+  return { ...config, id, name }
+}
+
+/**
+ * 仅用于初始化场景（如打开设置面板时一次性读取激活配置）。
+ * 消费方在渲染路径上应直接读 `settings.captioner` 镜像，不要在循环/选择器里调用此函数。
+ */
+export function getActiveCaptionerProfile(
+  settings: Partial<AppSettings> | unknown,
+): CaptionerProfile {
+  const normalized = normalizeSettings(settings)
+  return (
+    normalized.captionerProfiles.find((p) => p.id === normalized.activeCaptionerProfileId) ??
+    normalized.captionerProfiles[0]
   )
 }
 
@@ -246,6 +326,26 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
   const activeOptimizer =
     optimizerProfiles.find((p) => p.id === activeOptimizerProfileId) ?? optimizerProfiles[0]
 
+  const rawCaptionerProfiles = Array.isArray(record.captionerProfiles)
+    ? (record.captionerProfiles as unknown[])
+    : []
+  const captionerProfiles = rawCaptionerProfiles.length
+    ? rawCaptionerProfiles.map((p) => normalizeCaptionerProfile(p))
+    : [
+        createDefaultCaptionerProfile({
+          ...normalizeCaptioner(record.captioner),
+          id: DEFAULT_CAPTIONER_PROFILE_ID,
+          name: '默认',
+        }),
+      ]
+  const activeCaptionerProfileId =
+    typeof record.activeCaptionerProfileId === 'string' &&
+    captionerProfiles.some((p) => p.id === record.activeCaptionerProfileId)
+      ? record.activeCaptionerProfileId
+      : captionerProfiles[0].id
+  const activeCaptioner =
+    captionerProfiles.find((p) => p.id === activeCaptionerProfileId) ?? captionerProfiles[0]
+
   return {
     baseUrl: active.baseUrl,
     apiKey: active.apiKey,
@@ -267,6 +367,15 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     },
     optimizerProfiles,
     activeOptimizerProfileId,
+    captioner: {
+      baseUrl: activeCaptioner.baseUrl,
+      apiKey: activeCaptioner.apiKey,
+      model: activeCaptioner.model,
+      timeout: activeCaptioner.timeout,
+      systemPrompt: activeCaptioner.systemPrompt,
+    },
+    captionerProfiles,
+    activeCaptionerProfileId,
   }
 }
 
@@ -407,6 +516,53 @@ function createImportedOptimizerProfileId(usedIds: Set<string>): string {
   return id
 }
 
+function getCaptionerProfileDedupKey(profile: CaptionerProfile): string {
+  return JSON.stringify([
+    profile.baseUrl.trim().replace(/\/+$/, '').toLowerCase(),
+    profile.apiKey.trim(),
+    profile.model.trim(),
+  ])
+}
+
+function dedupeCaptionerProfiles(profiles: CaptionerProfile[]): CaptionerProfile[] {
+  const seen = new Set<string>()
+  return profiles.filter((profile) => {
+    const key = getCaptionerProfileDedupKey(profile)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function isDefaultCaptionerProfile(profile: CaptionerProfile): boolean {
+  return (
+    profile.id === DEFAULT_CAPTIONER_PROFILE_ID &&
+    profile.name === '默认' &&
+    profile.baseUrl === DEFAULT_BASE_URL &&
+    profile.apiKey === '' &&
+    profile.model === DEFAULT_CAPTIONER_MODEL &&
+    profile.timeout === DEFAULT_CAPTIONER_TIMEOUT &&
+    profile.systemPrompt === DEFAULT_CAPTIONER_SYSTEM_PROMPT
+  )
+}
+
+function hasOnlyDefaultCaptionerProfiles(settings: AppSettings): boolean {
+  return (
+    settings.captionerProfiles.length === 1 &&
+    settings.activeCaptionerProfileId === DEFAULT_CAPTIONER_PROFILE_ID &&
+    isDefaultCaptionerProfile(settings.captionerProfiles[0])
+  )
+}
+
+function createImportedCaptionerProfileId(usedIds: Set<string>): string {
+  let id = `captioner-imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+  while (usedIds.has(id)) {
+    id = `captioner-imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+  }
+  usedIds.add(id)
+  return id
+}
+
 export function mergeImportedSettings(
   currentSettings: Partial<AppSettings> | unknown,
   importedSettings: Partial<AppSettings> | unknown,
@@ -417,6 +573,7 @@ export function mergeImportedSettings(
     ...normalizedImported,
     profiles: dedupeApiProfiles(normalizedImported.profiles),
     optimizerProfiles: dedupeOptimizerProfiles(normalizedImported.optimizerProfiles),
+    captionerProfiles: dedupeCaptionerProfiles(normalizedImported.captionerProfiles),
   })
 
   if (hasOnlyDefaultProfiles(current)) {
@@ -448,12 +605,29 @@ export function mergeImportedSettings(
     mergedActiveOptimizerProfileId = current.activeOptimizerProfileId
   }
 
+  let mergedCaptionerProfiles: CaptionerProfile[]
+  let mergedActiveCaptionerProfileId: string
+  if (hasOnlyDefaultCaptionerProfiles(current)) {
+    mergedCaptionerProfiles = imported.captionerProfiles
+    mergedActiveCaptionerProfileId = imported.activeCaptionerProfileId
+  } else {
+    const usedCaptionerIds = new Set(current.captionerProfiles.map((p) => p.id))
+    const existingCaptionerKeys = new Set(current.captionerProfiles.map(getCaptionerProfileDedupKey))
+    const importedCaptionerProfiles = imported.captionerProfiles
+      .filter((p) => !existingCaptionerKeys.has(getCaptionerProfileDedupKey(p)))
+      .map((p) => ({ ...p, id: createImportedCaptionerProfileId(usedCaptionerIds) }))
+    mergedCaptionerProfiles = [...current.captionerProfiles, ...importedCaptionerProfiles]
+    mergedActiveCaptionerProfileId = current.activeCaptionerProfileId
+  }
+
   return normalizeSettings({
     ...current,
     profiles,
     activeProfileId: current.activeProfileId,
     optimizerProfiles: mergedOptimizerProfiles,
     activeOptimizerProfileId: mergedActiveOptimizerProfileId,
+    captionerProfiles: mergedCaptionerProfiles,
+    activeCaptionerProfileId: mergedActiveCaptionerProfileId,
   })
 }
 
