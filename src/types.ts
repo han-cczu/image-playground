@@ -40,6 +40,12 @@ export interface PromptOptimizerConfig {
   systemPrompt: string
 }
 
+/** 提示词优化器的命名配置（多配置切换用） */
+export interface PromptOptimizerProfile extends PromptOptimizerConfig {
+  id: string
+  name: string
+}
+
 export interface AppSettings {
   /** 旧版单配置字段：保留用于导入/查询参数兼容，实际请求以 active profile 为准 */
   baseUrl: string
@@ -53,7 +59,10 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'system'
   profiles: ApiProfile[]
   activeProfileId: string
+  /** 派生镜像：当前激活的优化器配置（消费方读此字段，等于 optimizerProfiles 中 activeOptimizerProfileId 指向的项） */
   promptOptimizer: PromptOptimizerConfig
+  optimizerProfiles: PromptOptimizerProfile[]
+  activeOptimizerProfileId: string
 }
 
 // ===== 任务参数 =====

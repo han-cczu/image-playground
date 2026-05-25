@@ -5,9 +5,12 @@ import {
   DEFAULT_IMAGES_MODEL,
   DEFAULT_OPENAI_PROFILE_ID,
   DEFAULT_OPTIMIZER_MODEL,
+  DEFAULT_OPTIMIZER_PROFILE_ID,
   DEFAULT_OPTIMIZER_SYSTEM_PROMPT,
   DEFAULT_OPTIMIZER_TIMEOUT,
   DEFAULT_SETTINGS,
+  createDefaultOptimizerProfile,
+  getActiveOptimizerProfile,
   mergeImportedSettings,
   normalizeSettings,
 } from './apiProfiles'
@@ -270,5 +273,86 @@ describe('normalizeSettings - promptOptimizer', () => {
     })
     expect(result2.promptOptimizer.timeout).toBe(DEFAULT_OPTIMIZER_TIMEOUT)
     expect(result2.promptOptimizer.systemPrompt).toBe(DEFAULT_OPTIMIZER_SYSTEM_PROMPT)
+  })
+})
+
+describe('optimizer profiles 归一化与迁移', () => {
+  it('老数据（只有 promptOptimizer，无 optimizerProfiles）迁移为单个默认配置', () => {
+    const result = normalizeSettings({
+      promptOptimizer: {
+        baseUrl: 'https://opt.example.com/v1',
+        apiKey: 'sk-opt',
+        model: 'gpt-4o-mini',
+        timeout: 45,
+        systemPrompt: '自定义提示词',
+      },
+    })
+    expect(result.optimizerProfiles).toHaveLength(1)
+    expect(result.optimizerProfiles[0]).toMatchObject({
+      id: DEFAULT_OPTIMIZER_PROFILE_ID,
+      name: '默认',
+      baseUrl: 'https://opt.example.com/v1',
+      apiKey: 'sk-opt',
+      model: 'gpt-4o-mini',
+      timeout: 45,
+      systemPrompt: '自定义提示词',
+    })
+    expect(result.activeOptimizerProfileId).toBe(DEFAULT_OPTIMIZER_PROFILE_ID)
+    expect(result.promptOptimizer).toEqual({
+      baseUrl: 'https://opt.example.com/v1',
+      apiKey: 'sk-opt',
+      model: 'gpt-4o-mini',
+      timeout: 45,
+      systemPrompt: '自定义提示词',
+    })
+  })
+
+  it('多个 optimizerProfiles：activeOptimizerProfileId 命中时镜像派生该项', () => {
+    const result = normalizeSettings({
+      optimizerProfiles: [
+        { id: 'a', name: 'A', baseUrl: 'https://a/v1', apiKey: 'ka', model: 'ma', timeout: 30, systemPrompt: 'sa' },
+        { id: 'b', name: 'B', baseUrl: 'https://b/v1', apiKey: 'kb', model: 'mb', timeout: 60, systemPrompt: 'sb' },
+      ],
+      activeOptimizerProfileId: 'b',
+    })
+    expect(result.optimizerProfiles).toHaveLength(2)
+    expect(result.activeOptimizerProfileId).toBe('b')
+    expect(result.promptOptimizer.apiKey).toBe('kb')
+    expect(result.promptOptimizer.model).toBe('mb')
+  })
+
+  it('activeOptimizerProfileId 失效时兜底回第一个', () => {
+    const result = normalizeSettings({
+      optimizerProfiles: [
+        { id: 'a', name: 'A', baseUrl: 'https://a/v1', apiKey: 'ka', model: 'ma', timeout: 30, systemPrompt: 'sa' },
+      ],
+      activeOptimizerProfileId: 'does-not-exist',
+    })
+    expect(result.activeOptimizerProfileId).toBe('a')
+    expect(result.promptOptimizer.apiKey).toBe('ka')
+  })
+
+  it('DEFAULT_SETTINGS 带一个默认优化器配置', () => {
+    expect(DEFAULT_SETTINGS.optimizerProfiles).toHaveLength(1)
+    expect(DEFAULT_SETTINGS.activeOptimizerProfileId).toBe(DEFAULT_OPTIMIZER_PROFILE_ID)
+    expect(DEFAULT_SETTINGS.optimizerProfiles[0].apiKey).toBe('')
+  })
+
+  it('createDefaultOptimizerProfile 可被 overrides 覆盖', () => {
+    const p = createDefaultOptimizerProfile({ id: 'x', name: '新配置' })
+    expect(p.id).toBe('x')
+    expect(p.name).toBe('新配置')
+    expect(p.timeout).toBe(DEFAULT_OPTIMIZER_TIMEOUT)
+  })
+
+  it('getActiveOptimizerProfile 返回激活配置', () => {
+    const active = getActiveOptimizerProfile({
+      optimizerProfiles: [
+        { id: 'a', name: 'A', baseUrl: 'https://a/v1', apiKey: 'ka', model: 'ma', timeout: 30, systemPrompt: 'sa' },
+        { id: 'b', name: 'B', baseUrl: 'https://b/v1', apiKey: 'kb', model: 'mb', timeout: 60, systemPrompt: 'sb' },
+      ],
+      activeOptimizerProfileId: 'b',
+    })
+    expect(active.id).toBe('b')
   })
 })
