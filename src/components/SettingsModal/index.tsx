@@ -122,7 +122,6 @@ export default function SettingsModal() {
   }, [activeProfile.id, activeProfile.timeout])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setOptimizerTimeoutInput(String(activeOptimizerProfile.timeout))
   }, [activeOptimizerProfile.id, activeOptimizerProfile.timeout])
 
