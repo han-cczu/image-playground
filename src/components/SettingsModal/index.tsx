@@ -19,7 +19,7 @@ import {
 import type { ApiProfile, AppSettings, PromptOptimizerProfile } from '../../types'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
 import { ProfileSelector } from './ProfileSelector'
-import { OptimizerProfileSelector } from './OptimizerProfileSelector'
+import { NamedProfileSelector } from './NamedProfileSelector'
 import { ApiProfileSection } from './ApiProfileSection'
 import { OptimizerSection } from './OptimizerSection'
 import { FavoriteCategorySection } from './FavoriteCategorySection'
@@ -419,7 +419,7 @@ export default function SettingsModal() {
               <h4 className="text-base font-semibold text-gray-800 dark:text-gray-200">
                 提示词优化 API
               </h4>
-              <OptimizerProfileSelector
+              <NamedProfileSelector
                 profiles={draft.optimizerProfiles}
                 activeProfileId={draft.activeOptimizerProfileId}
                 open={showOptimizerProfileMenu}
