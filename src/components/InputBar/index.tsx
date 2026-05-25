@@ -51,6 +51,7 @@ export default function InputBar() {
   const settings = useStore((s) => s.settings)
   const setShowSettings = useStore((s) => s.setShowSettings)
   const setShowPromptOptimizer = useStore((s) => s.setShowPromptOptimizer)
+  const setCaptionSource = useStore((s) => s.setCaptionSource)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const showToast = useStore((s) => s.showToast)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
@@ -74,6 +75,7 @@ export default function InputBar() {
   }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const captionFileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const imagesRef = useRef<HTMLDivElement>(null)
@@ -99,6 +101,10 @@ export default function InputBar() {
     : !optimizerPromptReady
       ? '请先输入提示词'
       : ''
+  const captionerKeyConfigured = Boolean(settings.captioner.apiKey.trim())
+  const captionTooltipText = !captionerKeyConfigured
+    ? '反推提示词 API 尚未配置，点设置中"反推提示词 API"添加'
+    : ''
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
   const maskTargetImage = maskDraft
     ? inputImages.find((img) => img.id === maskDraft.targetImageId) ?? null
@@ -185,6 +191,27 @@ export default function InputBar() {
     e.target.value = ''
   }
 
+  const handleCaptionFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      showToast('请选择图片文件', 'error')
+      return
+    }
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(file)
+      })
+      setCaptionSource(dataUrl)
+    } catch (err) {
+      showToast(`读取图片失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+    }
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault()
@@ -202,6 +229,9 @@ export default function InputBar() {
       apiMaxImages={API_MAX_IMAGES}
       onOpenSizePicker={() => setShowSizePicker(true)}
       onOptimize={() => setShowPromptOptimizer(true)}
+      canCaption={captionerKeyConfigured}
+      captionTooltipText={captionTooltipText}
+      onCaption={() => captionFileInputRef.current?.click()}
       onAttach={() => fileInputRef.current?.click()}
     />
   )
@@ -355,6 +385,13 @@ export default function InputBar() {
             multiple
             className="hidden"
             onChange={handleFileUpload}
+          />
+          <input
+            ref={captionFileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleCaptionFilePick}
           />
         </div>
       </div>

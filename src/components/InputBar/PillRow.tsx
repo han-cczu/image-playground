@@ -41,6 +41,9 @@ export interface PillRowProps {
   apiMaxImages: number
   onOpenSizePicker: () => void
   onOptimize: () => void
+  canCaption: boolean
+  captionTooltipText: string
+  onCaption: () => void
   onAttach: () => void
 }
 
@@ -54,6 +57,9 @@ export default function PillRow({
   apiMaxImages,
   onOpenSizePicker,
   onOptimize,
+  canCaption,
+  captionTooltipText,
+  onCaption,
   onAttach,
 }: PillRowProps) {
   const prompt = useStore((s) => s.prompt)
@@ -67,6 +73,7 @@ export default function PillRow({
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
 
   const [optimizeHover, setOptimizeHover] = useState(false)
+  const [captionHover, setCaptionHover] = useState(false)
   const [attachHover, setAttachHover] = useState(false)
 
   /** 顶部 pill 弹出层互斥 */
@@ -199,6 +206,30 @@ export default function PillRow({
             <path d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
           </svg>
           <span>优化</span>
+        </button>
+      </div>
+
+      {/* 反推 pill */}
+      <div
+        className="relative"
+        onMouseEnter={() => setCaptionHover(true)}
+        onMouseLeave={() => setCaptionHover(false)}
+      >
+        <ButtonTooltip visible={Boolean(captionTooltipText) && captionHover} text={captionTooltipText} />
+        <button
+          type="button"
+          onClick={() => canCaption && onCaption()}
+          disabled={!canCaption}
+          className={canCaption ? PILL_BASE : PILL_DISABLED}
+          title="图生文 / 反推提示词"
+          aria-label="图生文 / 反推提示词"
+        >
+          <svg className="h-3.5 w-3.5 opacity-80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M3 15l5-5 4 4 3-3 6 6" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+          </svg>
+          <span>反推</span>
         </button>
       </div>
 
