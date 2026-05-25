@@ -371,6 +371,7 @@ describe('mergeImportedSettings - optimizer profiles', () => {
       'https://a/v1',
       'https://b/v1',
     ])
+    expect(merged.activeOptimizerProfileId).toBe('imp-b')
   })
 
   it('current 已自定义优化器配置时，去重追加导入项并分配新 id，保留 current 激活项', () => {
@@ -396,5 +397,23 @@ describe('mergeImportedSettings - optimizer profiles', () => {
     expect(baseUrls).toEqual(['https://cur/v1', 'https://new/v1'])
     expect(merged.activeOptimizerProfileId).toBe('cur-opt')
     expect(merged.optimizerProfiles.some((p) => p.id === 'new')).toBe(false)
+  })
+
+  it('current 仅默认图像配置但已自定义优化器配置时，仍按 fresh 整体替换语义采用导入', () => {
+    // current 图像 profiles 仍是出厂默认 → 命中 hasOnlyDefaultProfiles → 整体替换
+    const current = normalizeSettings({
+      optimizerProfiles: [
+        { id: 'my-opt', name: 'My', baseUrl: 'https://my/v1', apiKey: 'mk', model: 'mm', timeout: 30, systemPrompt: 'ms' },
+      ],
+      activeOptimizerProfileId: 'my-opt',
+    })
+    const merged = mergeImportedSettings(current, {
+      optimizerProfiles: [
+        { id: 'imp-opt', name: 'Imp', baseUrl: 'https://imp/v1', apiKey: 'ik', model: 'im', timeout: 60, systemPrompt: 'is' },
+      ],
+      activeOptimizerProfileId: 'imp-opt',
+    })
+    expect(merged.optimizerProfiles).toHaveLength(1)
+    expect(merged.optimizerProfiles[0].baseUrl).toBe('https://imp/v1')
   })
 })

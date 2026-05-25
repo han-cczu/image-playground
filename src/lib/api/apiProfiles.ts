@@ -379,15 +379,14 @@ function dedupeOptimizerProfiles(profiles: PromptOptimizerProfile[]): PromptOpti
 }
 
 function isDefaultOptimizerProfile(profile: PromptOptimizerProfile): boolean {
-  const d = createDefaultOptimizerProfile()
   return (
     profile.id === DEFAULT_OPTIMIZER_PROFILE_ID &&
-    profile.name === d.name &&
-    profile.baseUrl === d.baseUrl &&
+    profile.name === '默认' &&
+    profile.baseUrl === DEFAULT_BASE_URL &&
     profile.apiKey === '' &&
-    profile.model === d.model &&
-    profile.timeout === d.timeout &&
-    profile.systemPrompt === d.systemPrompt
+    profile.model === DEFAULT_OPTIMIZER_MODEL &&
+    profile.timeout === DEFAULT_OPTIMIZER_TIMEOUT &&
+    profile.systemPrompt === DEFAULT_OPTIMIZER_SYSTEM_PROMPT
   )
 }
 
