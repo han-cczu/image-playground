@@ -6,6 +6,7 @@ import type {
   GeminiProfile,
   OpenAIProfile,
   PromptOptimizerConfig,
+  PromptOptimizerProfile,
 } from '../../types'
 import { isOpenAIProfile } from '../../types'
 import { readRuntimeEnv } from './runtimeEnv'
@@ -20,6 +21,7 @@ export const DEFAULT_API_TIMEOUT = 600
 
 export const DEFAULT_OPTIMIZER_MODEL = 'gpt-4o-mini'
 export const DEFAULT_OPTIMIZER_TIMEOUT = 60
+export const DEFAULT_OPTIMIZER_PROFILE_ID = 'default-optimizer'
 export const DEFAULT_OPTIMIZER_SYSTEM_PROMPT = `You are an expert prompt engineer specializing in text-to-image generation.
 
 Rewrite the user's draft prompt into a single, vivid, structured English image prompt suitable for state-of-the-art image models (GPT Image, DALL·E, Midjourney, Stable Diffusion).
@@ -61,6 +63,42 @@ export function normalizePromptOptimizer(input: unknown): PromptOptimizerConfig 
         ? record.systemPrompt
         : defaults.systemPrompt,
   }
+}
+
+export function createDefaultOptimizerProfile(
+  overrides: Partial<PromptOptimizerProfile> = {},
+): PromptOptimizerProfile {
+  return {
+    id: DEFAULT_OPTIMIZER_PROFILE_ID,
+    name: '默认',
+    ...createDefaultPromptOptimizer(),
+    ...overrides,
+  }
+}
+
+export function normalizeOptimizerProfile(input: unknown): PromptOptimizerProfile {
+  const record = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
+  const config = normalizePromptOptimizer(record)
+  const id =
+    typeof record.id === 'string' && record.id.trim()
+      ? record.id
+      : `optimizer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+  const name = typeof record.name === 'string' && record.name.trim() ? record.name : '新配置'
+  return { ...config, id, name }
+}
+
+/**
+ * 仅用于初始化场景（如打开设置面板时一次性读取激活配置）。
+ * 消费方在渲染路径上应直接读 `settings.promptOptimizer` 镜像，不要在循环/选择器里调用此函数。
+ */
+export function getActiveOptimizerProfile(
+  settings: Partial<AppSettings> | unknown,
+): PromptOptimizerProfile {
+  const normalized = normalizeSettings(settings)
+  return (
+    normalized.optimizerProfiles.find((p) => p.id === normalized.activeOptimizerProfileId) ??
+    normalized.optimizerProfiles[0]
+  )
 }
 
 export function createDefaultOpenAIProfile(overrides: Partial<OpenAIProfile> = {}): OpenAIProfile {
@@ -188,6 +226,26 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
   const active = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
   const activeAsOpenAI = isOpenAIProfile(active) ? active : null
 
+  const rawOptimizerProfiles = Array.isArray(record.optimizerProfiles)
+    ? (record.optimizerProfiles as unknown[])
+    : []
+  const optimizerProfiles = rawOptimizerProfiles.length
+    ? rawOptimizerProfiles.map((p) => normalizeOptimizerProfile(p))
+    : [
+        createDefaultOptimizerProfile({
+          ...normalizePromptOptimizer(record.promptOptimizer),
+          id: DEFAULT_OPTIMIZER_PROFILE_ID,
+          name: '默认',
+        }),
+      ]
+  const activeOptimizerProfileId =
+    typeof record.activeOptimizerProfileId === 'string' &&
+    optimizerProfiles.some((p) => p.id === record.activeOptimizerProfileId)
+      ? record.activeOptimizerProfileId
+      : optimizerProfiles[0].id
+  const activeOptimizer =
+    optimizerProfiles.find((p) => p.id === activeOptimizerProfileId) ?? optimizerProfiles[0]
+
   return {
     baseUrl: active.baseUrl,
     apiKey: active.apiKey,
@@ -200,7 +258,15 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     theme: record.theme === 'light' || record.theme === 'dark' || record.theme === 'system' ? record.theme : 'light',
     profiles,
     activeProfileId,
-    promptOptimizer: normalizePromptOptimizer(record.promptOptimizer),
+    promptOptimizer: {
+      baseUrl: activeOptimizer.baseUrl,
+      apiKey: activeOptimizer.apiKey,
+      model: activeOptimizer.model,
+      timeout: activeOptimizer.timeout,
+      systemPrompt: activeOptimizer.systemPrompt,
+    },
+    optimizerProfiles,
+    activeOptimizerProfileId,
   }
 }
 
@@ -294,6 +360,53 @@ function dedupeApiProfiles(profiles: ApiProfile[]): ApiProfile[] {
   })
 }
 
+function getOptimizerProfileDedupKey(profile: PromptOptimizerProfile): string {
+  return JSON.stringify([
+    profile.baseUrl.trim().replace(/\/+$/, '').toLowerCase(),
+    profile.apiKey.trim(),
+    profile.model.trim(),
+  ])
+}
+
+function dedupeOptimizerProfiles(profiles: PromptOptimizerProfile[]): PromptOptimizerProfile[] {
+  const seen = new Set<string>()
+  return profiles.filter((profile) => {
+    const key = getOptimizerProfileDedupKey(profile)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function isDefaultOptimizerProfile(profile: PromptOptimizerProfile): boolean {
+  return (
+    profile.id === DEFAULT_OPTIMIZER_PROFILE_ID &&
+    profile.name === '默认' &&
+    profile.baseUrl === DEFAULT_BASE_URL &&
+    profile.apiKey === '' &&
+    profile.model === DEFAULT_OPTIMIZER_MODEL &&
+    profile.timeout === DEFAULT_OPTIMIZER_TIMEOUT &&
+    profile.systemPrompt === DEFAULT_OPTIMIZER_SYSTEM_PROMPT
+  )
+}
+
+function hasOnlyDefaultOptimizerProfiles(settings: AppSettings): boolean {
+  return (
+    settings.optimizerProfiles.length === 1 &&
+    settings.activeOptimizerProfileId === DEFAULT_OPTIMIZER_PROFILE_ID &&
+    isDefaultOptimizerProfile(settings.optimizerProfiles[0])
+  )
+}
+
+function createImportedOptimizerProfileId(usedIds: Set<string>): string {
+  let id = `optimizer-imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+  while (usedIds.has(id)) {
+    id = `optimizer-imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+  }
+  usedIds.add(id)
+  return id
+}
+
 export function mergeImportedSettings(
   currentSettings: Partial<AppSettings> | unknown,
   importedSettings: Partial<AppSettings> | unknown,
@@ -303,6 +416,7 @@ export function mergeImportedSettings(
   const imported = normalizeSettings({
     ...normalizedImported,
     profiles: dedupeApiProfiles(normalizedImported.profiles),
+    optimizerProfiles: dedupeOptimizerProfiles(normalizedImported.optimizerProfiles),
   })
 
   if (hasOnlyDefaultProfiles(current)) {
@@ -319,10 +433,27 @@ export function mergeImportedSettings(
     }))
   const profiles = [...current.profiles, ...importedProfiles]
 
+  let mergedOptimizerProfiles: PromptOptimizerProfile[]
+  let mergedActiveOptimizerProfileId: string
+  if (hasOnlyDefaultOptimizerProfiles(current)) {
+    mergedOptimizerProfiles = imported.optimizerProfiles
+    mergedActiveOptimizerProfileId = imported.activeOptimizerProfileId
+  } else {
+    const usedOptimizerIds = new Set(current.optimizerProfiles.map((p) => p.id))
+    const existingOptimizerKeys = new Set(current.optimizerProfiles.map(getOptimizerProfileDedupKey))
+    const importedOptimizerProfiles = imported.optimizerProfiles
+      .filter((p) => !existingOptimizerKeys.has(getOptimizerProfileDedupKey(p)))
+      .map((p) => ({ ...p, id: createImportedOptimizerProfileId(usedOptimizerIds) }))
+    mergedOptimizerProfiles = [...current.optimizerProfiles, ...importedOptimizerProfiles]
+    mergedActiveOptimizerProfileId = current.activeOptimizerProfileId
+  }
+
   return normalizeSettings({
     ...current,
     profiles,
     activeProfileId: current.activeProfileId,
+    optimizerProfiles: mergedOptimizerProfiles,
+    activeOptimizerProfileId: mergedActiveOptimizerProfileId,
   })
 }
 

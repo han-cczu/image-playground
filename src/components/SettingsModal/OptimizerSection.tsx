@@ -4,14 +4,14 @@ import {
   DEFAULT_OPTIMIZER_SYSTEM_PROMPT,
   DEFAULT_SETTINGS,
 } from '../../lib/api/apiProfiles'
-import type { AppSettings, OpenAIProfile } from '../../types'
+import type { OpenAIProfile, PromptOptimizerProfile } from '../../types'
 import { ModelListDropdown } from './ModelListDropdown'
 import { normalizeTimeout } from './timeout'
 import { EyeIcon } from './EyeIcon'
 
 export interface OptimizerSectionProps {
-  optimizer: AppSettings['promptOptimizer']
-  onUpdate: (patch: Partial<AppSettings['promptOptimizer']>) => void
+  optimizer: PromptOptimizerProfile
+  onUpdate: (patch: Partial<PromptOptimizerProfile>) => void
   // timeout input is kept in index.tsx for dirty-detection; passed as props
   timeoutInput: string
   onTimeoutChange: (v: string) => void
@@ -34,7 +34,7 @@ export function OptimizerSection({
     setOptimizerModelListOpen(false)
     setOptimizerModelList(null)
     setOptimizerModelListError(null)
-  }, [optimizer.baseUrl, optimizer.apiKey])
+  }, [optimizer.id, optimizer.baseUrl, optimizer.apiKey])
 
   const fetchOptimizerModelList = useCallback(async () => {
     setOptimizerModelListOpen(true)
@@ -66,6 +66,16 @@ export function OptimizerSection({
 
   return (
     <div className="space-y-4">
+      <label className="block">
+        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">配置名称</span>
+        <input
+          value={optimizer.name}
+          onChange={(e) => onUpdate({ name: e.target.value })}
+          type="text"
+          className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+        />
+      </label>
+
       <label className="block">
         <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API URL</span>
         <input
