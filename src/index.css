@@ -202,6 +202,41 @@ input[type="number"] {
   animation: dropdown-up 0.15s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* ===== 首屏入场动画（分层错落，统一用 0.16,1,0.3,1 缓动；尊重 prefers-reduced-motion） ===== */
+@keyframes app-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+/* 顶栏：从上方轻落 */
+@keyframes app-drop-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* 主内容：从下方上浮 */
+@keyframes app-rise-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* InputBar 固定居中：入场保留 -50% 水平位移，仅做纵向上浮，避免与 -translate-x-1/2 冲突 */
+@keyframes app-rise-in-centered {
+  from { opacity: 0; transform: translate(-50%, 28px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.app-enter-sidebar  { animation: app-fade-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.05s both; }
+.app-enter-header   { animation: app-drop-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both; }
+.app-enter-main     { animation: app-rise-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.18s both; }
+.app-enter-inputbar { animation: app-rise-in-centered 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.26s both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-enter-sidebar,
+  .app-enter-header,
+  .app-enter-main,
+  .app-enter-inputbar {
+    animation: none;
+  }
+}
+
 .safe-area-x {
   padding-left: max(1rem, var(--safe-area-left));
   padding-right: max(1rem, var(--safe-area-right));

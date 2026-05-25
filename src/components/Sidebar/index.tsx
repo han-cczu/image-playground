@@ -193,7 +193,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
         ref={panelRef}
         tabIndex={-1}
         aria-label="对话列表"
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-gray-200 bg-white outline-none transition-[transform,width] duration-200 dark:border-white/[0.08] dark:bg-gray-950 md:static md:z-0 md:h-screen ${widthClass} ${mobileTransform}`}
+        className={`app-enter-sidebar fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-gray-200 bg-white outline-none transition-[transform,width] duration-200 dark:border-white/[0.08] dark:bg-gray-950 md:static md:z-0 md:h-screen ${widthClass} ${mobileTransform}`}
       >
         {/* 顶部：Logo + 折叠按钮。折叠态时 Logo 自身承担"展开"入口，toggle button 不再渲染，避免双入口冲突。 */}
         <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-3 py-3 dark:border-white/[0.06]">

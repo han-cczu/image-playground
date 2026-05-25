@@ -144,7 +144,7 @@ export default function App() {
               data-drag-select-surface
               className="flex-1 pb-48 md:overflow-y-auto"
             >
-              <div className="safe-area-x mx-auto max-w-7xl">
+              <div className="app-enter-main safe-area-x mx-auto max-w-7xl">
                 {showEmptyState ? (
                   <EmptyState mode={galleryView ? 'gallery' : 'conversation'} />
                 ) : (
