@@ -502,3 +502,45 @@ describe('captioner profiles 归一化与迁移', () => {
     expect(active.id).toBe('b')
   })
 })
+
+describe('mergeImportedSettings - captioner profiles', () => {
+  it('current 仅默认反推配置时，全量采用导入的反推配置', () => {
+    const merged = mergeImportedSettings(DEFAULT_SETTINGS, {
+      captionerProfiles: [
+        { id: 'imp-a', name: 'Imp A', baseUrl: 'https://a/v1', apiKey: 'ka', model: 'ma', timeout: 30, systemPrompt: 'sa' },
+        { id: 'imp-b', name: 'Imp B', baseUrl: 'https://b/v1', apiKey: 'kb', model: 'mb', timeout: 60, systemPrompt: 'sb' },
+      ],
+      activeCaptionerProfileId: 'imp-b',
+    })
+    expect(merged.captionerProfiles).toHaveLength(2)
+    expect(merged.captionerProfiles.map((p) => p.baseUrl).sort()).toEqual([
+      'https://a/v1',
+      'https://b/v1',
+    ])
+    expect(merged.activeCaptionerProfileId).toBe('imp-b')
+  })
+
+  it('current 已自定义反推配置时，去重追加导入项并分配新 id，保留 current 激活项', () => {
+    const current = normalizeSettings({
+      profiles: [
+        { id: 'cur-img', name: 'Cur', provider: 'openai', baseUrl: 'https://img/v1', apiKey: 'ik', model: 'gpt-image-2', timeout: 600, apiMode: 'images', codexCli: false, apiProxy: false },
+      ],
+      activeProfileId: 'cur-img',
+      captionerProfiles: [
+        { id: 'cur-cap', name: 'Cur Cap', baseUrl: 'https://cur/v1', apiKey: 'ck', model: 'cm', timeout: 30, systemPrompt: 'cs' },
+      ],
+      activeCaptionerProfileId: 'cur-cap',
+    })
+    const merged = mergeImportedSettings(current, {
+      captionerProfiles: [
+        { id: 'dup', name: 'Dup', baseUrl: 'https://cur/v1', apiKey: 'ck', model: 'cm', timeout: 99, systemPrompt: 'x' },
+        { id: 'new', name: 'New', baseUrl: 'https://new/v1', apiKey: 'nk', model: 'nm', timeout: 45, systemPrompt: 'ns' },
+      ],
+      activeCaptionerProfileId: 'new',
+    })
+    expect(merged.captionerProfiles).toHaveLength(2)
+    expect(merged.captionerProfiles.map((p) => p.baseUrl).sort()).toEqual(['https://cur/v1', 'https://new/v1'])
+    expect(merged.activeCaptionerProfileId).toBe('cur-cap')
+    expect(merged.captionerProfiles.some((p) => p.id === 'new')).toBe(false)
+  })
+})

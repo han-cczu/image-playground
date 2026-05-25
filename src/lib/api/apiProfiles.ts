@@ -516,6 +516,53 @@ function createImportedOptimizerProfileId(usedIds: Set<string>): string {
   return id
 }
 
+function getCaptionerProfileDedupKey(profile: CaptionerProfile): string {
+  return JSON.stringify([
+    profile.baseUrl.trim().replace(/\/+$/, '').toLowerCase(),
+    profile.apiKey.trim(),
+    profile.model.trim(),
+  ])
+}
+
+function dedupeCaptionerProfiles(profiles: CaptionerProfile[]): CaptionerProfile[] {
+  const seen = new Set<string>()
+  return profiles.filter((profile) => {
+    const key = getCaptionerProfileDedupKey(profile)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function isDefaultCaptionerProfile(profile: CaptionerProfile): boolean {
+  return (
+    profile.id === DEFAULT_CAPTIONER_PROFILE_ID &&
+    profile.name === '默认' &&
+    profile.baseUrl === DEFAULT_BASE_URL &&
+    profile.apiKey === '' &&
+    profile.model === DEFAULT_CAPTIONER_MODEL &&
+    profile.timeout === DEFAULT_CAPTIONER_TIMEOUT &&
+    profile.systemPrompt === DEFAULT_CAPTIONER_SYSTEM_PROMPT
+  )
+}
+
+function hasOnlyDefaultCaptionerProfiles(settings: AppSettings): boolean {
+  return (
+    settings.captionerProfiles.length === 1 &&
+    settings.activeCaptionerProfileId === DEFAULT_CAPTIONER_PROFILE_ID &&
+    isDefaultCaptionerProfile(settings.captionerProfiles[0])
+  )
+}
+
+function createImportedCaptionerProfileId(usedIds: Set<string>): string {
+  let id = `captioner-imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+  while (usedIds.has(id)) {
+    id = `captioner-imported-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+  }
+  usedIds.add(id)
+  return id
+}
+
 export function mergeImportedSettings(
   currentSettings: Partial<AppSettings> | unknown,
   importedSettings: Partial<AppSettings> | unknown,
@@ -526,6 +573,7 @@ export function mergeImportedSettings(
     ...normalizedImported,
     profiles: dedupeApiProfiles(normalizedImported.profiles),
     optimizerProfiles: dedupeOptimizerProfiles(normalizedImported.optimizerProfiles),
+    captionerProfiles: dedupeCaptionerProfiles(normalizedImported.captionerProfiles),
   })
 
   if (hasOnlyDefaultProfiles(current)) {
@@ -557,12 +605,29 @@ export function mergeImportedSettings(
     mergedActiveOptimizerProfileId = current.activeOptimizerProfileId
   }
 
+  let mergedCaptionerProfiles: CaptionerProfile[]
+  let mergedActiveCaptionerProfileId: string
+  if (hasOnlyDefaultCaptionerProfiles(current)) {
+    mergedCaptionerProfiles = imported.captionerProfiles
+    mergedActiveCaptionerProfileId = imported.activeCaptionerProfileId
+  } else {
+    const usedCaptionerIds = new Set(current.captionerProfiles.map((p) => p.id))
+    const existingCaptionerKeys = new Set(current.captionerProfiles.map(getCaptionerProfileDedupKey))
+    const importedCaptionerProfiles = imported.captionerProfiles
+      .filter((p) => !existingCaptionerKeys.has(getCaptionerProfileDedupKey(p)))
+      .map((p) => ({ ...p, id: createImportedCaptionerProfileId(usedCaptionerIds) }))
+    mergedCaptionerProfiles = [...current.captionerProfiles, ...importedCaptionerProfiles]
+    mergedActiveCaptionerProfileId = current.activeCaptionerProfileId
+  }
+
   return normalizeSettings({
     ...current,
     profiles,
     activeProfileId: current.activeProfileId,
     optimizerProfiles: mergedOptimizerProfiles,
     activeOptimizerProfileId: mergedActiveOptimizerProfileId,
+    captionerProfiles: mergedCaptionerProfiles,
+    activeCaptionerProfileId: mergedActiveCaptionerProfileId,
   })
 }
 
