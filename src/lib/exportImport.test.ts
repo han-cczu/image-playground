@@ -138,6 +138,12 @@ describe('export/import reliability', () => {
         ...DEFAULT_SETTINGS.promptOptimizer,
         apiKey: 'optimizer-secret',
       },
+      optimizerProfiles: [
+        {
+          ...DEFAULT_SETTINGS.optimizerProfiles[0],
+          apiKey: 'optimizer-profile-secret',
+        },
+      ],
     })
 
     expect(JSON.stringify(redacted)).not.toContain('legacy-secret')
@@ -147,6 +153,8 @@ describe('export/import reliability', () => {
     expect(redacted.apiKey).toBe('')
     expect(redacted.profiles.every((profile) => profile.apiKey === '')).toBe(true)
     expect(redacted.promptOptimizer.apiKey).toBe('')
+    expect(JSON.stringify(redacted)).not.toContain('optimizer-profile-secret')
+    expect(redacted.optimizerProfiles.every((p) => p.apiKey === '')).toBe(true)
   })
 
   it('imports legacy backups with API keys through the existing settings merge path', async () => {
