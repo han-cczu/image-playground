@@ -28,12 +28,15 @@ export default function ImageCaptionModal() {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
+    const source = sourceRef.current
+    if (!source) {
+      setPhase('error')
+      setErrorMessage('未选择图片')
+      return
+    }
     setCaption('')
     setErrorMessage(null)
     setPhase('streaming')
-
-    const source = sourceRef.current
-    if (!source) return
     captionImageStream(configRef.current, source, {
       signal: controller.signal,
       onDelta: (chunk) => setCaption((s) => s + chunk),
@@ -105,6 +108,7 @@ export default function ImageCaptionModal() {
             反推提示词
           </h3>
           <button
+            type="button"
             onClick={handleClose}
             className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
             aria-label="关闭"
