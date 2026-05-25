@@ -144,6 +144,12 @@ describe('export/import reliability', () => {
           apiKey: 'optimizer-profile-secret',
         },
       ],
+      captionerProfiles: [
+        {
+          ...DEFAULT_SETTINGS.captionerProfiles[0],
+          apiKey: 'captioner-profile-secret',
+        },
+      ],
     })
 
     expect(JSON.stringify(redacted)).not.toContain('legacy-secret')
@@ -155,6 +161,8 @@ describe('export/import reliability', () => {
     expect(redacted.promptOptimizer.apiKey).toBe('')
     expect(JSON.stringify(redacted)).not.toContain('optimizer-profile-secret')
     expect(redacted.optimizerProfiles.every((p) => p.apiKey === '')).toBe(true)
+    expect(JSON.stringify(redacted)).not.toContain('captioner-profile-secret')
+    expect(redacted.captionerProfiles.every((p) => p.apiKey === '')).toBe(true)
   })
 
   it('imports legacy backups with API keys through the existing settings merge path', async () => {
