@@ -10,6 +10,7 @@ export default function ImageContextMenu() {
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const setMaskEditorImageId = useStore((s) => s.setMaskEditorImageId)
   const setCaptionSource = useStore((s) => s.setCaptionSource)
+  const captionerKeyConfigured = useStore((s) => Boolean(s.settings.captioner.apiKey.trim()))
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -130,9 +131,15 @@ export default function ImageContextMenu() {
   const handleCaption = async (e: React.MouseEvent) => {
     e.stopPropagation()
     setMenuInfo(null)
+    if (!captionerKeyConfigured) {
+      showToast('反推提示词 API 尚未配置，请在设置中配置后再试', 'error')
+      return
+    }
     try {
       const res = await fetch(menuInfo.src)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
+      if (!blob.type.startsWith('image/')) throw new Error('不是有效的图片文件')
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader()
         reader.onload = () => resolve(reader.result as string)
