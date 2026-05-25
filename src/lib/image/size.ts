@@ -149,6 +149,33 @@ export function formatImageRatio(width: number, height: number) {
   return friendlyNearest && friendlyNearest.delta <= 0.04 ? `≈${friendlyNearest.label}` : simplified
 }
 
+/** 从 size 字符串推断当前 tier（1K/2K/4K/auto/custom） */
+export function detectTier(size: string): SizeTier | 'auto' | 'custom' {
+  const trimmed = (size || '').trim()
+  if (!trimmed || trimmed === 'auto') return 'auto'
+  const m = trimmed.match(/^\s*(\d+)\s*[xX×]\s*(\d+)\s*$/)
+  if (!m) return 'custom'
+  const w = Number(m[1])
+  const h = Number(m[2])
+  const longSide = Math.max(w, h)
+  // 阈值在两档分辨率之间取中点
+  if (longSide <= 1536) return '1K'
+  if (longSide <= 2944) return '2K'
+  return '4K'
+}
+
+/** 从 size 字符串推断比例字符串（保留简化形式以便复用 calculateImageSize） */
+export function detectRatioFromSize(size: string): string | null {
+  const trimmed = (size || '').trim()
+  if (!trimmed || trimmed === 'auto') return null
+  const m = trimmed.match(/^\s*(\d+)\s*[xX×]\s*(\d+)\s*$/)
+  if (!m) return null
+  const w = Number(m[1])
+  const h = Number(m[2])
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null
+  return `${w}:${h}`
+}
+
 export function calculateImageSize(tier: SizeTier, ratio: string) {
   const parsed = parseRatio(ratio)
   if (!parsed) return null
