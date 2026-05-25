@@ -5,17 +5,21 @@ import { useStore, exportData, importData, clearAllData } from '../../store'
 import type { ImportMode } from '../../lib/exportImport'
 import {
   createDefaultOpenAIProfile,
+  createDefaultOptimizerProfile,
   DEFAULT_OPENAI_PROFILE_ID,
+  DEFAULT_OPTIMIZER_PROFILE_ID,
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_GEMINI_MODEL,
   DEFAULT_SETTINGS,
   getActiveApiProfile,
-  normalizePromptOptimizer,
+  getActiveOptimizerProfile,
+  normalizeOptimizerProfile,
   normalizeSettings,
 } from '../../lib/api/apiProfiles'
-import type { ApiProfile, AppSettings } from '../../types'
+import type { ApiProfile, AppSettings, PromptOptimizerProfile } from '../../types'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
 import { ProfileSelector } from './ProfileSelector'
+import { OptimizerProfileSelector } from './OptimizerProfileSelector'
 import { ApiProfileSection } from './ApiProfileSection'
 import { OptimizerSection } from './OptimizerSection'
 import { FavoriteCategorySection } from './FavoriteCategorySection'
@@ -41,11 +45,15 @@ export default function SettingsModal() {
   const [timeoutInput, setTimeoutInput] = useState(String(getActiveApiProfile(settings).timeout))
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [optimizerTimeoutInput, setOptimizerTimeoutInput] = useState(
-    String(normalizeSettings(settings).promptOptimizer.timeout),
+    String(getActiveOptimizerProfile(settings).timeout),
   )
+  const [showOptimizerProfileMenu, setShowOptimizerProfileMenu] = useState(false)
 
   const apiProxyAvailable = isApiProxyAvailable(readClientDevProxyConfig())
   const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
+  const activeOptimizerProfile =
+    draft.optimizerProfiles.find((profile) => profile.id === draft.activeOptimizerProfileId) ??
+    draft.optimizerProfiles[0]
   const apiProxyEnabled = apiProxyAvailable && activeProfile.provider === 'openai' && activeProfile.apiProxy
 
   const wasSettingsOpenRef = useRef(false)
@@ -71,17 +79,21 @@ export default function SettingsModal() {
     const optimizerTimeoutRaw = Number(optimizerTimeoutInput)
     const normalizedOptimizerTimeout =
       optimizerTimeoutInput.trim() === '' || Number.isNaN(optimizerTimeoutRaw) || optimizerTimeoutRaw <= 0
-        ? next.promptOptimizer.timeout
+        ? activeOptimizerProfile.timeout
         : optimizerTimeoutRaw
-    if (normalizedOptimizerTimeout !== next.promptOptimizer.timeout) {
+    if (normalizedOptimizerTimeout !== activeOptimizerProfile.timeout) {
       next = {
         ...next,
-        promptOptimizer: { ...next.promptOptimizer, timeout: normalizedOptimizerTimeout },
+        optimizerProfiles: next.optimizerProfiles.map((profile) =>
+          profile.id === activeOptimizerProfile.id
+            ? { ...profile, timeout: normalizedOptimizerTimeout }
+            : profile,
+        ),
       }
     }
 
     return next
-  }, [draft, activeProfile.id, activeProfile.timeout, timeoutInput, optimizerTimeoutInput])
+  }, [draft, activeProfile.id, activeProfile.timeout, activeOptimizerProfile.id, activeOptimizerProfile.timeout, timeoutInput, optimizerTimeoutInput])
 
   const isDirty = useMemo(
     () => JSON.stringify(buildFlushedDraft()) !== JSON.stringify(settings),
@@ -102,12 +114,17 @@ export default function SettingsModal() {
     })
     setDraft(nextDraft)
     setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
-    setOptimizerTimeoutInput(String(nextDraft.promptOptimizer.timeout))
+    setOptimizerTimeoutInput(String(getActiveOptimizerProfile(nextDraft).timeout))
   }, [apiProxyAvailable, showSettings, settings])
 
   useEffect(() => {
     setTimeoutInput(String(activeProfile.timeout))
   }, [activeProfile.id, activeProfile.timeout])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOptimizerTimeoutInput(String(activeOptimizerProfile.timeout))
+  }, [activeOptimizerProfile.id, activeOptimizerProfile.timeout])
 
   const commitSettings = (nextDraft: AppSettings) => {
     const normalizedProfiles: ApiProfile[] = nextDraft.profiles.map((profile) => {
@@ -132,22 +149,32 @@ export default function SettingsModal() {
       }
     })
     const fallbackProfile = createDefaultOpenAIProfile({ id: newId('openai') })
-    const normalizedOptimizer = normalizePromptOptimizer({
-      ...nextDraft.promptOptimizer,
-      baseUrl: nextDraft.promptOptimizer.baseUrl.trim(),
-      apiKey: nextDraft.promptOptimizer.apiKey.trim(),
-      model: nextDraft.promptOptimizer.model.trim(),
-    })
+    const normalizedOptimizerProfiles: PromptOptimizerProfile[] = nextDraft.optimizerProfiles.map((profile) =>
+      normalizeOptimizerProfile({
+        ...profile,
+        name: profile.name.trim() || (profile.id === DEFAULT_OPTIMIZER_PROFILE_ID ? '默认' : '新配置'),
+        baseUrl: profile.baseUrl.trim(),
+        apiKey: profile.apiKey.trim(),
+        model: profile.model.trim(),
+      }),
+    )
+    const fallbackOptimizer = createDefaultOptimizerProfile({ id: newId('optimizer') })
+    const optimizerProfiles = normalizedOptimizerProfiles.length
+      ? normalizedOptimizerProfiles
+      : [fallbackOptimizer]
     const normalizedDraft = normalizeSettings({
       ...nextDraft,
       profiles: normalizedProfiles.length ? normalizedProfiles : [fallbackProfile],
       activeProfileId: normalizedProfiles.some((profile) => profile.id === nextDraft.activeProfileId)
         ? nextDraft.activeProfileId
         : (normalizedProfiles[0]?.id ?? fallbackProfile.id),
-      promptOptimizer: normalizedOptimizer,
+      optimizerProfiles,
+      activeOptimizerProfileId: optimizerProfiles.some((profile) => profile.id === nextDraft.activeOptimizerProfileId)
+        ? nextDraft.activeOptimizerProfileId
+        : (optimizerProfiles[0]?.id ?? fallbackOptimizer.id),
     })
     setDraft(normalizedDraft)
-    setOptimizerTimeoutInput(String(normalizedDraft.promptOptimizer.timeout))
+    setOptimizerTimeoutInput(String(getActiveOptimizerProfile(normalizedDraft).timeout))
     setSettings(normalizedDraft)
   }
 
@@ -164,7 +191,7 @@ export default function SettingsModal() {
     const fresh = normalizeSettings(settings)
     setDraft(fresh)
     setTimeoutInput(String(getActiveApiProfile(fresh).timeout))
-    setOptimizerTimeoutInput(String(fresh.promptOptimizer.timeout))
+    setOptimizerTimeoutInput(String(getActiveOptimizerProfile(fresh).timeout))
   }, [settings])
 
   const handleClose = () => {
@@ -202,10 +229,12 @@ export default function SettingsModal() {
 
   useCloseOnEscape(showSettings, handleClose)
 
-  const updatePromptOptimizer = (patch: Partial<AppSettings['promptOptimizer']>) => {
+  const updateActiveOptimizerProfile = (patch: Partial<PromptOptimizerProfile>) => {
     setDraft((prev) => ({
       ...prev,
-      promptOptimizer: { ...prev.promptOptimizer, ...patch },
+      optimizerProfiles: prev.optimizerProfiles.map((profile) =>
+        profile.id === activeOptimizerProfile.id ? { ...profile, ...patch } : profile,
+      ),
     }))
   }
 
@@ -217,7 +246,7 @@ export default function SettingsModal() {
       const nextDraft = normalizeSettings(useStore.getState().settings)
       setDraft(nextDraft)
       setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
-      setOptimizerTimeoutInput(String(nextDraft.promptOptimizer.timeout))
+      setOptimizerTimeoutInput(String(getActiveOptimizerProfile(nextDraft).timeout))
       setShowProfileMenu(false)
     }
   }
@@ -227,7 +256,7 @@ export default function SettingsModal() {
     const nextDraft = normalizeSettings(useStore.getState().settings)
     setDraft(nextDraft)
     setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
-    setOptimizerTimeoutInput(String(nextDraft.promptOptimizer.timeout))
+    setOptimizerTimeoutInput(String(getActiveOptimizerProfile(nextDraft).timeout))
     setShowProfileMenu(false)
   }
 
@@ -253,6 +282,32 @@ export default function SettingsModal() {
       ...draft,
       profiles: nextProfiles,
       activeProfileId: draft.activeProfileId === id ? nextProfiles[0].id : draft.activeProfileId,
+    }))
+  }
+
+  const createOptimizerProfile = () => {
+    const profile = createDefaultOptimizerProfile({ id: newId('optimizer'), name: '新配置' })
+    setDraft(normalizeSettings({
+      ...draft,
+      optimizerProfiles: [...draft.optimizerProfiles, profile],
+      activeOptimizerProfileId: profile.id,
+    }))
+    setShowOptimizerProfileMenu(false)
+  }
+
+  const switchOptimizerProfile = (id: string) => {
+    setDraft(normalizeSettings({ ...draft, activeOptimizerProfileId: id }))
+    setShowOptimizerProfileMenu(false)
+  }
+
+  const deleteOptimizerProfile = (id: string) => {
+    if (draft.optimizerProfiles.length <= 1) return
+    const nextProfiles = draft.optimizerProfiles.filter((item) => item.id !== id)
+    setDraft(normalizeSettings({
+      ...draft,
+      optimizerProfiles: nextProfiles,
+      activeOptimizerProfileId:
+        draft.activeOptimizerProfileId === id ? nextProfiles[0].id : draft.activeOptimizerProfileId,
     }))
   }
 
@@ -361,12 +416,27 @@ export default function SettingsModal() {
           </section>
 
           <section className="rounded-2xl bg-gray-50/40 dark:bg-white/[0.02] p-5">
-            <h4 className="mb-4 text-base font-semibold text-gray-800 dark:text-gray-200">
-              提示词优化 API
-            </h4>
+            <div className="mb-4 flex items-center justify-between gap-3 relative">
+              <h4 className="text-base font-semibold text-gray-800 dark:text-gray-200">
+                提示词优化 API
+              </h4>
+              <OptimizerProfileSelector
+                profiles={draft.optimizerProfiles}
+                activeProfileId={draft.activeOptimizerProfileId}
+                open={showOptimizerProfileMenu}
+                onOpenChange={setShowOptimizerProfileMenu}
+                onSelect={switchOptimizerProfile}
+                onCreate={createOptimizerProfile}
+                onDelete={(id) => setConfirmDialog({
+                  title: '删除配置',
+                  message: `确定要删除配置「${draft.optimizerProfiles.find((p) => p.id === id)?.name ?? id}」吗？`,
+                  action: () => deleteOptimizerProfile(id),
+                })}
+              />
+            </div>
             <OptimizerSection
-              optimizer={draft.promptOptimizer}
-              onUpdate={updatePromptOptimizer}
+              optimizer={activeOptimizerProfile}
+              onUpdate={updateActiveOptimizerProfile}
               timeoutInput={optimizerTimeoutInput}
               onTimeoutChange={setOptimizerTimeoutInput}
             />
