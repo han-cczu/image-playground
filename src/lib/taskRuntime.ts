@@ -37,6 +37,7 @@ import { reseedConversationsFromFavoriteCategories } from './conversationMigrati
 const syncHttpWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const taskAbortControllers = new Map<string, AbortController>()
 const SYNC_HTTP_INTERRUPTED_ERROR = '请求中断'
+const TASK_CANCELLED_ERROR = '已取消生成'
 
 function createSyncHttpTimeoutError(timeoutSeconds: number) {
   return `请求超时：超过 ${timeoutSeconds} 秒仍未完成，请稍后重试或提高超时时间。`
@@ -95,6 +96,13 @@ function abortTaskRequest(taskId: string) {
   if (controller && !controller.signal.aborted) controller.abort()
 }
 
+/** 统一收口在途任务的运行期资源:中止请求 + 清 watchdog 定时器 + 清 AbortController。 */
+function terminateTaskRuntime(taskId: string) {
+  abortTaskRequest(taskId)
+  clearSyncHttpWatchdogTimer(taskId)
+  clearTaskAbortController(taskId)
+}
+
 function updateTaskInStoreSilently(taskId: string, patch: Partial<TaskRecord>) {
   void updateTaskInStore(taskId, patch).catch(() => {
     /* updateTaskInStore already surfaced the persistence error */
@@ -105,11 +113,29 @@ function failSyncHttpTaskIfStillRunning(taskId: string, error: string, now = Dat
   const task = useStore.getState().tasks.find((item) => item.id === taskId)
   if (!task || !isRunningSyncHttpTask(task)) return false
 
-  abortTaskRequest(taskId)
+  terminateTaskRuntime(taskId)
 
   updateTaskInStoreSilently(taskId, {
     status: 'error',
     error,
+    finishedAt: now,
+    elapsed: Math.max(0, now - task.createdAt),
+  })
+  return true
+}
+
+/**
+ * 用户主动取消一个进行中的任务:中止请求 + 清理运行期资源,并落 'error' 态 + 取消文案。
+ * TaskStatus 无 'cancelled',故复用 'error' + 专属文案(与 SYNC_HTTP_INTERRUPTED_ERROR 同构)。
+ */
+export function cancelTask(taskId: string, now = Date.now()): boolean {
+  const task = useStore.getState().tasks.find((item) => item.id === taskId)
+  if (!task || task.status !== 'running') return false
+
+  terminateTaskRuntime(taskId)
+  updateTaskInStoreSilently(taskId, {
+    status: 'error',
+    error: TASK_CANCELLED_ERROR,
     finishedAt: now,
     elapsed: Math.max(0, now - task.createdAt),
   })
@@ -201,7 +227,11 @@ export async function initStore() {
     const persistTasks = mergedTasks.filter(
       (task) => dirtyIds.has(task.id) || interruptedTasks.some((t) => t.id === task.id),
     )
-    await persistConversationMigration(migratedConversations, persistTasks)
+    // 仅在确有变更时才写库,避免 localStorage 版本号被清空时每次启动空跑一次全表写事务(M4)
+    const conversationsChanged = migratedConversations.length !== normalizedExistingConversations.length
+    if (persistTasks.length || conversationsChanged) {
+      await persistConversationMigration(migratedConversations, persistTasks)
+    }
     writeConversationMigrationVersion(CONVERSATION_MIGRATION_VERSION)
 
     finalConversations = normalizeConversations(migratedConversations)
@@ -258,6 +288,7 @@ export async function initStore() {
   for (const img of images) {
     if (!referencedIds.has(img.id)) {
       await deleteImage(img.id)
+      deleteCachedImage(img.id)
     }
   }
   // 输入图片需要立即可用（用于显示在输入栏），仍然缓存这部分
@@ -517,8 +548,9 @@ async function executeTask(taskId: string) {
     }
   } catch (err) {
     clearSyncHttpWatchdogTimer(taskId)
-    const latestTask = useStore.getState().tasks.find((t) => t.id === taskId) ?? task
-    if (latestTask.status !== 'running') return
+    // 任务可能在请求进行中被删除/取消:find 不到或已非 running 时直接退出,不要用 `?? task` 复活已删任务。
+    const latestTask = useStore.getState().tasks.find((t) => t.id === taskId)
+    if (!latestTask || latestTask.status !== 'running') return
     await updateTaskInStore(taskId, {
       status: 'error',
       error: err instanceof Error ? err.message : String(err),
@@ -575,6 +607,9 @@ export function getTaskSortKey(task: TaskRecord): number {
   return task.sortOrder ?? task.createdAt
 }
 
+// 首/尾插入用大步长,大幅降低反复同隙插入导致的浮点精度坍缩(配合 taskFilters 的 createdAt/id tiebreaker 兜底排序稳定)
+const SORT_STEP = 65536
+
 /**
  * 将 taskId 移到 prevTaskId 与 nextTaskId 之间。任一邻居为 null 表示拖到最前/最后。
  * 用 gap-based 排序：仅写入被拖动任务的新 sortOrder，避免大批量 IDB 写入。
@@ -592,9 +627,9 @@ export function reorderTask(
   if (prev && next) {
     newSortOrder = (getTaskSortKey(prev) + getTaskSortKey(next)) / 2
   } else if (prev) {
-    newSortOrder = getTaskSortKey(prev) - 1
+    newSortOrder = getTaskSortKey(prev) - SORT_STEP
   } else if (next) {
-    newSortOrder = getTaskSortKey(next) + 1
+    newSortOrder = getTaskSortKey(next) + SORT_STEP
   } else {
     return
   }
@@ -697,6 +732,7 @@ export async function removeMultipleTasks(taskIds: string[]) {
   const deletedImageIds = new Set<string>()
   for (const t of tasks) {
     if (toDelete.has(t.id)) {
+      if (t.status === 'running') terminateTaskRuntime(t.id)
       for (const id of t.inputImageIds || []) deletedImageIds.add(id)
       if (t.maskImageId) deletedImageIds.add(t.maskImageId)
       for (const id of t.outputImages || []) deletedImageIds.add(id)
@@ -738,6 +774,9 @@ export async function removeMultipleTasks(taskIds: string[]) {
 export async function removeTask(task: TaskRecord) {
   const { tasks, setTasks, inputImages, showToast } = useStore.getState()
 
+  // 删除在途任务前先中止请求并清 watchdog/controller,避免请求继续跑、watchdog 误报、控制器残留
+  if (task.status === 'running') terminateTaskRuntime(task.id)
+
   // 收集此任务关联的图片
   const taskImageIds = new Set([
     ...(task.inputImageIds || []),
@@ -770,9 +809,15 @@ export async function removeTask(task: TaskRecord) {
   showToast('记录已删除', 'success')
 }
 
+/** 输入图片单文件大小上限;上传/拖放/粘贴最终都汇聚到 addImageFromFile,在此单点设限即覆盖三入口。 */
+export const MAX_INPUT_IMAGE_BYTES = 50 * 1024 * 1024
+
 /** 添加图片到输入（文件上传） */
 export async function addImageFromFile(file: File): Promise<void> {
   if (!file.type.startsWith('image/')) return
+  if (file.size > MAX_INPUT_IMAGE_BYTES) {
+    throw new Error(`图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
+  }
   const dataUrl = await fileToDataUrl(file)
   const id = await storeImage(dataUrl, 'upload')
   setCachedImage(id, dataUrl)
@@ -784,6 +829,9 @@ export async function addImageFromUrl(src: string): Promise<void> {
   const res = await fetch(src)
   const blob = await res.blob()
   if (!blob.type.startsWith('image/')) throw new Error('不是有效的图片')
+  if (blob.size > MAX_INPUT_IMAGE_BYTES) {
+    throw new Error(`图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
+  }
   const dataUrl = await blobToDataUrl(blob)
   const id = await storeImage(dataUrl, 'upload')
   setCachedImage(id, dataUrl)

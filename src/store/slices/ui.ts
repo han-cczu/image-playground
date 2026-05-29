@@ -30,7 +30,7 @@ export interface UiSlice {
   setCaptionSource: (src: string | null) => void
 
   // Toast
-  toast: { message: string; type: 'info' | 'success' | 'error' } | null
+  toast: { id: number; message: string; type: 'info' | 'success' | 'error' } | null
   showToast: (message: string, type?: 'info' | 'success' | 'error') => void
 
   // Confirm dialog
@@ -48,6 +48,9 @@ export interface UiSlice {
   } | null
   setConfirmDialog: (d: AppState['confirmDialog']) => void
 }
+
+// toast 自增序号:用 id(而非 message 文本)判定计时器是否应清除当前 toast,避免并发同文案误清
+let toastSeq = 0
 
 export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get) => ({
   // Sidebar
@@ -84,9 +87,10 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   // Toast
   toast: null,
   showToast: (message, type = 'info') => {
-    set({ toast: { message, type } })
+    const id = ++toastSeq
+    set({ toast: { id, message, type } })
     setTimeout(() => {
-      if (get().toast?.message === message) set({ toast: null })
+      if (get().toast?.id === id) set({ toast: null })
     }, 3000)
   },
 

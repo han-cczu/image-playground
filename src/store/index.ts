@@ -52,6 +52,7 @@ export {
   editOutputs,
   removeTask,
   removeMultipleTasks,
+  cancelTask,
   reorderTask,
   updateTaskInStore,
   addImageFromFile,
