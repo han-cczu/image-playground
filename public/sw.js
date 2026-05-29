@@ -71,7 +71,9 @@ if (KILL_SWITCH) {
         if (cached) return cached
 
         return fetch(request).then((response) => {
-          if (response.ok) {
+          // 仅缓存内容寻址的 hashed 静态资源(/assets/);其余同源 GET 只走网络不写缓存,
+          // 避免运行时缓存对所有同源 GET 无限 cache.put(单次部署生命周期内只增不减、可能逼近配额)。
+          if (response.ok && url.pathname.includes('/assets/')) {
             const copy = response.clone()
             caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
           }
