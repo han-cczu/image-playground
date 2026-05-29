@@ -30,10 +30,10 @@ export default function SubmitButton({
         type="button"
         onClick={() => (needsConfig ? onOpenSettings() : onSubmit())}
         disabled={needsConfig ? false : !canSubmit}
-        className={`flex h-11 w-11 items-center justify-center rounded-2xl shadow-sm transition-all hover:shadow ${
+        className={`flex h-11 w-11 items-center justify-center rounded-2xl transition-all ${
           needsConfig
-            ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
-            : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
+            ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer shadow-sm hover:shadow'
+            : 'bg-gradient-to-br from-blue-500 to-indigo-500 text-white shadow-[0_4px_20px_-6px_rgba(79,70,229,0.6)] hover:from-blue-400 hover:to-indigo-400 hover:shadow-[0_6px_26px_-6px_rgba(79,70,229,0.85)] active:scale-95 disabled:from-gray-300 disabled:to-gray-300 disabled:shadow-none disabled:opacity-50 disabled:cursor-not-allowed dark:disabled:from-white/[0.04] dark:disabled:to-white/[0.04]'
         }`}
         title={needsConfig ? '请先配置 API' : hasMask ? '遮罩编辑 (Ctrl+Enter)' : '生成 (Ctrl+Enter)'}
         aria-label={hasMask ? '提交遮罩编辑' : '提交生成'}
