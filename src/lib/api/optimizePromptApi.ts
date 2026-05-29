@@ -1,34 +1,17 @@
 import type { PromptOptimizerConfig } from '../../types'
-import { normalizeBaseUrl } from './devProxy'
+import {
+  buildChatCompletionsUrl,
+  extractStreamErrorMessage,
+  parseSseLine,
+  resolveChatTimeoutMs,
+} from './chatCompletionsShared'
+import { DEFAULT_OPTIMIZER_TIMEOUT } from './apiProfiles'
 
 export interface OptimizePromptOptions {
   /** AbortSignal 用于取消请求 */
   signal?: AbortSignal
   /** 流式追加 token 回调 */
   onDelta?: (chunk: string) => void
-}
-
-function buildChatCompletionsUrl(baseUrl: string): string {
-  const normalized = normalizeBaseUrl(baseUrl)
-  if (!normalized) return '/v1/chat/completions'
-  return normalized.endsWith('/v1')
-    ? `${normalized}/chat/completions`
-    : `${normalized}/v1/chat/completions`
-}
-
-function parseSseLine(line: string): string | null {
-  if (!line.startsWith('data:')) return null
-  const payload = line.slice(5).trim()
-  if (!payload || payload === '[DONE]') return null
-  try {
-    const parsed = JSON.parse(payload) as {
-      choices?: Array<{ delta?: { content?: unknown } }>
-    }
-    const delta = parsed.choices?.[0]?.delta?.content
-    return typeof delta === 'string' ? delta : null
-  } catch {
-    return null
-  }
 }
 
 /**
@@ -50,7 +33,7 @@ export async function optimizePromptStream(
   }
 
   const url = buildChatCompletionsUrl(config.baseUrl)
-  const timeoutMs = Math.max(1, config.timeout) * 1000
+  const timeoutMs = resolveChatTimeoutMs(config.timeout, DEFAULT_OPTIMIZER_TIMEOUT)
 
   const externalSignal = options.signal
   const timeoutController = new AbortController()
@@ -106,11 +89,14 @@ export async function optimizePromptStream(
   const decoder = new TextDecoder()
   let buffer = ''
   let full = ''
+  let raw = ''
   try {
     while (true) {
       const { value, done } = await reader.read()
       if (done) break
-      buffer += decoder.decode(value, { stream: true })
+      const text = decoder.decode(value, { stream: true })
+      buffer += text
+      raw += text
       let newlineIdx = buffer.indexOf('\n')
       while (newlineIdx !== -1) {
         const line = buffer.slice(0, newlineIdx).replace(/\r$/, '')
@@ -141,6 +127,6 @@ export async function optimizePromptStream(
   }
 
   const trimmed = full.trim()
-  if (!trimmed) throw new Error('优化结果为空')
+  if (!trimmed) throw new Error(extractStreamErrorMessage(raw) || '优化结果为空')
   return trimmed
 }

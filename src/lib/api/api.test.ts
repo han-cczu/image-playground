@@ -225,6 +225,9 @@ describe('callImageApi', () => {
 
   it('passes a cancellable caller abort signal through OpenAI requests', async () => {
     const controller = new AbortController()
+    // 调用前即取消:合并后的请求 signal 应反映 caller 的取消,验证 caller→fetch 的接线。
+    // (请求完成后 mergeAbortSignals 的 dispose 会解绑监听以防泄漏,故不再断言「完成后再 abort 仍传播」。)
+    controller.abort()
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       data: [{ b64_json: 'aW1hZ2U=' }],
     }), {
@@ -238,15 +241,11 @@ describe('callImageApi', () => {
       params: { ...DEFAULT_PARAMS },
       inputImageDataUrls: [],
       signal: controller.signal,
-    })
+    }).catch(() => {})
 
     const [, init] = fetchMock.mock.calls[0]
     const requestSignal = (init as RequestInit).signal as AbortSignal
     expect(requestSignal).toBeDefined()
-    expect(requestSignal.aborted).toBe(false)
-
-    controller.abort()
-
     expect(requestSignal.aborted).toBe(true)
   })
 

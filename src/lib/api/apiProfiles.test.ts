@@ -391,7 +391,8 @@ describe('mergeImportedSettings - optimizer profiles', () => {
     })
     const merged = mergeImportedSettings(current, {
       optimizerProfiles: [
-        { id: 'dup', name: 'Dup', baseUrl: 'https://cur/v1', apiKey: 'ck', model: 'cm', timeout: 99, systemPrompt: 'x' },
+        // 与 cur-opt 在去重键全字段(baseUrl/apiKey/model/systemPrompt/name)一致,仅 timeout 不同 → 仍应折叠
+        { id: 'dup', name: 'Cur Opt', baseUrl: 'https://cur/v1', apiKey: 'ck', model: 'cm', timeout: 99, systemPrompt: 'cs' },
         { id: 'new', name: 'New', baseUrl: 'https://new/v1', apiKey: 'nk', model: 'nm', timeout: 45, systemPrompt: 'ns' },
       ],
       activeOptimizerProfileId: 'new',
@@ -533,7 +534,8 @@ describe('mergeImportedSettings - captioner profiles', () => {
     })
     const merged = mergeImportedSettings(current, {
       captionerProfiles: [
-        { id: 'dup', name: 'Dup', baseUrl: 'https://cur/v1', apiKey: 'ck', model: 'cm', timeout: 99, systemPrompt: 'x' },
+        // 与 cur-cap 在去重键全字段(baseUrl/apiKey/model/systemPrompt/name)一致,仅 timeout 不同 → 仍应折叠
+        { id: 'dup', name: 'Cur Cap', baseUrl: 'https://cur/v1', apiKey: 'ck', model: 'cm', timeout: 99, systemPrompt: 'cs' },
         { id: 'new', name: 'New', baseUrl: 'https://new/v1', apiKey: 'nk', model: 'nm', timeout: 45, systemPrompt: 'ns' },
       ],
       activeCaptionerProfileId: 'new',
@@ -542,5 +544,26 @@ describe('mergeImportedSettings - captioner profiles', () => {
     expect(merged.captionerProfiles.map((p) => p.baseUrl).sort()).toEqual(['https://cur/v1', 'https://new/v1'])
     expect(merged.activeCaptionerProfileId).toBe('cur-cap')
     expect(merged.captionerProfiles.some((p) => p.id === 'new')).toBe(false)
+  })
+
+  it('仅 systemPrompt 不同的导入配置不被折叠(M2:往返导入保留多套 systemPrompt)', () => {
+    const current = normalizeSettings({
+      profiles: [
+        { id: 'cur-img', name: 'Cur', provider: 'openai', baseUrl: 'https://img/v1', apiKey: 'ik', model: 'gpt-image-2', timeout: 600, apiMode: 'images', codexCli: false, apiProxy: false },
+      ],
+      activeProfileId: 'cur-img',
+      captionerProfiles: [
+        { id: 'cur-cap', name: 'Cur Cap', baseUrl: 'https://cur/v1', apiKey: '', model: 'cm', timeout: 30, systemPrompt: 'A' },
+      ],
+      activeCaptionerProfileId: 'cur-cap',
+    })
+    const merged = mergeImportedSettings(current, {
+      captionerProfiles: [
+        { id: 'imp', name: 'Imp', baseUrl: 'https://cur/v1', apiKey: '', model: 'cm', timeout: 30, systemPrompt: 'B' },
+      ],
+      activeCaptionerProfileId: 'imp',
+    })
+    expect(merged.captionerProfiles).toHaveLength(2)
+    expect(merged.captionerProfiles.map((p) => p.systemPrompt).sort()).toEqual(['A', 'B'])
   })
 })

@@ -70,7 +70,9 @@ export function buildApiUrl(
     return `${proxyConfig?.prefix ?? DEFAULT_PROXY_PREFIX}/${apiPath}`
   }
 
-  return normalizedBaseUrl ? `${normalizedBaseUrl}/${apiPath}` : `/${apiPath}`
+  // 空 baseUrl 不再退化为同源相对路径(否则密钥会随请求发往应用部署源)。
+  if (!normalizedBaseUrl) throw new Error('未配置 API URL')
+  return `${normalizedBaseUrl}/${apiPath}`
 }
 
 export function resolveDevProxyConfig(input: unknown, isDev: boolean): DevProxyConfig | null {

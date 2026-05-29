@@ -4,7 +4,7 @@ import {
   type CallApiOptions,
   type CallApiResult,
   getApiErrorMessage,
-  getDataUrlEncodedByteSize,
+  getDataUrlDecodedByteSize,
   mergeActualParams,
   mergeAbortSignals,
   summarizeConcurrentFailures,
@@ -106,7 +106,7 @@ async function callGeminiSingle(opts: CallApiOptions, profile: GeminiProfile): P
     throw new Error('Gemini provider 暂不支持遮罩编辑，请切换到 OpenAI 配置')
   }
 
-  const totalBytes = opts.inputImageDataUrls.reduce((sum, dataUrl) => sum + getDataUrlEncodedByteSize(dataUrl), 0)
+  const totalBytes = opts.inputImageDataUrls.reduce((sum, dataUrl) => sum + getDataUrlDecodedByteSize(dataUrl), 0)
   assertImageInputPayloadSize(totalBytes)
 
   const parts: Array<Record<string, unknown>> = [{ text: opts.prompt }]
@@ -128,7 +128,7 @@ async function callGeminiSingle(opts: CallApiOptions, profile: GeminiProfile): P
   }
 
   const controller = new AbortController()
-  const requestSignal = mergeAbortSignals(opts.signal, controller.signal)
+  const { signal: requestSignal, dispose: disposeSignals } = mergeAbortSignals(opts.signal, controller.signal)
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
 
   try {
@@ -173,6 +173,7 @@ async function callGeminiSingle(opts: CallApiOptions, profile: GeminiProfile): P
     }
   } finally {
     clearTimeout(timeoutId)
+    disposeSignals()
   }
 }
 
