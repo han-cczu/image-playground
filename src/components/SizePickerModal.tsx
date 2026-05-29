@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { calculateImageSize, normalizeImageSize, parseRatio, type SizeTier } from '../lib/image/size'
 import ViewportTooltip from './ViewportTooltip'
+import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
 
 const TIERS: SizeTier[] = ['1K', '2K', '4K']
 const SIZE_LIMIT_TEXT = '由于模型限制，最终输出会自动规整到合法尺寸：宽高均为 16 的倍数，最大边长 3840px，宽高比不超过 3:1，总像素限制为 655360-8294400。'
@@ -43,6 +45,9 @@ function findPresetForSize(size: string) {
 }
 
 export default function SizePickerModal({ currentSize, onSelect, onClose, allowAuto = true }: Props) {
+  // 该组件由父级条件挂载,挂载即「打开」:接入 ESC 关闭与 body 滚动锁,与其它弹窗一致
+  useCloseOnEscape(true, onClose)
+  useLockBodyScroll(true)
   const currentPreset = findPresetForSize(currentSize)
   const currentParsedSize = parseSize(currentSize)
   const [mode, setMode] = useState<Mode>(() => {

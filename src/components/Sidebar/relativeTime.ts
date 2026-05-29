@@ -32,7 +32,8 @@ function getFormatter(): Intl.RelativeTimeFormat {
 }
 
 export function formatRelativeTime(timestamp: number, now: number = Date.now()): string {
-  const diff = timestamp - now
+  // 未来时间戳(时钟回拨 / 异常导入数据)钳为现在,避免显示「X 分钟后」这类不合理相对时间
+  const diff = Math.min(0, timestamp - now)
   const abs = Math.abs(diff)
   if (abs < 30 * SECOND) return '刚刚'
 

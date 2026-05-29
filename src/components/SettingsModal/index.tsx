@@ -22,6 +22,7 @@ import {
 } from '../../lib/api/apiProfiles'
 import type { ApiProfile, AppSettings, CaptionerProfile, PromptOptimizerProfile } from '../../types'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
+import { useLockBodyScroll } from '../../hooks/useLockBodyScroll'
 import { ProfileSelector } from './ProfileSelector'
 import { NamedProfileSelector } from './NamedProfileSelector'
 import { ApiProfileSection } from './ApiProfileSection'
@@ -123,9 +124,10 @@ export default function SettingsModal() {
     return next
   }, [draft, activeProfile.id, activeProfile.timeout, activeOptimizerProfile.id, activeOptimizerProfile.timeout, activeCaptionerProfile.id, activeCaptionerProfile.timeout, timeoutInput, optimizerTimeoutInput, captionerTimeoutInput])
 
+  const settingsJson = useMemo(() => JSON.stringify(settings), [settings])
   const isDirty = useMemo(
-    () => JSON.stringify(buildFlushedDraft()) !== JSON.stringify(settings),
-    [buildFlushedDraft, settings],
+    () => JSON.stringify(buildFlushedDraft()) !== settingsJson,
+    [buildFlushedDraft, settingsJson],
   )
 
   useEffect(() => {
@@ -185,7 +187,7 @@ export default function SettingsModal() {
       normalizeOptimizerProfile({
         ...profile,
         name: profile.name.trim() || (profile.id === DEFAULT_OPTIMIZER_PROFILE_ID ? '默认' : '新配置'),
-        baseUrl: profile.baseUrl.trim(),
+        baseUrl: profile.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl,
         apiKey: profile.apiKey.trim(),
         model: profile.model.trim(),
       }),
@@ -198,7 +200,7 @@ export default function SettingsModal() {
       normalizeCaptionerProfile({
         ...profile,
         name: profile.name.trim() || (profile.id === DEFAULT_CAPTIONER_PROFILE_ID ? '默认' : '新配置'),
-        baseUrl: profile.baseUrl.trim(),
+        baseUrl: profile.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl,
         apiKey: profile.apiKey.trim(),
         model: profile.model.trim(),
       }),
@@ -279,6 +281,7 @@ export default function SettingsModal() {
   }, [activeProfile.id, activeProfile.timeout, timeoutInput])
 
   useCloseOnEscape(showSettings, handleClose)
+  useLockBodyScroll(showSettings)
 
   const updateActiveOptimizerProfile = (patch: Partial<PromptOptimizerProfile>) => {
     setDraft((prev) => ({

@@ -4,6 +4,7 @@ import { canvasToBlob } from '../../lib/image/canvasImage'
 import { storeImage } from '../../lib/db'
 import { replaceMaskTargetImage } from '../../lib/image/maskPreprocess'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
+import { useLockBodyScroll } from '../../hooks/useLockBodyScroll'
 import { type Point } from '../../lib/image/viewportTransform'
 import { useMaskHistory } from './hooks/useMaskHistory'
 import { useCanvasViewport } from './hooks/useCanvasViewport'
@@ -143,6 +144,7 @@ export default function MaskEditorModal() {
     setMaskEditorImageId(null)
   }
   useCloseOnEscape(Boolean(imageId), close)
+  useLockBodyScroll(Boolean(imageId))
 
   const handleRemoveMask = () => {
     setConfirmDialog({

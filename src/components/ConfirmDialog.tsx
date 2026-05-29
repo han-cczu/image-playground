@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
 
 function renderMessage(message: string) {
   return message.split(/(`[^`]+`)/g).map((part, index) => {
@@ -44,6 +45,7 @@ export default function ConfirmDialog() {
   }
 
   useCloseOnEscape(Boolean(confirmDialog) && canConfirm, handleClose)
+  useLockBodyScroll(Boolean(confirmDialog))
 
   if (!confirmDialog) return null
   const isDestructive = confirmDialog.title.includes('删除') || confirmDialog.title.includes('清空')

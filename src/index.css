@@ -237,6 +237,59 @@ input[type="number"] {
   }
 }
 
+/* ===== 全面电影化：环境光晕缓慢漂移 + 卡片错落入场 ===== */
+
+/* 环境光晕：三块光斑错峰缓慢漂移（仅 transform，走合成层） */
+@keyframes glow-drift-a {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  100% { transform: translate3d(6%, 8%, 0) scale(1.12); }
+}
+@keyframes glow-drift-b {
+  0%   { transform: translate3d(0, 0, 0) scale(1.05); }
+  100% { transform: translate3d(-7%, -5%, 0) scale(0.95); }
+}
+@keyframes glow-drift-c {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  100% { transform: translate3d(4%, -6%, 0) scale(1.1); }
+}
+.glow-blob-a { animation: glow-drift-a 26s ease-in-out 0s infinite alternate; }
+.glow-blob-b { animation: glow-drift-b 32s ease-in-out 1.5s infinite alternate; }
+.glow-blob-c { animation: glow-drift-c 22s ease-in-out 0.8s infinite alternate; }
+
+/* 卡片错落入场：放在 dnd 外层包裹的内层元素上，不与拖拽 transform 冲突。
+   backwards 让 stagger 延迟期间保持隐藏（opacity 0），避免先闪现。 */
+@keyframes card-rise-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.card-enter {
+  animation: card-rise-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glow-blob-a,
+  .glow-blob-b,
+  .glow-blob-c,
+  .card-enter {
+    animation: none;
+  }
+}
+
+/* 交互层(弹窗 / 吐司 / 下拉)位移类动画也尊重 prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  .toast-enter,
+  .animate-overlay-in,
+  .animate-modal-in,
+  .animate-confirm-in,
+  .animate-slide-down-in,
+  .animate-zoom-in,
+  .animate-fade-in,
+  .animate-dropdown-down,
+  .animate-dropdown-up {
+    animation: none;
+  }
+}
+
 .safe-area-x {
   padding-left: max(1rem, var(--safe-area-left));
   padding-right: max(1rem, var(--safe-area-right));

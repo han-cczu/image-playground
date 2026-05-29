@@ -33,7 +33,9 @@ export default function ViewportTooltip({ visible, children, className = '' }: V
     updatePosition()
     window.addEventListener('resize', updatePosition)
     return () => window.removeEventListener('resize', updatePosition)
-  }, [visible, children])
+    // 不依赖 children:它每次父渲染都是新引用,会让本 effect 反复重订阅 resize + 强制重排。
+    // tooltip 内容通常仅在 visible 切换时变化,resize 监听已覆盖窗口尺寸变化。
+  }, [visible])
 
   if (!visible) return null
 

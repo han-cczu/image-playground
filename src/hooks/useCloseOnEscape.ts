@@ -9,6 +9,8 @@ let nextId = 0
 
 function globalKeyDown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
+  // IME 组字过程中把 ESC 留给输入法处理,不拦截、不关闭弹窗
+  if (e.isComposing || e.keyCode === 229) return
   if (escStack.length === 0) return
   e.preventDefault()
   // 调用栈顶（最后注册的）handler

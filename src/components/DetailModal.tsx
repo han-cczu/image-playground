@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { useStore, getCachedImage, ensureImageCached, reuseConfig, editOutputs, removeTask, updateTaskInStore, showCodexCliPrompt, getCodexCliPromptKey, retryTask, setTaskFavoriteCategory, clearTaskFavorite } from '../store'
+import { useStore, getCachedImage, ensureImageCached, reuseConfig, editOutputs, removeTask, updateTaskInStore, showCodexCliPrompt, getCodexCliPromptKey, retryTask, setTaskFavoriteCategory, clearTaskFavorite, cancelTask } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
 import { formatImageRatio } from '../lib/image/size'
 import { ActualValueBadge, DetailParamValue } from '../lib/paramDisplay'
 import { copyBlobToClipboard, copyTextToClipboard, getClipboardFailureMessage } from '../lib/image/clipboard'
@@ -34,6 +35,7 @@ export default function DetailModal() {
   )
 
   useCloseOnEscape(Boolean(task), () => setDetailTaskId(null))
+  useLockBodyScroll(Boolean(task))
 
   // Reset index when task changes
   useEffect(() => {
@@ -383,6 +385,13 @@ export default function DetailModal() {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
+              <button
+                type="button"
+                onClick={() => cancelTask(task.id)}
+                className="absolute right-4 top-4 inline-flex items-center gap-1 rounded-full bg-black/50 px-3 py-1 text-xs text-white backdrop-blur-sm transition hover:bg-red-500/80"
+              >
+                取消生成
+              </button>
             </>
           )}
           {task.status === 'error' && (

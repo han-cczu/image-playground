@@ -2,6 +2,7 @@ import { useMemo, useRef, useState, useEffect } from 'react'
 import {
   DndContext,
   PointerSensor,
+  KeyboardSensor,
   useSensor,
   useSensors,
   closestCenter,
@@ -11,6 +12,7 @@ import {
   SortableContext,
   arrayMove,
   rectSortingStrategy,
+  sortableKeyboardCoordinates,
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -29,6 +31,7 @@ export interface ConversationTag {
 
 interface SortableTaskCardProps {
   task: TaskRecord
+  index: number
   isSelected: boolean
   dragDisabled: boolean
   conversationTag?: ConversationTag
@@ -38,7 +41,7 @@ interface SortableTaskCardProps {
   onDelete: () => void
 }
 
-function SortableTaskCard({ task, isSelected, dragDisabled, conversationTag, ...handlers }: SortableTaskCardProps) {
+function SortableTaskCard({ task, index, isSelected, dragDisabled, conversationTag, ...handlers }: SortableTaskCardProps) {
   const {
     attributes,
     listeners,
@@ -63,18 +66,20 @@ function SortableTaskCard({ task, isSelected, dragDisabled, conversationTag, ...
       className="task-card-wrapper"
       data-task-id={task.id}
     >
-      <TaskCard
-        task={task}
-        isSelected={isSelected}
-        conversationTag={conversationTag}
-        dragHandle={{
-          ref: setActivatorNodeRef,
-          listeners,
-          attributes,
-          disabled: dragDisabled,
-        }}
-        {...handlers}
-      />
+      <div className="card-enter" style={{ animationDelay: `${Math.min(index, 12) * 40}ms` }}>
+        <TaskCard
+          task={task}
+          isSelected={isSelected}
+          conversationTag={conversationTag}
+          dragHandle={{
+            ref: setActivatorNodeRef,
+            listeners,
+            attributes,
+            disabled: dragDisabled,
+          }}
+          {...handlers}
+        />
+      </div>
     </div>
   )
 }
@@ -134,6 +139,8 @@ export default function TaskGrid() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    // 键盘可拖拽:聚焦拖拽手柄后空格拾起、方向键移动、空格放下、Esc 取消
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -295,7 +302,7 @@ export default function TaskGrid() {
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={filteredTasks.map((t) => t.id)} strategy={rectSortingStrategy}>
           <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
-            {filteredTasks.map((task) => {
+            {filteredTasks.map((task, index) => {
               let conversationTag: ConversationTag | undefined
               if (galleryView && task.conversationId) {
                 const conv = conversationById.get(task.conversationId)
@@ -315,6 +322,7 @@ export default function TaskGrid() {
               <SortableTaskCard
                 key={task.id}
                 task={task}
+                index={index}
                 isSelected={selectedTaskIds.includes(task.id)}
                 dragDisabled={dragDisabled}
                 conversationTag={conversationTag}

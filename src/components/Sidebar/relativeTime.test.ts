@@ -23,4 +23,9 @@ describe('formatRelativeTime', () => {
     const out = formatRelativeTime(NOW - 60 * 86_400_000, NOW)
     expect(out).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
+
+  it('未来时间戳被钳为「刚刚」,不显示「X 分钟后」(时钟回拨/异常导入数据)', () => {
+    expect(formatRelativeTime(NOW + 5 * 60_000, NOW)).toBe('刚刚')
+    expect(formatRelativeTime(NOW + 3 * 3_600_000, NOW)).toBe('刚刚')
+  })
 })

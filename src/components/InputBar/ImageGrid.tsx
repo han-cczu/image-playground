@@ -48,6 +48,10 @@ export default function ImageGrid({
   const imageDragPreviewRef = useRef<HTMLElement | null>(null)
   const suppressImageClickRef = useRef(false)
   const maskConflictNoticeShownRef = useRef(false)
+  // 遮罩主图消失/切换时复位提示标志,使移除遮罩后重新添加再点参考图能再次给出冲突提示
+  useEffect(() => {
+    maskConflictNoticeShownRef.current = false
+  }, [maskTargetImage?.id])
 
   const { imageHintId, showHint: showImageHint, hideHint: hideImageHint, startHintTouch: startImageHintTouch } = useImageHintTimer()
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
 import { captionImageStream } from '../lib/api/captionImageApi'
 
 type Phase = 'idle' | 'streaming' | 'done' | 'error'
@@ -39,7 +40,11 @@ export default function ImageCaptionModal() {
     setPhase('streaming')
     captionImageStream(configRef.current, source, {
       signal: controller.signal,
-      onDelta: (chunk) => setCaption((s) => s + chunk),
+      onDelta: (chunk) => {
+        // 旧流被 abort 后已入队的 delta 不应污染新一轮文本
+        if (controller.signal.aborted) return
+        setCaption((s) => s + chunk)
+      },
     })
       .then(() => {
         if (controller.signal.aborted) return
@@ -88,6 +93,7 @@ export default function ImageCaptionModal() {
   }
 
   useCloseOnEscape(Boolean(captionSource), handleClose)
+  useLockBodyScroll(Boolean(captionSource))
 
   if (!captionSource) return null
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
 import { optimizePromptStream } from '../lib/api/optimizePromptApi'
 
 type Phase = 'idle' | 'streaming' | 'done' | 'error' | 'cancelled'
@@ -38,6 +39,8 @@ export default function PromptOptimizerModal() {
     optimizePromptStream(config, currentPrompt, {
       signal: controller.signal,
       onDelta: (chunk) => {
+        // 旧流被 abort 后已入队的 delta 不应污染新一轮文本
+        if (controller.signal.aborted) return
         setOptimized((s) => s + chunk)
       },
     })
@@ -84,6 +87,7 @@ export default function PromptOptimizerModal() {
   }
 
   useCloseOnEscape(showPromptOptimizer, handleClose)
+  useLockBodyScroll(showPromptOptimizer)
 
   if (!showPromptOptimizer) return null
 
