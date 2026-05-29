@@ -1,3 +1,5 @@
+import { toPngBlob } from './canvasImage'
+
 export async function copyTextToClipboard(text: string) {
   let asyncClipboardError: unknown = null
 
@@ -20,8 +22,11 @@ export async function copyBlobToClipboard(blob: Blob) {
     throw new Error('Clipboard image API is not available')
   }
 
+  // 浏览器异步剪贴板对图片只可靠支持 image/png(写 jpeg/webp 会抛错);空 type 还会得到坏键 { '': blob }。
+  // 统一先转成 image/png 再写入。
+  const png = await toPngBlob(blob)
   await navigator.clipboard.write([
-    new ClipboardItem({ [blob.type]: blob }),
+    new ClipboardItem({ [png.type]: png }),
   ])
 }
 

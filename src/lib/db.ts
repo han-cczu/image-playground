@@ -13,6 +13,11 @@ function openDB(): Promise<IDBDatabase> {
     req.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result
       const tx = (e.target as IDBOpenDBRequest).transaction
+      if (tx) {
+        // 升级事务中途失败/中止时 reject,避免 Promise 永久挂起
+        tx.onabort = () => reject(tx.error ?? new Error('数据库升级被中止'))
+        tx.onerror = () => reject(tx.error)
+      }
       if (!db.objectStoreNames.contains(STORE_TASKS)) {
         db.createObjectStore(STORE_TASKS, { keyPath: 'id' })
       }
@@ -34,6 +39,8 @@ function openDB(): Promise<IDBDatabase> {
         }
       }
     }
+    // 其它标签页持有旧版本连接时,版本升级会被阻塞;不处理会让 open 既不 success 也不 error,Promise 永久挂起。
+    req.onblocked = () => reject(new Error('数据库升级被其它标签页阻塞,请关闭本站其它标签页后重试'))
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
   })
@@ -204,9 +211,15 @@ function getDataUrlMeta(dataUrl: string): { mime: string; isBase64: boolean; pay
 
 export function dataUrlToImageBlob(dataUrl: string): { blob: Blob; mime: string } {
   const { mime, isBase64, payload } = getDataUrlMeta(dataUrl)
-  const bytes = isBase64
-    ? createBytesFromBinary(atob(payload.replace(/\s/g, '')))
-    : new TextEncoder().encode(decodeURIComponent(payload))
+  let bytes: Uint8Array
+  try {
+    bytes = isBase64
+      ? createBytesFromBinary(atob(payload.replace(/\s/g, '')))
+      : new TextEncoder().encode(decodeURIComponent(payload))
+  } catch {
+    // atob / decodeURIComponent 对损坏内容会抛 DOMException;转成语义化错误供上层提示。
+    throw new Error('图片 data URL 解码失败：内容已损坏')
+  }
 
   return { blob: new Blob([copyBytesToArrayBuffer(bytes)], { type: mime }), mime }
 }

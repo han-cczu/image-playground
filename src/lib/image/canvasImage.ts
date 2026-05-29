@@ -36,6 +36,27 @@ export async function imageDataUrlToPngBlob(dataUrl: string): Promise<Blob> {
   return canvasToBlob(canvas, 'image/png')
 }
 
+/**
+ * 把任意图片 Blob 转成 image/png Blob:已是 png 直接返回,否则经离屏 canvas 重绘导出。
+ * 供剪贴板写入复用——浏览器异步剪贴板对图片只可靠支持 image/png。
+ */
+export async function toPngBlob(blob: Blob): Promise<Blob> {
+  if (blob.type === 'image/png') return blob
+  const url = URL.createObjectURL(blob)
+  try {
+    const image = await loadImage(url)
+    const canvas = document.createElement('canvas')
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('当前浏览器不支持 Canvas')
+    ctx.drawImage(image, 0, 0)
+    return await canvasToBlob(canvas, 'image/png')
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
 export async function maskDataUrlToPngBlob(maskDataUrl: string): Promise<Blob> {
   const blob = await dataUrlToBlob(maskDataUrl, 'image/png')
   if (blob.type !== 'image/png') {
@@ -108,5 +129,10 @@ export async function createMaskPreviewDataUrl(imageDataUrl: string, maskDataUrl
   if (!overlayCtx) throw new Error('当前浏览器不支持 Canvas')
   overlayCtx.putImageData(overlay, 0, 0)
   ctx.drawImage(overlayCanvas, 0, 0)
-  return canvas.toDataURL('image/png')
+  const dataUrl = canvas.toDataURL('image/png')
+  // 主动释放离屏 canvas 的位图内存(iOS Safari 有总 canvas 内存上限,高分辨率频繁预览易触顶)。
+  maskCanvas.width = maskCanvas.height = 0
+  overlayCanvas.width = overlayCanvas.height = 0
+  canvas.width = canvas.height = 0
+  return dataUrl
 }

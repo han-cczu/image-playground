@@ -23,6 +23,7 @@ import {
   normalizeConversations,
 } from './conversations'
 import { reseedConversationsFromFavoriteCategories } from './conversationMigration'
+import { normalizeTasks } from './tasks'
 
 export type ImportMode = 'merge' | 'replace'
 
@@ -41,6 +42,14 @@ function getMimeFromPath(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase() ?? 'png'
   const mimeMap: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }
   return mimeMap[ext] ?? 'image/png'
+}
+
+/** 校验图片条目 path:必须形如 images/<id>.<ext> 且 id 与 manifest key 一致,否则返回 null 跳过(防 ZIP 路径穿越 / id 错配)。 */
+function resolveImageEntry(id: string, filePath: string): string | null {
+  if (filePath.includes('..')) return null
+  const match = /^images\/(.+)\.(png|jpg|jpeg|webp)$/.exec(filePath)
+  if (!match || match[1] !== id) return null
+  return getMimeFromPath(filePath)
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -233,14 +242,18 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
       ? normalizeFavoriteCategories(data.favoriteCategories)
       : []
     const importedCategoryIds = new Set(importedCategories.map((category) => category.id))
-    const importedTasks = sanitizeImportedTasksForFavoriteCategories(data.tasks, importedCategoryIds)
+    // 对不可信 task 做字段级白名单归一化(防缺字段 / 类型错误 / __proto__ 污染直入 IndexedDB)
+    const normalizedImportedTasks = normalizeTasks(data.tasks)
+    const importedTasks = sanitizeImportedTasksForFavoriteCategories(normalizedImportedTasks, importedCategoryIds)
 
     // 还原图片
     for (const [id, info] of Object.entries(data.imageFiles)) {
       if (existingImageIds.has(id)) continue
+      // 校验 path 严格形如 images/<id>.<ext> 且与 id 一致,拒绝路径穿越 / id 错配的条目
+      const mime = resolveImageEntry(id, info.path)
+      if (!mime) continue
       const bytes = unzipped[info.path]
       if (!bytes) continue
-      const mime = getMimeFromPath(info.path)
       const blob = new Blob([copyBytesToArrayBuffer(bytes)], { type: mime })
       await putImage({ id, blob, mime, createdAt: info.createdAt, source: info.source })
     }
@@ -325,13 +338,17 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
     useStore.getState().setTasks(tasks)
     useStore
       .getState()
-      .showToast(`已导入 ${data.tasks.length} 条记录`, 'success')
+      .showToast(`已导入 ${normalizedImportedTasks.length} 条记录`, 'success')
     return true
   } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    const isReplace = (options.mode ?? 'merge') === 'replace'
     useStore
       .getState()
       .showToast(
-        `导入失败：${e instanceof Error ? e.message : String(e)}`,
+        isReplace
+          ? `替换导入失败：${message}。数据可能不完整,请重新导入或清空后重试。`
+          : `导入失败：${message}`,
         'error',
       )
     return false
