@@ -54,7 +54,9 @@ export function readUrlBootstrap(href: string): UrlBootstrapResult {
     settings.baseUrl = normalizeBaseUrl(apiUrlParam.trim())
   }
 
-  const apiKeyParam = hashParams.get('apiKey') ?? searchParams.get('apiKey')
+  // 仅从 hash 读取 apiKey:查询串会进服务器访问日志 / Referer,密钥绝不应走查询串。
+  // 'apiKey' 仍保留在 BOOTSTRAP_KEYS 中,故查询串里的 ?apiKey= 仍会被 cleanSearchParams 清理出 URL。
+  const apiKeyParam = hashParams.get('apiKey')
   if (apiKeyParam !== null) {
     settings.apiKey = apiKeyParam.trim()
   }
