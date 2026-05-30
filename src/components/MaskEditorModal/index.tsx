@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useStore } from '../../store'
+import { useStore, rollbackStoredImages } from '../../store'
 import { canvasToBlob } from '../../lib/image/canvasImage'
 import { storeImage } from '../../lib/db'
 import { replaceMaskTargetImage } from '../../lib/image/maskPreprocess'
@@ -243,7 +243,11 @@ export default function MaskEditorModal() {
         saveTokenRef.current !== token ||
         activeSessionIdRef.current !== savingSessionId ||
         useStore.getState().maskEditorImageId !== savingImageId
-      ) return
+      ) {
+        // 保存期间用户已关闭/切图:回滚刚存入的图(若无其它引用),避免孤儿记录
+        await rollbackStoredImages([workingTargetId])
+        return
+      }
 
       const latestStore = useStore.getState()
       latestStore.setInputImages(

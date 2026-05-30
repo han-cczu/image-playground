@@ -33,6 +33,7 @@ import {
   writeConversationMigrationVersion,
 } from './conversations'
 import { reseedConversationsFromFavoriteCategories } from './conversationMigration'
+import { SORT_STEP, SORT_EPSILON, computeReorderedSortOrders } from './taskSort'
 
 const syncHttpWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const taskAbortControllers = new Map<string, AbortController>()
@@ -101,6 +102,28 @@ function terminateTaskRuntime(taskId: string) {
   abortTaskRequest(taskId)
   clearSyncHttpWatchdogTimer(taskId)
   clearTaskAbortController(taskId)
+}
+
+/**
+ * 回滚一组刚 storeImage 的图片(成对删 DB + 内存缓存),但只删当前没有任何 task / inputImage 引用的,
+ * 避免误删内容寻址去重命中的在用图。供 executeTask 写图后早退、蒙版保存竞态复用。
+ */
+export async function rollbackStoredImages(imageIds: string[]): Promise<void> {
+  if (!imageIds.length) return
+  const { tasks, inputImages } = useStore.getState()
+  const stillUsed = new Set<string>()
+  for (const t of tasks) {
+    for (const id of t.inputImageIds || []) stillUsed.add(id)
+    if (t.maskImageId) stillUsed.add(t.maskImageId)
+    for (const id of t.outputImages || []) stillUsed.add(id)
+  }
+  for (const img of inputImages) stillUsed.add(img.id)
+  for (const id of imageIds) {
+    if (!stillUsed.has(id)) {
+      await deleteImage(id)
+      deleteCachedImage(id)
+    }
+  }
 }
 
 function updateTaskInStoreSilently(taskId: string, patch: Partial<TaskRecord>) {
@@ -516,7 +539,11 @@ async function executeTask(taskId: string) {
 
     // 更新任务
     const latestBeforeUpdate = useStore.getState().tasks.find((t) => t.id === taskId)
-    if (!latestBeforeUpdate || latestBeforeUpdate.status !== 'running') return
+    if (!latestBeforeUpdate || latestBeforeUpdate.status !== 'running') {
+      // 任务在写图期间被删/取消:回滚已存但无引用的输出图,避免孤儿记录泄漏
+      await rollbackStoredImages(outputIds)
+      return
+    }
     clearSyncHttpWatchdogTimer(taskId)
     await updateTaskInStore(taskId, {
       outputImages: outputIds,
@@ -607,21 +634,45 @@ export function getTaskSortKey(task: TaskRecord): number {
   return task.sortOrder ?? task.createdAt
 }
 
-// 首/尾插入用大步长,大幅降低反复同隙插入导致的浮点精度坍缩(配合 taskFilters 的 createdAt/id tiebreaker 兜底排序稳定)
-const SORT_STEP = 65536
-
 /**
  * 将 taskId 移到 prevTaskId 与 nextTaskId 之间。任一邻居为 null 表示拖到最前/最后。
- * 用 gap-based 排序：仅写入被拖动任务的新 sortOrder，避免大批量 IDB 写入。
+ * 常规走 gap-based 中点(仅写被拖动任务);中点逼近浮点精度时,对全量任务整数化重排自愈。
  */
 export function reorderTask(
   taskId: string,
   prevTaskId: string | null,
   nextTaskId: string | null,
 ) {
-  const { tasks } = useStore.getState()
+  const { tasks, setTasks } = useStore.getState()
   const prev = prevTaskId ? tasks.find((t) => t.id === prevTaskId) : null
   const next = nextTaskId ? tasks.find((t) => t.id === nextTaskId) : null
+
+  // 中点与邻居差逼近浮点精度(反复同隙插入耗尽精度):对全量任务整数化重排自愈,再放置被拖动项
+  if (prev && next && Math.abs(getTaskSortKey(prev) - getTaskSortKey(next)) < SORT_EPSILON) {
+    const orderedIds = [...tasks]
+      .sort((a, b) => {
+        const ka = getTaskSortKey(a)
+        const kb = getTaskSortKey(b)
+        if (ka !== kb) return kb - ka
+        if (a.createdAt !== b.createdAt) return b.createdAt - a.createdAt
+        return a.id < b.id ? 1 : a.id > b.id ? -1 : 0
+      })
+      .map((t) => t.id)
+    const newOrders = computeReorderedSortOrders(orderedIds, taskId, prevTaskId, nextTaskId)
+    const changed: TaskRecord[] = []
+    const updated = tasks.map((t) => {
+      const order = newOrders.get(t.id)
+      if (order != null && order !== t.sortOrder) {
+        const updatedTask = { ...t, sortOrder: order }
+        changed.push(updatedTask)
+        return updatedTask
+      }
+      return t
+    })
+    setTasks(updated)
+    void Promise.all(changed.map((t) => putTask(t).catch(() => {})))
+    return
+  }
 
   let newSortOrder: number
   if (prev && next) {
