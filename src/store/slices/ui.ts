@@ -11,6 +11,10 @@ export interface UiSlice {
   dismissedInsecureContextBanner: boolean
   setDismissedInsecureContextBanner: (v: boolean) => void
 
+  // 明文密钥存储一次性提示(设置页 API key 区域)
+  dismissedPlaintextKeyNotice: boolean
+  setDismissedPlaintextKeyNotice: (v: boolean) => void
+
   // 图库视图：跨对话查看全部 task
   galleryView: boolean
   setGalleryView: (view: boolean) => void
@@ -62,6 +66,11 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   dismissedInsecureContextBanner: false,
   setDismissedInsecureContextBanner: (dismissedInsecureContextBanner) =>
     set({ dismissedInsecureContextBanner }),
+
+  // 明文密钥存储一次性提示
+  dismissedPlaintextKeyNotice: false,
+  setDismissedPlaintextKeyNotice: (dismissedPlaintextKeyNotice) =>
+    set({ dismissedPlaintextKeyNotice }),
 
   // Gallery view
   galleryView: false,

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { useStore } from '../../store'
 import { listModels } from '../../lib/api/listModels'
 import {
   DEFAULT_GEMINI_BASE_URL,
@@ -39,6 +40,8 @@ export function ApiProfileSection({
   const [modelListLoading, setModelListLoading] = useState(false)
   const [modelList, setModelList] = useState<string[] | null>(null)
   const [modelListError, setModelListError] = useState<string | null>(null)
+  const dismissedPlaintextKeyNotice = useStore((s) => s.dismissedPlaintextKeyNotice)
+  const setDismissedPlaintextKeyNotice = useStore((s) => s.setDismissedPlaintextKeyNotice)
 
   // Reset model list cache when key connection params change
   useEffect(() => {
@@ -183,6 +186,25 @@ export function ApiProfileSection({
         <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
           URL 临时传入密钥请使用 hash：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">#apiKey=</code>，读取后会自动清除。
         </div>
+        {!dismissedPlaintextKeyNotice && (
+          <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200/70 bg-amber-50/60 px-2.5 py-2 text-xs text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/[0.06] dark:text-amber-400/90">
+            <svg className="mt-px h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            </svg>
+            <span className="flex-1 leading-relaxed">密钥仅以明文保存在本机浏览器(localStorage),清除浏览器数据即丢失;共享或不可信设备上请谨慎,并优先使用可随时吊销的密钥。</span>
+            <button
+              type="button"
+              onClick={() => setDismissedPlaintextKeyNotice(true)}
+              className="flex-shrink-0 rounded p-0.5 text-amber-500/80 transition hover:bg-amber-500/10 hover:text-amber-600 dark:hover:text-amber-300"
+              aria-label="不再提示"
+              title="不再提示"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
 
       {activeProfile.provider === 'openai' && (
