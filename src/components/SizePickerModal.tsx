@@ -3,6 +3,7 @@ import { calculateImageSize, normalizeImageSize, parseRatio, type SizeTier } fro
 import ViewportTooltip from './ViewportTooltip'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 
 const TIERS: SizeTier[] = ['1K', '2K', '4K']
 const SIZE_LIMIT_TEXT = '由于模型限制，最终输出会自动规整到合法尺寸：宽高均为 16 的倍数，最大边长 3840px，宽高比不超过 3:1，总像素限制为 655360-8294400。'
@@ -45,9 +46,11 @@ function findPresetForSize(size: string) {
 }
 
 export default function SizePickerModal({ currentSize, onSelect, onClose, allowAuto = true }: Props) {
-  // 该组件由父级条件挂载,挂载即「打开」:接入 ESC 关闭与 body 滚动锁,与其它弹窗一致
+  // 该组件由父级条件挂载,挂载即「打开」:接入 ESC 关闭、body 滚动锁、焦点陷阱,与其它弹窗一致
+  const panelRef = useRef<HTMLDivElement>(null)
   useCloseOnEscape(true, onClose)
   useLockBodyScroll(true)
+  useFocusTrap(true, panelRef)
   const currentPreset = findPresetForSize(currentSize)
   const currentParsedSize = parseSize(currentSize)
   const [mode, setMode] = useState<Mode>(() => {
@@ -149,6 +152,8 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
     <div data-no-drag-select className="fixed inset-0 z-[70] flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" />
       <div
+        ref={panelRef}
+        tabIndex={-1}
         className="relative z-10 w-full max-w-md rounded-3xl border border-white/50 bg-white/95 p-5 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
         onClick={(e) => e.stopPropagation()}
       >

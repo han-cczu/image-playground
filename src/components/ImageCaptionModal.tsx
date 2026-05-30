@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 import { captionImageStream } from '../lib/api/captionImageApi'
 
 type Phase = 'idle' | 'streaming' | 'done' | 'error'
@@ -18,6 +19,7 @@ export default function ImageCaptionModal() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const sourceRef = useRef<string | null>(null)
   sourceRef.current = captionSource
   const configRef = useRef(settings.captioner)
@@ -94,6 +96,7 @@ export default function ImageCaptionModal() {
 
   useCloseOnEscape(Boolean(captionSource), handleClose)
   useLockBodyScroll(Boolean(captionSource))
+  useFocusTrap(Boolean(captionSource), panelRef)
 
   if (!captionSource) return null
 
@@ -105,7 +108,7 @@ export default function ImageCaptionModal() {
   return (
     <div data-no-drag-select className="fixed inset-0 z-[80] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" onClick={handleClose} />
-      <div className="relative z-10 w-full max-w-3xl rounded-3xl border border-white/50 bg-white/95 p-5 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 overflow-hidden max-h-[85vh] flex flex-col">
+      <div ref={panelRef} tabIndex={-1} className="relative z-10 w-full max-w-3xl rounded-3xl border border-white/50 bg-white/95 p-5 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 overflow-hidden max-h-[85vh] flex flex-col">
         <div className="mb-4 flex items-center justify-between gap-4">
           <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2">
             <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
