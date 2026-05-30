@@ -6,6 +6,7 @@ import { readUrlBootstrap } from './lib/urlBootstrap'
 import { filterAndSortTasks } from './lib/taskFilters'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
+import AmbientGlow from './components/AmbientGlow'
 import EmptyState from './components/EmptyState'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
@@ -126,6 +127,7 @@ export default function App() {
 
   return (
     <>
+      <AmbientGlow />
       <InsecureContextBanner />
       <div className="flex min-h-screen md:h-screen md:overflow-hidden">
         <ErrorBoundary region="sidebar">

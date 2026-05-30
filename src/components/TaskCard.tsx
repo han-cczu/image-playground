@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import type { DraggableAttributes } from '@dnd-kit/core'
 import type { SyntheticListenerMap } from '@dnd-kit/core/dist/hooks/utilities'
 import type { TaskRecord } from '../types'
-import { useStore, getCachedImage, ensureImageCached, setTaskFavoriteCategory, clearTaskFavorite, retryTask } from '../store'
+import { useStore, getCachedImage, ensureImageCached, setTaskFavoriteCategory, clearTaskFavorite, retryTask, cancelTask } from '../store'
 import { formatImageRatio } from '../lib/image/size'
 import { ParamValue } from '../lib/paramDisplay'
 import FavoriteCategoryMenu from './FavoriteCategoryMenu'
@@ -146,6 +146,9 @@ export default function TaskCard({
           if (url) setThumbSrc(url)
         })
       }
+    } else {
+      // 输出被清空时复位,避免残留上一次的封面
+      setThumbSrc('')
     }
   }, [task.outputImages])
 
@@ -219,7 +222,7 @@ export default function TaskCard({
       </div>
 
       <div
-        className={`group relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer duration-200 hover:shadow-lg dark:hover:bg-gray-800/80 ${
+        className={`group relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer duration-200 hover:shadow-lg dark:hover:shadow-[0_10px_40px_-12px_rgba(99,102,241,0.35)] dark:hover:bg-gray-800/80 ${
           !isSwiping ? 'transition-[box-shadow,border-color,background-color,transform]' : 'transition-[box-shadow,border-color,background-color]'
         } ${
           task.status === 'running'
@@ -230,6 +233,8 @@ export default function TaskCard({
         }`}
         style={{
           transform: swipeOffset ? `translateX(${swipeOffset}px)` : undefined,
+          // 横向滑动选择交给手势、纵向仍可滚动;用 CSS 抑制方向冲突(passive 监听下 preventDefault 无效)
+          touchAction: 'pan-y',
         }}
         onClick={(e) => {
           if (Date.now() < suppressClickUntilRef.current) {
@@ -306,6 +311,16 @@ export default function TaskCard({
                 />
               </svg>
               <span className="text-xs text-gray-400 dark:text-gray-500">生成中...</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  cancelTask(task.id)
+                }}
+                className="mt-0.5 rounded-full px-2 py-0.5 text-[11px] text-gray-500 transition hover:bg-gray-200 hover:text-red-500 dark:text-gray-400 dark:hover:bg-white/10"
+              >
+                取消
+              </button>
             </div>
           )}
           {task.status === 'error' && (
@@ -332,7 +347,7 @@ export default function TaskCard({
             <>
               <img
                 src={thumbSrc}
-                className="saveable-image w-full h-full object-cover"
+                className="saveable-image w-full h-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.06]"
                 loading="lazy"
                 alt=""
               />

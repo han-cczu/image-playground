@@ -7,6 +7,8 @@ import { getImage, storedImageToDataUrl } from './db'
  */
 const MAX_ENTRIES = 100
 const imageCache = new Map<string, string>()
+// 每次 clearImageCache 自增;ensureImageCached 用它判断 await 期间缓存是否被清空,避免把已删图写回(僵尸缓存)。
+let cacheEpoch = 0
 
 function touch(id: string, dataUrl: string): void {
   // 命中即移到末尾，标记为最近使用
@@ -31,10 +33,13 @@ export function getCachedImage(id: string): string | undefined {
 export async function ensureImageCached(id: string): Promise<string | undefined> {
   const cached = getCachedImage(id)
   if (cached !== undefined) return cached
+  const startEpoch = cacheEpoch
   const rec = await getImage(id)
   if (rec) {
     const dataUrl = await storedImageToDataUrl(rec)
     if (!dataUrl) return undefined
+    // 若 await 期间发生过 clearImageCache(清空数据),返回本次取到的值但不写回缓存,避免僵尸缓存项。
+    if (cacheEpoch !== startEpoch) return dataUrl
     imageCache.set(id, dataUrl)
     evictIfOverflow()
     return dataUrl
@@ -54,11 +59,16 @@ export function deleteCachedImage(id: string): void {
 
 export function clearImageCache(): void {
   imageCache.clear()
+  cacheEpoch++
 }
 
 // 测试用，不在生产路径调用
 export function _getCacheSizeForTesting(): number {
   return imageCache.size
+}
+
+export function _getCacheEpochForTesting(): number {
+  return cacheEpoch
 }
 
 export function _getCacheKeysInOrderForTesting(): string[] {

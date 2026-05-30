@@ -1,5 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 
+function isEditableElement(el: Element | null): boolean {
+  if (!el) return false
+  const tag = el.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || (el as HTMLElement).isContentEditable === true
+}
+
 export function useDragDropFiles(args: {
   onFiles: (files: File[]) => void
 }): { isDragging: boolean } {
@@ -12,6 +18,10 @@ export function useDragDropFiles(args: {
   // 粘贴图片
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
+      // 焦点在 InputBar 之外的可编辑元素(设置弹窗输入框、重命名框、其它弹窗文本域)时,
+      // 不劫持图片粘贴——让目标元素自行处理,避免图片被错误塞进底栏参考图。
+      const active = document.activeElement
+      if (isEditableElement(active) && !active!.closest('[data-input-bar]')) return
       const items = e.clipboardData?.items
       if (!items) return
       const imageFiles: File[] = []
@@ -66,16 +76,26 @@ export function useDragDropFiles(args: {
       }
     }
 
+    // 拖出窗口外释放 / 窗口失焦时计数器可能失衡导致全屏遮罩卡住,兜底归零
+    const resetDrag = () => {
+      dragCounter.current = 0
+      setIsDragging(false)
+    }
+
     document.addEventListener('dragenter', handleDragEnter)
     document.addEventListener('dragover', handleDragOver)
     document.addEventListener('dragleave', handleDragLeave)
     document.addEventListener('drop', handleDrop)
+    window.addEventListener('dragend', resetDrag)
+    window.addEventListener('blur', resetDrag)
 
     return () => {
       document.removeEventListener('dragenter', handleDragEnter)
       document.removeEventListener('dragover', handleDragOver)
       document.removeEventListener('dragleave', handleDragLeave)
       document.removeEventListener('drop', handleDrop)
+      window.removeEventListener('dragend', resetDrag)
+      window.removeEventListener('blur', resetDrag)
     }
   }, [])
 

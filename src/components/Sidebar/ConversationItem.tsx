@@ -71,14 +71,20 @@ export default function ConversationItem({
     }
   }, [menuOpen])
 
+  // Enter 提交后 input 卸载会再触发 onBlur→commitRename;用一次性标志防止重复 renameConversation 写入
+  const committingRef = useRef(false)
+
   const startRename = () => {
     if (isArchive) return
+    committingRef.current = false
     setDraftTitle(conversation.title)
     setIsRenaming(true)
     setMenuOpen(false)
   }
 
   const commitRename = () => {
+    if (committingRef.current) return
+    committingRef.current = true
     const trimmed = draftTitle.trim()
     if (!trimmed) {
       // 空字符串拒绝；恢复显示
@@ -93,6 +99,7 @@ export default function ConversationItem({
   }
 
   const cancelRename = () => {
+    committingRef.current = true
     setIsRenaming(false)
     setDraftTitle(conversation.title)
   }

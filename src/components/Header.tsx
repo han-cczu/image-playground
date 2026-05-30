@@ -77,7 +77,7 @@ export default function Header({ onOpenMobileSidebar }: HeaderProps) {
   return (
     <header
       data-no-drag-select
-      className="app-enter-header safe-area-top sticky top-0 z-30 border-b border-gray-200 bg-white/80 backdrop-blur dark:border-white/[0.08] dark:bg-gray-950/80"
+      className="app-enter-header safe-area-top sticky top-0 z-30 border-b border-gray-200 bg-white/70 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-950/70"
     >
       <div className="safe-area-x safe-header-inner mx-auto flex max-w-7xl items-center justify-between gap-2">
         {/* 左侧：移动端 hamburger + 当前对话/模型信息 */}

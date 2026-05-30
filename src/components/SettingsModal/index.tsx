@@ -22,6 +22,8 @@ import {
 } from '../../lib/api/apiProfiles'
 import type { ApiProfile, AppSettings, CaptionerProfile, PromptOptimizerProfile } from '../../types'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
+import { useLockBodyScroll } from '../../hooks/useLockBodyScroll'
+import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { ProfileSelector } from './ProfileSelector'
 import { NamedProfileSelector } from './NamedProfileSelector'
 import { ApiProfileSection } from './ApiProfileSection'
@@ -123,9 +125,10 @@ export default function SettingsModal() {
     return next
   }, [draft, activeProfile.id, activeProfile.timeout, activeOptimizerProfile.id, activeOptimizerProfile.timeout, activeCaptionerProfile.id, activeCaptionerProfile.timeout, timeoutInput, optimizerTimeoutInput, captionerTimeoutInput])
 
+  const settingsJson = useMemo(() => JSON.stringify(settings), [settings])
   const isDirty = useMemo(
-    () => JSON.stringify(buildFlushedDraft()) !== JSON.stringify(settings),
-    [buildFlushedDraft, settings],
+    () => JSON.stringify(buildFlushedDraft()) !== settingsJson,
+    [buildFlushedDraft, settingsJson],
   )
 
   useEffect(() => {
@@ -185,7 +188,7 @@ export default function SettingsModal() {
       normalizeOptimizerProfile({
         ...profile,
         name: profile.name.trim() || (profile.id === DEFAULT_OPTIMIZER_PROFILE_ID ? '默认' : '新配置'),
-        baseUrl: profile.baseUrl.trim(),
+        baseUrl: profile.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl,
         apiKey: profile.apiKey.trim(),
         model: profile.model.trim(),
       }),
@@ -198,7 +201,7 @@ export default function SettingsModal() {
       normalizeCaptionerProfile({
         ...profile,
         name: profile.name.trim() || (profile.id === DEFAULT_CAPTIONER_PROFILE_ID ? '默认' : '新配置'),
-        baseUrl: profile.baseUrl.trim(),
+        baseUrl: profile.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl,
         apiKey: profile.apiKey.trim(),
         model: profile.model.trim(),
       }),
@@ -278,7 +281,10 @@ export default function SettingsModal() {
     }
   }, [activeProfile.id, activeProfile.timeout, timeoutInput])
 
+  const panelRef = useRef<HTMLDivElement>(null)
   useCloseOnEscape(showSettings, handleClose)
+  useLockBodyScroll(showSettings)
+  useFocusTrap(showSettings, panelRef)
 
   const updateActiveOptimizerProfile = (patch: Partial<PromptOptimizerProfile>) => {
     setDraft((prev) => ({
@@ -420,6 +426,8 @@ export default function SettingsModal() {
         onClick={handleClose}
       />
       <div
+        ref={panelRef}
+        tabIndex={-1}
         className="relative z-10 w-full max-w-md sm:max-w-lg md:max-w-2xl rounded-3xl border border-white/50 bg-white/95 p-5 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 overflow-y-auto max-h-[85vh] custom-scrollbar"
       >
         <div className="mb-5 flex items-center justify-between gap-4">

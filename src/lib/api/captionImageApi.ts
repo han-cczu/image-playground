@@ -1,5 +1,11 @@
 import type { CaptionerConfig } from '../../types'
-import { normalizeBaseUrl } from './devProxy'
+import {
+  buildChatCompletionsUrl,
+  extractStreamErrorMessage,
+  parseSseLine,
+  resolveChatTimeoutMs,
+} from './chatCompletionsShared'
+import { DEFAULT_CAPTIONER_TIMEOUT } from './apiProfiles'
 
 export interface CaptionImageOptions {
   /** AbortSignal 用于取消请求 */
@@ -10,29 +16,6 @@ export interface CaptionImageOptions {
 
 /** 引导语：放在 user 文本部分，配合 systemPrompt 一起约束输出 */
 const USER_GUIDE_TEXT = 'Describe this image as a detailed text-to-image prompt.'
-
-function buildChatCompletionsUrl(baseUrl: string): string {
-  const normalized = normalizeBaseUrl(baseUrl)
-  if (!normalized) return '/v1/chat/completions'
-  return normalized.endsWith('/v1')
-    ? `${normalized}/chat/completions`
-    : `${normalized}/v1/chat/completions`
-}
-
-function parseSseLine(line: string): string | null {
-  if (!line.startsWith('data:')) return null
-  const payload = line.slice(5).trim()
-  if (!payload || payload === '[DONE]') return null
-  try {
-    const parsed = JSON.parse(payload) as {
-      choices?: Array<{ delta?: { content?: unknown } }>
-    }
-    const delta = parsed.choices?.[0]?.delta?.content
-    return typeof delta === 'string' ? delta : null
-  } catch {
-    return null
-  }
-}
 
 /**
  * 对一张图片做反推：通过 OpenAI 兼容 chat completions（vision，stream=true）生成文生图提示词。
@@ -54,7 +37,7 @@ export async function captionImageStream(
   }
 
   const url = buildChatCompletionsUrl(config.baseUrl)
-  const timeoutMs = Math.max(1, config.timeout) * 1000
+  const timeoutMs = resolveChatTimeoutMs(config.timeout, DEFAULT_CAPTIONER_TIMEOUT)
 
   const externalSignal = options.signal
   const timeoutController = new AbortController()
@@ -116,11 +99,14 @@ export async function captionImageStream(
   const decoder = new TextDecoder()
   let buffer = ''
   let full = ''
+  let raw = ''
   try {
     while (true) {
       const { value, done } = await reader.read()
       if (done) break
-      buffer += decoder.decode(value, { stream: true })
+      const text = decoder.decode(value, { stream: true })
+      buffer += text
+      raw += text
       let newlineIdx = buffer.indexOf('\n')
       while (newlineIdx !== -1) {
         const line = buffer.slice(0, newlineIdx).replace(/\r$/, '')
@@ -151,6 +137,6 @@ export async function captionImageStream(
   }
 
   const trimmed = full.trim()
-  if (!trimmed) throw new Error('反推结果为空')
+  if (!trimmed) throw new Error(extractStreamErrorMessage(raw) || '反推结果为空')
   return trimmed
 }

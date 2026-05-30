@@ -38,13 +38,18 @@ export function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export function mergeAbortSignals(...signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
+export function mergeAbortSignals(...signals: Array<AbortSignal | undefined>): {
+  signal: AbortSignal | undefined
+  dispose: () => void
+} {
+  const noop = () => {}
   const activeSignals = signals.filter((signal): signal is AbortSignal => Boolean(signal))
-  if (activeSignals.length === 0) return undefined
-  if (activeSignals.length === 1) return activeSignals[0]
+  if (activeSignals.length === 0) return { signal: undefined, dispose: noop }
+  if (activeSignals.length === 1) return { signal: activeSignals[0], dispose: noop }
 
   const controller = new AbortController()
-  const cleanup = () => {
+  // dispose 在正常完成路径解绑监听,避免长生命周期 / 并发复用同一 caller signal 时监听器线性累积。
+  const dispose = () => {
     for (const signal of activeSignals) {
       signal.removeEventListener('abort', abort)
     }
@@ -52,18 +57,18 @@ export function mergeAbortSignals(...signals: Array<AbortSignal | undefined>): A
   const abort = () => {
     if (!controller.signal.aborted) {
       controller.abort()
-      cleanup()
+      dispose()
     }
   }
   if (activeSignals.some((signal) => signal.aborted)) {
     abort()
-    return controller.signal
+    return { signal: controller.signal, dispose }
   }
 
   for (const signal of activeSignals) {
     signal.addEventListener('abort', abort, { once: true })
   }
-  return controller.signal
+  return { signal: controller.signal, dispose }
 }
 
 export function isHttpUrl(value: unknown): value is string {
@@ -78,12 +83,28 @@ export function normalizeBase64Image(value: string, fallbackMime: string): strin
   return value.startsWith('data:') ? value : `data:${fallbackMime};base64,${value}`
 }
 
-function formatMiB(bytes: number): string {
-  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`
+/**
+ * 把 Responses output item 的 result(字符串裸 base64 / data URL,或对象形态
+ * { b64_json | image | data })统一规整为一个非空候选字符串;空则返回 null。
+ * 返回值仍交给 normalizeBase64Image 补 data: 前缀(对已是 data URL 的透传)。
+ */
+export function extractResponsesImageBase64(
+  result: string | { b64_json?: string; image?: string; data?: string } | undefined | null,
+): string | null {
+  if (typeof result === 'string') {
+    const trimmed = result.trim()
+    return trimmed || null
+  }
+  if (result && typeof result === 'object') {
+    for (const value of [result.b64_json, result.image, result.data]) {
+      if (typeof value === 'string' && value.trim()) return value.trim()
+    }
+  }
+  return null
 }
 
-export function getDataUrlEncodedByteSize(dataUrl: string): number {
-  return dataUrl.length
+function formatMiB(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`
 }
 
 export function getDataUrlDecodedByteSize(dataUrl: string): number {

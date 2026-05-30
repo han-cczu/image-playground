@@ -20,6 +20,10 @@ your-domain.com {
         X-Frame-Options "SAMEORIGIN"
         X-Content-Type-Options "nosniff"
         Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Cross-Origin-Opener-Policy "same-origin"
+        # CSP 先 Report-Only(只上报不拦截);验证后改为 Content-Security-Policy 强制。详见 docs/security-headers.md。
+        Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'sha256-3RSlfpoi9mvBe/mSqzp5IGBDwU6ltj+1Eozow0zhThg='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; worker-src 'self'; manifest-src 'self'"
         # 移除 server 头泄露
         -Server
     }

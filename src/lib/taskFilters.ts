@@ -27,10 +27,15 @@ export function filterAndSortTasks(tasks: TaskRecord[], options: TaskFilterOptio
   const categoryId = options.filterFavoriteCategoryId?.trim() || null
   const conversationId = options.filterConversationId?.trim() || null
 
-  // 1.2 按自定义排序值或创建时间排序
-  const sorted = [...tasks].sort(
-    (a, b) => (b.sortOrder ?? b.createdAt) - (a.sortOrder ?? a.createdAt),
-  )
+  // 1.2 按自定义排序值或创建时间降序;sortOrder 相等时用 createdAt、再用 id 作 tiebreaker,
+  //     避免 gap 排序精度坍缩后(两任务 sortOrder 浮点相等)出现不稳定/抖动的次序。
+  const sorted = [...tasks].sort((a, b) => {
+    const ka = a.sortOrder ?? a.createdAt
+    const kb = b.sortOrder ?? b.createdAt
+    if (ka !== kb) return kb - ka
+    if (a.createdAt !== b.createdAt) return b.createdAt - a.createdAt
+    return a.id < b.id ? 1 : a.id > b.id ? -1 : 0
+  })
 
   // 1.3 应用对话、收藏、分类、状态和文本筛选
   return sorted.filter((task) => {

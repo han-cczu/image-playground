@@ -13,6 +13,14 @@ describe('readUrlBootstrap', () => {
     expect(result.cleanUrl).toBe('https://app.example.com/')
   })
 
+  it('忽略查询串里的 apiKey(只接受 hash),但仍将其从 URL 清理掉', () => {
+    const result = readUrlBootstrap('https://app.example.com/?apiKey=query-key&provider=openai')
+
+    expect(result.settings.apiKey).toBeUndefined()
+    expect(result.changed).toBe(true)
+    expect(result.cleanUrl).toBe('https://app.example.com/')
+  })
+
   it('keeps non-sensitive hash fragments while clearing secret bootstrap values', () => {
     const result = readUrlBootstrap('https://app.example.com/#section=history&apiKey=hash-key')
 

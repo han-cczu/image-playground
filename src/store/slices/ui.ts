@@ -11,6 +11,10 @@ export interface UiSlice {
   dismissedInsecureContextBanner: boolean
   setDismissedInsecureContextBanner: (v: boolean) => void
 
+  // 明文密钥存储一次性提示(设置页 API key 区域)
+  dismissedPlaintextKeyNotice: boolean
+  setDismissedPlaintextKeyNotice: (v: boolean) => void
+
   // 图库视图：跨对话查看全部 task
   galleryView: boolean
   setGalleryView: (view: boolean) => void
@@ -30,7 +34,7 @@ export interface UiSlice {
   setCaptionSource: (src: string | null) => void
 
   // Toast
-  toast: { message: string; type: 'info' | 'success' | 'error' } | null
+  toast: { id: number; message: string; type: 'info' | 'success' | 'error' } | null
   showToast: (message: string, type?: 'info' | 'success' | 'error') => void
 
   // Confirm dialog
@@ -49,6 +53,9 @@ export interface UiSlice {
   setConfirmDialog: (d: AppState['confirmDialog']) => void
 }
 
+// toast 自增序号:用 id(而非 message 文本)判定计时器是否应清除当前 toast,避免并发同文案误清
+let toastSeq = 0
+
 export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get) => ({
   // Sidebar
   sidebarCollapsed: false,
@@ -59,6 +66,11 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   dismissedInsecureContextBanner: false,
   setDismissedInsecureContextBanner: (dismissedInsecureContextBanner) =>
     set({ dismissedInsecureContextBanner }),
+
+  // 明文密钥存储一次性提示
+  dismissedPlaintextKeyNotice: false,
+  setDismissedPlaintextKeyNotice: (dismissedPlaintextKeyNotice) =>
+    set({ dismissedPlaintextKeyNotice }),
 
   // Gallery view
   galleryView: false,
@@ -84,9 +96,10 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   // Toast
   toast: null,
   showToast: (message, type = 'info') => {
-    set({ toast: { message, type } })
+    const id = ++toastSeq
+    set({ toast: { id, message, type } })
     setTimeout(() => {
-      if (get().toast?.message === message) set({ toast: null })
+      if (get().toast?.id === id) set({ toast: null })
     }, 3000)
   },
 

@@ -65,7 +65,10 @@ export function normalizePromptOptimizer(input: unknown): PromptOptimizerConfig 
   const record = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
   const defaults = createDefaultPromptOptimizer()
   return {
-    baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : defaults.baseUrl,
+    baseUrl:
+      typeof record.baseUrl === 'string' && record.baseUrl.trim()
+        ? record.baseUrl
+        : defaults.baseUrl,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
     model:
       typeof record.model === 'string' && record.model.trim() ? record.model : defaults.model,
@@ -131,7 +134,10 @@ export function normalizeCaptioner(input: unknown): CaptionerConfig {
   const record = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
   const defaults = createDefaultCaptioner()
   return {
-    baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : defaults.baseUrl,
+    baseUrl:
+      typeof record.baseUrl === 'string' && record.baseUrl.trim()
+        ? record.baseUrl
+        : defaults.baseUrl,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
     model: typeof record.model === 'string' && record.model.trim() ? record.model : defaults.model,
     timeout:
@@ -474,6 +480,9 @@ function getOptimizerProfileDedupKey(profile: PromptOptimizerProfile): string {
     profile.baseUrl.trim().replace(/\/+$/, '').toLowerCase(),
     profile.apiKey.trim(),
     profile.model.trim(),
+    // 纳入 systemPrompt + name:导出会抹空 apiKey,否则同 baseUrl+model 的多套配置往返导入时会被折叠丢失
+    profile.systemPrompt.trim(),
+    profile.name.trim(),
   ])
 }
 
@@ -521,6 +530,9 @@ function getCaptionerProfileDedupKey(profile: CaptionerProfile): string {
     profile.baseUrl.trim().replace(/\/+$/, '').toLowerCase(),
     profile.apiKey.trim(),
     profile.model.trim(),
+    // 纳入 systemPrompt + name:导出会抹空 apiKey,否则同 baseUrl+model 的多套配置往返导入时会被折叠丢失
+    profile.systemPrompt.trim(),
+    profile.name.trim(),
   ])
 }
 

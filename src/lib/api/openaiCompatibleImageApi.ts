@@ -8,8 +8,8 @@ import {
   type CallApiResult,
   fetchImageUrlAsDataUrl,
   getApiErrorMessage,
+  extractResponsesImageBase64,
   getDataUrlDecodedByteSize,
-  getDataUrlEncodedByteSize,
   isDataUrl,
   isHttpUrl,
   mergeActualParams,
@@ -93,10 +93,10 @@ function parseResponsesImageResults(payload: ResponsesApiResponse, fallbackMime:
   for (const item of output) {
     if (item?.type !== 'image_generation_call') continue
 
-    const result = item.result
-    if (typeof result === 'string' && result.trim()) {
+    const raw = extractResponsesImageBase64(item.result)
+    if (raw) {
       results.push({
-        image: normalizeBase64Image(result, fallbackMime),
+        image: normalizeBase64Image(raw, fallbackMime),
         actualParams: mergeActualParams(pickActualParams(item)),
         revisedPrompt: typeof item.revised_prompt === 'string' ? item.revised_prompt : undefined,
       })
@@ -166,7 +166,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
   const requestHeaders = createRequestHeaders(profile)
 
   const controller = new AbortController()
-  const requestSignal = mergeAbortSignals(opts.signal, controller.signal)
+  const { signal: requestSignal, dispose: disposeSignals } = mergeAbortSignals(opts.signal, controller.signal)
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
 
   try {
@@ -299,6 +299,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
     }
   } finally {
     clearTimeout(timeoutId)
+    disposeSignals()
   }
 }
 
@@ -340,7 +341,7 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: OpenAI
   const useApiProxy = profile.apiProxy && isApiProxyAvailable(proxyConfig)
   const requestHeaders = createRequestHeaders(profile)
   const controller = new AbortController()
-  const requestSignal = mergeAbortSignals(opts.signal, controller.signal)
+  const { signal: requestSignal, dispose: disposeSignals } = mergeAbortSignals(opts.signal, controller.signal)
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
 
   try {
@@ -349,8 +350,8 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: OpenAI
       assertMaskEditFileSize('遮罩文件', getDataUrlDecodedByteSize(opts.maskDataUrl))
     }
     assertImageInputPayloadSize(
-      inputImageDataUrls.reduce((sum, dataUrl) => sum + getDataUrlEncodedByteSize(dataUrl), 0) +
-        (opts.maskDataUrl ? getDataUrlEncodedByteSize(opts.maskDataUrl) : 0),
+      inputImageDataUrls.reduce((sum, dataUrl) => sum + getDataUrlDecodedByteSize(dataUrl), 0) +
+        (opts.maskDataUrl ? getDataUrlDecodedByteSize(opts.maskDataUrl) : 0),
     )
 
     const body = {
@@ -390,5 +391,6 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: OpenAI
     }
   } finally {
     clearTimeout(timeoutId)
+    disposeSignals()
   }
 }
