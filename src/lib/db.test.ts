@@ -4,6 +4,7 @@ import { IDBFactory } from 'fake-indexeddb'
 import type { TaskRecord } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import {
+  __resetDbCacheForTests,
   dataUrlToImageBlob,
   deleteConversation,
   getAllConversations,
@@ -68,12 +69,15 @@ describe('stored image conversions', () => {
 
 describe('conversations object store', () => {
   beforeEach(() => {
-    // 每个用例使用全新的 IDB，避免互相污染。
+    // 每个用例使用全新的 IDB，避免互相污染。openDB 现在缓存模块级连接,必须连同重置缓存,
+    // 否则会复用上个用例 factory 的旧连接,破坏隔离。
     globalThis.indexedDB = new IDBFactory()
+    __resetDbCacheForTests()
   })
 
   afterEach(() => {
     globalThis.indexedDB = new IDBFactory()
+    __resetDbCacheForTests()
   })
 
   it('seeds the archive conversation on first open and preserves existing tasks across version upgrade', async () => {

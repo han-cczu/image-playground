@@ -1,0 +1,4 @@
+# 固定 index.html 为 LF,使 CSP 内联脚本 sha256 跨平台一致(详见 docs/security-headers.md)。
+# 否则 Windows(core.autocrlf=true)算出 CRLF 版哈希、Linux/Docker 算出 LF 版哈希,
+# 强制 CSP 后 Linux 构建产物的内联主题脚本会被拦截 → 首屏白屏 / FOUC。
+index.html text eol=lf

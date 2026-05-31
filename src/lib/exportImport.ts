@@ -1,5 +1,5 @@
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
-import type { AppSettings, Conversation, ExportData, TaskRecord } from '../types'
+import type { AppSettings, Conversation, ExportData, StoredImage, TaskRecord } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { useStore } from '../store'
 import { mergeImportedSettings, DEFAULT_SETTINGS, normalizeSettings } from './api/apiProfiles'
@@ -30,6 +30,9 @@ export type ImportMode = 'merge' | 'replace'
 interface ImportDataOptions {
   mode?: ImportMode
 }
+
+/** 导入 ZIP 文件总大小上限:unzipSync 会把全部条目一次性解压进内存,无上限时 zip bomb / 超大备份可 OOM。 */
+const MAX_IMPORT_FILE_BYTES = 400 * 1024 * 1024
 
 function getImageExt(mime: string): string {
   const ext = mime.split('/')[1]?.toLowerCase()
@@ -212,6 +215,9 @@ export async function exportData() {
 /** 导入 ZIP 数据 */
 export async function importData(file: File, options: ImportDataOptions = {}): Promise<boolean> {
   try {
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      throw new Error(`导入文件过大:超过 ${Math.round(MAX_IMPORT_FILE_BYTES / 1024 / 1024)}MB 上限`)
+    }
     const buffer = await file.arrayBuffer()
     const unzipped = unzipSync(new Uint8Array(buffer))
 
@@ -221,7 +227,36 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
     const data: ExportData = JSON.parse(strFromU8(manifestBytes))
     if (!data.tasks || !data.imageFiles) throw new Error('无效的数据格式')
 
-    if ((options.mode ?? 'merge') === 'replace') {
+    const isReplaceMode = (options.mode ?? 'merge') === 'replace'
+    // 既有 id 在清空之前读取(replace 模式短路为空集,不触达活库;merge 模式无清空):供下方去重。
+    const existingTaskIds = isReplaceMode ? new Set<string>() : new Set((await getAllTasks()).map((task) => task.id))
+    const existingImageIds = isReplaceMode ? new Set<string>() : new Set((await getAllImages()).map((image) => image.id))
+    const hasFavoriteCategoryMetadata = Array.isArray(data.favoriteCategories)
+    const importedCategories = hasFavoriteCategoryMetadata
+      ? normalizeFavoriteCategories(data.favoriteCategories)
+      : []
+    const importedCategoryIds = new Set(importedCategories.map((category) => category.id))
+    // 对不可信 task 做字段级白名单归一化(防缺字段 / 类型错误 / __proto__ 污染直入 IndexedDB)
+    const normalizedImportedTasks = normalizeTasks(data.tasks)
+    const importedTasks = sanitizeImportedTasksForFavoriteCategories(normalizedImportedTasks, importedCategoryIds)
+
+    // 先把全部待写图片解码 + 校验到内存(路径穿越 / id 错配 / 字节缺失在此 continue 跳过),全部就绪后才清空,
+    // 把 replace 模式的不可恢复窗口从「清空 → 解码 → 写回」收敛为「清空 → 纯写回」。
+    const imagesToWrite: StoredImage[] = []
+    for (const [id, info] of Object.entries(data.imageFiles)) {
+      if (existingImageIds.has(id)) continue
+      // 校验 path 严格形如 images/<id>.<ext> 且与 id 一致,拒绝路径穿越 / id 错配的条目
+      const mime = resolveImageEntry(id, info.path)
+      if (!mime) continue
+      const bytes = unzipped[info.path]
+      if (!bytes) continue
+      const blob = new Blob([copyBytesToArrayBuffer(bytes)], { type: mime })
+      imagesToWrite.push({ id, blob, mime, createdAt: info.createdAt, source: info.source })
+    }
+    const tasksToWrite = importedTasks.filter((task) => !existingTaskIds.has(task.id))
+
+    // 全部待写记录就绪后才清空旧库(replace 模式),最大限度缩小数据丢失窗口。
+    if (isReplaceMode) {
       await dbClearTasks()
       await clearImages()
       await dbClearConversations()
@@ -234,32 +269,11 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
       state.clearMaskDraft()
     }
 
-    const isReplaceMode = (options.mode ?? 'merge') === 'replace'
-    const existingTaskIds = isReplaceMode ? new Set<string>() : new Set((await getAllTasks()).map((task) => task.id))
-    const existingImageIds = isReplaceMode ? new Set<string>() : new Set((await getAllImages()).map((image) => image.id))
-    const hasFavoriteCategoryMetadata = Array.isArray(data.favoriteCategories)
-    const importedCategories = hasFavoriteCategoryMetadata
-      ? normalizeFavoriteCategories(data.favoriteCategories)
-      : []
-    const importedCategoryIds = new Set(importedCategories.map((category) => category.id))
-    // 对不可信 task 做字段级白名单归一化(防缺字段 / 类型错误 / __proto__ 污染直入 IndexedDB)
-    const normalizedImportedTasks = normalizeTasks(data.tasks)
-    const importedTasks = sanitizeImportedTasksForFavoriteCategories(normalizedImportedTasks, importedCategoryIds)
-
-    // 还原图片
-    for (const [id, info] of Object.entries(data.imageFiles)) {
-      if (existingImageIds.has(id)) continue
-      // 校验 path 严格形如 images/<id>.<ext> 且与 id 一致,拒绝路径穿越 / id 错配的条目
-      const mime = resolveImageEntry(id, info.path)
-      if (!mime) continue
-      const bytes = unzipped[info.path]
-      if (!bytes) continue
-      const blob = new Blob([copyBytesToArrayBuffer(bytes)], { type: mime })
-      await putImage({ id, blob, mime, createdAt: info.createdAt, source: info.source })
+    // 纯写回(已无解码 / 校验,清空后失败概率最低)
+    for (const image of imagesToWrite) {
+      await putImage(image)
     }
-
-    for (const task of importedTasks) {
-      if (existingTaskIds.has(task.id)) continue
+    for (const task of tasksToWrite) {
       await putTask(task)
     }
 

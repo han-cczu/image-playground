@@ -49,7 +49,10 @@ export function readUrlBootstrap(href: string): UrlBootstrapResult {
   const hashParams = parseHashParams(url.hash)
   const settings: Partial<AppSettings> = {}
 
-  const apiUrlParam = searchParams.get('apiUrl') ?? hashParams.get('apiUrl')
+  // 仅从 hash 读取 apiUrl(与 apiKey 对称):查询串里的 ?apiUrl= 可被攻击者注入改写 baseUrl,
+  // 使带 Authorization 的请求发往恶意主机。'apiUrl' 仍保留在 BOOTSTRAP_KEYS,故查询串里的值仍会被
+  // changed 命中并由 cleanSearchParams 清出 URL(读丢弃、URL 照样净化)。
+  const apiUrlParam = hashParams.get('apiUrl')
   if (apiUrlParam !== null) {
     settings.baseUrl = normalizeBaseUrl(apiUrlParam.trim())
   }

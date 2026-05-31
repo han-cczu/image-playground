@@ -56,18 +56,30 @@ export default function ImageContextMenu() {
       }
       setMenuInfo(null)
     }
+    // ESC 关闭(该组件不入全局 useCloseOnEscape 栈,本地监听即可)。
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuInfo(null)
+    }
     window.addEventListener('mousedown', close, { capture: true })
     window.addEventListener('touchstart', close, { capture: true })
     window.addEventListener('wheel', close, { capture: true })
     window.addEventListener('scroll', close, { capture: true })
     window.addEventListener('resize', close)
+    window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('mousedown', close, { capture: true })
       window.removeEventListener('touchstart', close, { capture: true })
       window.removeEventListener('wheel', close, { capture: true })
       window.removeEventListener('scroll', close, { capture: true })
       window.removeEventListener('resize', close)
+      window.removeEventListener('keydown', onKeyDown)
     }
+  }, [menuInfo])
+
+  // 打开时把焦点移入菜单首项,便于键盘用户操作(置于早退之前以保证 hook 顺序稳定)。
+  useEffect(() => {
+    if (!menuInfo) return
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
   }, [menuInfo])
 
   if (!menuInfo) return null
@@ -172,11 +184,14 @@ export default function ImageContextMenu() {
   return (
     <div
       ref={menuRef}
+      role="menu"
+      aria-label="图片操作"
       className="fixed z-[9999] bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-100 dark:border-gray-700 py-1 w-[120px] overflow-hidden animate-fade-in"
       style={{ left, top }}
       onContextMenu={(e) => e.preventDefault()}
     >
       <button
+        role="menuitem"
         onClick={handleCopy}
         className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
       >
@@ -186,6 +201,7 @@ export default function ImageContextMenu() {
         复制
       </button>
       <button
+        role="menuitem"
         onClick={handleDownload}
         className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
       >
@@ -195,6 +211,7 @@ export default function ImageContextMenu() {
         下载
       </button>
       <button
+        role="menuitem"
         onClick={handleEdit}
         className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
       >
@@ -204,6 +221,7 @@ export default function ImageContextMenu() {
         编辑
       </button>
       <button
+        role="menuitem"
         onClick={handleCaption}
         className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
       >

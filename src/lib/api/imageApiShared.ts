@@ -159,6 +159,13 @@ export async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, 
   }
 
   const blob = await response.blob()
+  // 上游(可能是用户可配/被注入的半信任主机)返回的图片 URL:套用与入站一致的体积上限,并校验确为图片,
+  // 避免把任意/超大响应体整块读入内存(arrayBuffer + binary 串 + btoa 三重放大)导致内存暴涨 / 页面卡死。
+  assertImageInputPayloadSize(blob.size)
+  const contentType = blob.type || fallbackMime
+  if (!contentType.startsWith('image/')) {
+    throw new Error(`图片 URL 返回的不是图片内容(Content-Type: ${contentType || '未知'})`)
+  }
   return blobToDataUrl(blob, fallbackMime)
 }
 

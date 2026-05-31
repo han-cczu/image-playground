@@ -20,7 +20,7 @@ Cross-Origin-Opener-Policy: same-origin
 当前以 **`Content-Security-Policy-Report-Only`** 形式下发,只上报不拦截,确保不破坏线上功能。策略字符串:
 
 ```
-default-src 'self'; script-src 'self' 'sha256-3RSlfpoi9mvBe/mSqzp5IGBDwU6ltj+1Eozow0zhThg='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; worker-src 'self'; manifest-src 'self'
+default-src 'self'; script-src 'self' 'sha256-ceZQVieuEu3wrVZesSAxmbWRpR45TuEEt523Sm1QRJs='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; worker-src 'self'; manifest-src 'self'
 ```
 
 ### 关键设计(经核实的必要妥协,非疏漏)
@@ -32,15 +32,21 @@ default-src 'self'; script-src 'self' 'sha256-3RSlfpoi9mvBe/mSqzp5IGBDwU6ltj+1Eo
 
 ### ⚠️ 内联脚本 hash 维护与上线流程
 
-上方 `sha256-` 是对 **源码 `index.html`** 内联 `<script>` 文本(CRLF)算出的。**Vite 构建可能改写 `index.html`(行尾/缩进),hash 可能漂移**。上线前务必:
+上方 `sha256-` 是对 **`index.html`** 内联 `<script>` 文本(**LF**,由 `.gitattributes` 的 `index.html text eol=lf` 固定)算出的。
 
-1. `npm run build`
-2. 从 `dist/index.html` 提取内联 `<script>` 的精确文本,重算 hash:
-   ```bash
-   node -e 'const fs=require("fs"),c=require("crypto");const h=fs.readFileSync("dist/index.html","utf8");const a=h.indexOf("<script>"),g=h.indexOf(">",a),z=h.indexOf("</script>",g);console.log("sha256-"+c.createHash("sha256").update(h.slice(g+1,z),"utf8").digest("base64"))'
-   ```
-3. 若与上方不一致,更新三处配置里的 hash。
-4. 部署后用 Report-Only 观察浏览器控制台无 CSP 违规(真实跑一遍 生图 + 反推 + 远程图 URL 导入)。
-5. 确认无违规后,把三处的 `Content-Security-Policy-Report-Only` 改为 `Content-Security-Policy`(强制)。
+> **为何必须固定 LF**:hash 对换行符敏感。Windows(`core.autocrlf=true`)工作树是 CRLF、Linux/Docker/CI 检出是 LF,二者算出的 hash 不同。`.gitattributes` 把 `index.html` 锁为 LF 后,所有平台构建产物字节一致,hash 唯一。改动该脚本后请用下方命令重算并同步四处配置(`nginx-security-headers.inc` / `Caddyfile` / `Caddyfile.lan` / `public/_headers`)。
 
-> 任何人改动 `index.html` 内联脚本后都必须重复 1-3 步,否则强制 CSP 下主题引导脚本会被拦截(首屏闪烁 / dark 失效)。
+**构建守卫(已自动化)**:`npm run build` 末尾会跑 `scripts/verify-csp-hash.mjs`,从 `dist/index.html` 重算内联脚本 hash 并与四处配置比对,**不一致即 `exit 1`**——把「强制 CSP 后白屏」从运行期事故前移为构建期硬失败。Vite 逐字透传换行符不归一化,故 LF 源 → LF 产物。
+
+手动重算命令(应得 `sha256-ceZQVieuEu3wrVZesSAxmbWRpR45TuEEt523Sm1QRJs=`):
+```bash
+node -e 'const fs=require("fs"),c=require("crypto");const h=fs.readFileSync("dist/index.html","utf8").replace(/\r\n/g,"\n");const a=h.indexOf("<script>"),g=h.indexOf(">",a),z=h.indexOf("</script>",g);console.log("sha256-"+c.createHash("sha256").update(h.slice(g+1,z),"utf8").digest("base64"))'
+```
+
+上线流程:
+
+1. `npm run build`(守卫通过即代表四处配置 hash 与产物一致)。
+2. 部署后用 Report-Only 观察浏览器控制台无 CSP 违规(真实跑一遍 生图 + 反推 + 远程图 URL 导入)。
+3. 确认无违规后,把四处的 `Content-Security-Policy-Report-Only` 改为 `Content-Security-Policy`(强制)。
+
+> 改动 `index.html` 内联脚本后,构建守卫会强制你同步四处 hash,否则 build 失败——无需再靠人工记得。

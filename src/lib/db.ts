@@ -7,8 +7,11 @@ const STORE_TASKS = 'tasks'
 const STORE_IMAGES = 'images'
 const STORE_CONVERSATIONS = 'conversations'
 
+let dbPromise: Promise<IDBDatabase> | null = null
+
 function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise
+  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result
@@ -41,9 +44,31 @@ function openDB(): Promise<IDBDatabase> {
     }
     // 其它标签页持有旧版本连接时,版本升级会被阻塞;不处理会让 open 既不 success 也不 error,Promise 永久挂起。
     req.onblocked = () => reject(new Error('数据库升级被其它标签页阻塞,请关闭本站其它标签页后重试'))
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => {
+      const db = req.result
+      // 另一标签页要做版本升级时主动 close 让路(否则它会一直 onblocked),并让缓存失效以便下次重开。
+      db.onversionchange = () => {
+        db.close()
+        dbPromise = null
+      }
+      // 连接被意外关闭(如浏览器回收 / close())时也让缓存失效,避免后续操作复用已关闭连接。
+      db.onclose = () => {
+        dbPromise = null
+      }
+      resolve(db)
+    }
     req.onerror = () => reject(req.error)
   })
+  // 打开失败不要把 rejected Promise 永久缓存(否则后续所有 DB 操作都被这次失败卡死),清空以便下次重试。
+  dbPromise.catch(() => {
+    dbPromise = null
+  })
+  return dbPromise
+}
+
+/** 仅供测试:重置模块级连接缓存,让下次 openDB 在(测试替换的)新 IDBFactory 上重新打开。 */
+export function __resetDbCacheForTests(): void {
+  dbPromise = null
 }
 
 function dbTransaction<T>(
@@ -53,12 +78,26 @@ function dbTransaction<T>(
 ): Promise<T> {
   return openDB().then(
     (db) =>
-      new Promise((resolve, reject) => {
+      new Promise<T>((resolve, reject) => {
         const tx = db.transaction(storeName, mode)
         const store = tx.objectStore(storeName)
         const req = fn(store)
-        req.onsuccess = () => resolve(req.result)
-        req.onerror = () => reject(req.error)
+        if (mode === 'readonly') {
+          // 读操作无提交丢写风险,onsuccess 即可返回。
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        } else {
+          // 写操作:req.onsuccess 仅表示写请求被接受,数据真正落盘在 tx.oncomplete。
+          // 必须等 oncomplete 才 resolve;否则提交阶段 abort(配额/IO/标签页冻结回滚)会被
+          // 误判为成功 → 静默丢写。对照 persistConversationMigration/deleteConversation 同款挂法。
+          let result: T
+          req.onsuccess = () => {
+            result = req.result
+          }
+          req.onerror = () => reject(req.error)
+          tx.oncomplete = () => resolve(result)
+          tx.onabort = () => reject(tx.error ?? new Error('数据库写事务被中止'))
+        }
       }),
   )
 }
