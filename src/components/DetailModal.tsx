@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useRef } from 'react'
 import { useStore, getCachedImage, ensureImageCached, reuseConfig, editOutputs, removeTask, updateTaskInStore, showCodexCliPrompt, getCodexCliPromptKey, retryTask, setTaskFavoriteCategory, clearTaskFavorite, cancelTask } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 import { formatImageRatio } from '../lib/image/size'
 import { ActualValueBadge, DetailParamValue } from '../lib/paramDisplay'
 import { copyBlobToClipboard, copyTextToClipboard, getClipboardFailureMessage } from '../lib/image/clipboard'
@@ -27,6 +28,7 @@ export default function DetailModal() {
   const [now, setNow] = useState(Date.now())
   const imagePanelRef = useRef<HTMLDivElement>(null)
   const mainImageRef = useRef<HTMLImageElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const [imageLabelLeft, setImageLabelLeft] = useState(8)
 
   const task = useMemo(
@@ -36,6 +38,7 @@ export default function DetailModal() {
 
   useCloseOnEscape(Boolean(task), () => setDetailTaskId(null))
   useLockBodyScroll(Boolean(task))
+  useFocusTrap(Boolean(task), panelRef)
 
   // Reset index when task changes
   useEffect(() => {
@@ -284,6 +287,10 @@ export default function DetailModal() {
     >
       <div className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-md animate-overlay-in" />
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
         className="relative bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] rounded-3xl shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col md:flex-row z-10 ring-1 ring-black/5 dark:ring-white/10 animate-modal-in"
         onClick={(e) => e.stopPropagation()}
       >

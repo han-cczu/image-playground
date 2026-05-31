@@ -67,6 +67,14 @@ export default function App() {
     const bootstrap = readUrlBootstrap(window.location.href)
     const nextSettings = { ...bootstrap.settings }
 
+    // 加固:引导改了 baseUrl 但没带新 apiKey 时,不复用旧 key——否则旧 key 会随 Authorization 发往新主机
+    //(攻击者用 #apiUrl=evil 不带 key 即可窃取已配置的 key)。置 '' 让 settings 合并层的
+    // `incoming.apiKey ?? profile.apiKey` 解析为空,强制为新主机重填 key。正常分享链 #apiUrl=...&apiKey=...
+    // 同时带 key,nextSettings.apiKey 已定义,不触发此分支,零误伤。
+    if (nextSettings.baseUrl !== undefined && nextSettings.apiKey === undefined) {
+      nextSettings.apiKey = ''
+    }
+
     const provider = bootstrap.provider
     if (provider) {
       const state = useStore.getState()

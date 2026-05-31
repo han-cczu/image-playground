@@ -5,6 +5,7 @@ import {
   type CallApiResult,
   getApiErrorMessage,
   getDataUrlDecodedByteSize,
+  isHttpUrl,
   mergeActualParams,
   mergeAbortSignals,
   summarizeConcurrentFailures,
@@ -89,7 +90,12 @@ function parseGeminiImages(payload: GeminiResponse): Array<{ image: string; mime
 }
 
 function buildGeminiUrl(baseUrl: string, model: string): string {
-  const cleanBase = baseUrl.trim().replace(/\/+$/, '') || 'https://generativelanguage.googleapis.com/v1beta'
+  const trimmed = baseUrl.trim().replace(/\/+$/, '')
+  // 非空但非 http(s)(如无 scheme 的裸串 evil.com)会被浏览器当同源相对路径 → 带 x-goog-api-key 的请求
+  // 发往应用部署源,造成 key 外泄。非空即要求是绝对 http(s),与 OpenAI / chat 路径对齐。空则回退官方端点(不变)。
+  // 注意:不复用 normalizeBaseUrl——它会给非 /v1 结尾的 path 补 /v1,把 .../v1beta 误改成 .../v1beta/v1。
+  if (trimmed && !isHttpUrl(trimmed)) throw new Error('未配置 API URL')
+  const cleanBase = trimmed || 'https://generativelanguage.googleapis.com/v1beta'
   const cleanModel = model.trim().replace(/^\/+/, '').replace(/\/+$/, '')
   return `${cleanBase}/models/${cleanModel}:generateContent`
 }

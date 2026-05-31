@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { useStore, getCachedImage, ensureImageCached } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 import { createMaskPreviewDataUrl } from '../lib/image/canvasImage'
 
 const MIN_SCALE = 1
@@ -145,6 +146,8 @@ interface LightboxInnerProps {
 /** 内部组件：保证挂载时 DOM 已经存在，所有 ref / effect 都可靠 */
 function LightboxInner({ src, maskPreviewSrc, onClose, showNav, currentIndex, total, onPrev, onNext }: LightboxInnerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  // LightboxInner 仅在打开时挂载,焦点陷阱常驻 true;作用在 containerRef(根节点带 tabIndex={-1} 承接焦点)。
+  useFocusTrap(true, containerRef)
 
   // 用 ref 追踪最新变换，避免闭包过期
   const scaleRef = useRef(1)
@@ -446,7 +449,10 @@ function LightboxInner({ src, maskPreviewSrc, onClose, showNav, currentIndex, to
     <div
       ref={containerRef}
       data-lightbox-root
-      className="fixed inset-0 z-[60] flex items-center justify-center select-none"
+      role="dialog"
+      aria-modal="true"
+      tabIndex={-1}
+      className="fixed inset-0 z-[60] flex items-center justify-center select-none outline-none"
       style={{ cursor: isZoomed ? (isDragging ? 'grabbing' : 'grab') : 'pointer' }}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
