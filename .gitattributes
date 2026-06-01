@@ -2,3 +2,7 @@
 # 否则 Windows(core.autocrlf=true)算出 CRLF 版哈希、Linux/Docker 算出 LF 版哈希,
 # 强制 CSP 后 Linux 构建产物的内联主题脚本会被拦截 → 首屏白屏 / FOUC。
 index.html text eol=lf
+
+# .mjs 必须 LF:CRLF 的 .mjs 在 Windows 工作树下会让 vitest 加载报 "Invalid or unexpected token"
+#(node/esbuild 单独都能解析,仅 vitest 的 .mjs 加载路径对 CRLF 敏感),导致 npm test 在 Windows 检出上变红。
+*.mjs text eol=lf
