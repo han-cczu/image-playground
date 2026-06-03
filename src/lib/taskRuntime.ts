@@ -22,6 +22,7 @@ import {
   MAX_PROMPT_EXPANSION_HARD,
 } from './promptExpand'
 import { mapWithConcurrency } from './concurrency'
+import { collectReferencedImageIds } from './storageStats'
 import { getImageDimensions, validateMaskMatchesImage } from './image/canvasImage'
 import { orderInputImagesForMask } from './image/mask'
 import { getChangedParams, normalizeParamsForSettings } from './api/paramCompatibility'
@@ -302,17 +303,9 @@ export async function initStore() {
 
   const tasks = finalTasks
 
-  // 收集所有任务引用的图片 id
-  const referencedIds = new Set<string>()
+  // 收集所有任务引用的图片 id（与孤儿 GC / 存储统计共用同一判定，见 lib/storageStats）
   const persistedInputImages = useStore.getState().inputImages
-  for (const img of persistedInputImages) referencedIds.add(img.id)
-  for (const t of tasks) {
-    for (const id of t.inputImageIds || []) referencedIds.add(id)
-    if (t.maskImageId) referencedIds.add(t.maskImageId)
-    for (const id of t.outputImages || []) {
-      referencedIds.add(id)
-    }
-  }
+  const referencedIds = collectReferencedImageIds(tasks, persistedInputImages)
 
   // 清理孤立图片（不预加载到内存，按需在 ensureImageCached 时加载）
   const images = await getAllImages()
@@ -321,13 +314,7 @@ export async function initStore() {
   // 叠加 createdAt >= initStartedAt 守卫,放过 init 期间另一标签刚 storeImage 但其 task 尚未被本页读到的新图。
   // 两层互补,最坏只漏删孤儿(良性存储泄漏),绝不误删在用图。
   const latestState = useStore.getState()
-  const latestReferencedIds = new Set<string>()
-  for (const img of latestState.inputImages) latestReferencedIds.add(img.id)
-  for (const t of latestState.tasks) {
-    for (const id of t.inputImageIds || []) latestReferencedIds.add(id)
-    if (t.maskImageId) latestReferencedIds.add(t.maskImageId)
-    for (const id of t.outputImages || []) latestReferencedIds.add(id)
-  }
+  const latestReferencedIds = collectReferencedImageIds(latestState.tasks, latestState.inputImages)
   for (const img of images) {
     if (referencedIds.has(img.id) || latestReferencedIds.has(img.id)) continue
     if ((img.createdAt ?? 0) >= initStartedAt) continue

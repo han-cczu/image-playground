@@ -1,7 +1,11 @@
 import { useRef, useState } from 'react'
 import type { ImportMode } from '../../lib/exportImport'
+import { formatBytes, type ImageSourceBucket, type StorageStats } from '../../lib/storageStats'
 
 export interface DataManagementSectionProps {
+  storageStats: StorageStats | null
+  storageLoading: boolean
+  onPruneOrphans: () => void
   onExport: () => void
   onImport: (file: File, mode: ImportMode) => Promise<void>
   onClearAll: () => void
@@ -9,7 +13,17 @@ export interface DataManagementSectionProps {
   onConfirmClearAll: (proceed: () => void) => void
 }
 
+const SOURCE_LABELS: { key: ImageSourceBucket; label: string }[] = [
+  { key: 'upload', label: '上传' },
+  { key: 'generated', label: '生成' },
+  { key: 'mask', label: '遮罩' },
+  { key: 'unknown', label: '其它' },
+]
+
 export function DataManagementSection({
+  storageStats,
+  storageLoading,
+  onPruneOrphans,
   onExport,
   onImport,
   onClearAll,
@@ -35,6 +49,70 @@ export function DataManagementSection({
 
   return (
     <div className="space-y-3">
+      <div className="rounded-xl bg-gray-50/60 dark:bg-white/[0.03] p-3 space-y-2.5">
+        {storageLoading || !storageStats ? (
+          <div className="text-xs text-gray-400 dark:text-gray-500">正在统计本地占用…</div>
+        ) : (
+          <>
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm text-gray-700 dark:text-gray-200">本地图片占用</span>
+              <span className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                {formatBytes(storageStats.totalBytes)} · {storageStats.imageCount} 张
+              </span>
+            </div>
+
+            {storageStats.quota && storageStats.quota.quota > 0 && (
+              <div className="space-y-1">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-white/[0.08]">
+                  <div
+                    className="h-full rounded-full bg-blue-500/80"
+                    style={{
+                      width: `${Math.min(100, (storageStats.quota.usage / storageStats.quota.quota) * 100).toFixed(1)}%`,
+                    }}
+                  />
+                </div>
+                <div className="text-[11px] text-gray-400 dark:text-gray-500">
+                  浏览器已用 {formatBytes(storageStats.quota.usage)} / {formatBytes(storageStats.quota.quota)}
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-1.5">
+              {SOURCE_LABELS.map(({ key, label }) => {
+                const bucket = storageStats.bySource[key]
+                if (!bucket.count) return null
+                return (
+                  <span
+                    key={key}
+                    className="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500 dark:bg-white/[0.06] dark:text-gray-400"
+                  >
+                    {label} {bucket.count}·{formatBytes(bucket.bytes)}
+                  </span>
+                )
+              })}
+            </div>
+
+            <div className="flex items-center justify-between pt-0.5">
+              {storageStats.orphanCount > 0 ? (
+                <>
+                  <span className="text-xs text-amber-600 dark:text-amber-400">
+                    {storageStats.orphanCount} 张孤儿图 · 约 {formatBytes(storageStats.orphanBytes)}
+                  </span>
+                  <button
+                    onClick={onPruneOrphans}
+                    className="rounded-lg bg-amber-50 px-2.5 py-1 text-xs text-amber-600 transition hover:bg-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:hover:bg-amber-500/20"
+                  >
+                    清理
+                  </button>
+                </>
+              ) : (
+                <span className="text-xs text-gray-400 dark:text-gray-500">无可清理的孤儿图</span>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
       <div className="flex gap-2">
         <button
           onClick={onExport}
