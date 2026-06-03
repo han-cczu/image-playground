@@ -36,6 +36,7 @@ vi.mock('./lib/api', async (importOriginal) => {
 import { deleteConversation, putConversation, putTask, storeImage } from './lib/db'
 import { callImageApi } from './lib/api'
 import { ARCHIVE_CONVERSATION_ID } from './lib/conversations'
+import { scheduleSyncHttpWatchdog } from './lib/taskRuntime'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 const categoryA: FavoriteCategory = {
@@ -308,7 +309,8 @@ describe('task runtime reliability', () => {
   it('expands a {a|b} wildcard into sibling tasks sharing one batchId', async () => {
     // callImageApi 永挂,让任务保持 running,以便稳定检查 enqueue 阶段写入的 prompt / batchId。
     vi.mocked(callImageApi).mockImplementation(() => new Promise(() => undefined))
-    useStore.setState({ prompt: 'a {x|y} cat', showToast: vi.fn() })
+    const showToast = vi.fn()
+    useStore.setState({ prompt: 'a {x|y} cat', showToast })
 
     await submitTask()
 
@@ -317,6 +319,8 @@ describe('task runtime reliability', () => {
     expect(tasks.map((t) => t.prompt).sort()).toEqual(['a x cat', 'a y cat'])
     expect(tasks[0].batchId).toBeTruthy()
     expect(tasks[0].batchId).toBe(tasks[1].batchId)
+    // 提交前预告总图数(2 条 × n=1 = 2 张)
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('共 2 张图片'), 'success')
   })
 
   it('keeps a non-wildcard prompt as a single task with no batchId (equivalence)', async () => {
@@ -346,6 +350,22 @@ describe('task runtime reliability', () => {
     expect(tasks).toHaveLength(1)
     expect(tasks[0].prompt).toBe('y')
     expect(showToast).toHaveBeenCalledWith(expect.stringContaining('保存任务失败'), 'error')
+  })
+
+  it('watchdog times from request start, not createdAt (a stale createdAt must not shorten the window)', () => {
+    vi.useFakeTimers()
+    // 模拟「在并发闸里排队很久才被取出执行」的批量子任务:createdAt 远早于此刻调度 watchdog 的时刻。
+    const staleTask = task({ id: 'queued', status: 'running', apiProvider: 'openai', createdAt: Date.now() - 10_000_000 })
+    useStore.setState({ tasks: [staleTask], showToast: vi.fn() })
+
+    scheduleSyncHttpWatchdog('queued', 60) // 60s 超时
+
+    // 修复前:remainingMs = 60000 - (now - createdAt) = 0 → 立即假超时。修复后应给完整 60s 窗口。
+    vi.advanceTimersByTime(59_000)
+    expect(useStore.getState().tasks[0].status).toBe('running')
+    vi.advanceTimersByTime(2_000)
+    expect(useStore.getState().tasks[0].status).toBe('error')
+    expect(useStore.getState().tasks[0].error).toContain('超时')
   })
 })
 

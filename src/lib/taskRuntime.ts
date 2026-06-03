@@ -173,18 +173,22 @@ export function cancelTask(taskId: string, now = Date.now()): boolean {
   return true
 }
 
-function scheduleSyncHttpWatchdog(taskId: string, timeoutSeconds: number) {
+export function scheduleSyncHttpWatchdog(taskId: string, timeoutSeconds: number) {
   clearSyncHttpWatchdogTimer(taskId)
   const task = useStore.getState().tasks.find((item) => item.id === taskId)
   if (!task || !isRunningSyncHttpTask(task)) return
 
+  // watchdog 总在 executeTask 中、请求即将发起时被调度,故从「此刻」起算完整 timeout。
+  // 不能再用 createdAt 偏移:批量路径下 N 条 task 在 enqueueTask 时统一写 createdAt,但要在并发闸
+  // (runEnqueuedTasks)队列里排队等待才被取出执行;若按 createdAt 计时,排队时长会被错误计入,
+  // 导致后段任务在请求真正开始前(或刚开始)就被误判「请求超时」而假失败。
+  // 注:elapsed(用户感知总耗时)仍基于 createdAt,语义不同,不受此影响。
   const timeoutMs = Math.max(0, timeoutSeconds * 1000)
-  const remainingMs = Math.max(0, timeoutMs - (Date.now() - task.createdAt))
   const timer = setTimeout(() => {
     syncHttpWatchdogTimers.delete(taskId)
     const failed = failSyncHttpTaskIfStillRunning(taskId, createSyncHttpTimeoutError(timeoutSeconds))
     if (failed) useStore.getState().showToast('生成任务请求超时', 'error')
-  }, remainingMs)
+  }, timeoutMs)
   syncHttpWatchdogTimers.set(taskId, timer)
 }
 
@@ -541,6 +545,10 @@ export async function submitTask(options: { allowFullMask?: boolean; allowLargeB
   // 通配展开:无通配时为 [trimmedPrompt] 原样(与重构前单条路径严格等价)。
   const prompts = expandPromptTemplate(trimmedPrompt)
   const batchId = prompts.length > 1 ? genId() : undefined
+  if (prompts.length > 1) {
+    // 提交前预告本批将生成的总图片数(展开数 × n),让用户对「一条提示词变多条」有知情(对齐 spec §6)。
+    showToast(`通配将生成 ${prompts.length} 条提示词、共 ${prompts.length * normalizedParams.n} 张图片`, 'success')
+  }
   const taskIds: string[] = []
   for (const expandedPrompt of prompts) {
     const id = await enqueueTask({
@@ -573,7 +581,6 @@ export async function submitTask(options: { allowFullMask?: boolean; allowLargeB
   if (taskIds.length === 1) {
     executeTask(taskIds[0])
   } else {
-    useStore.getState().showToast(`开始批量生成 ${taskIds.length} 条提示词`, 'success')
     void runEnqueuedTasks(taskIds)
   }
 }
