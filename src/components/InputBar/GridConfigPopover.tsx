@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, submitGridTask } from '../../store'
 import type { GridAxis, GridAxisKey } from '../../types'
-import { GRID_AXIS_DEFS, getGridAxisDef, type GridAxisCtx } from '../../lib/gridExperiment'
+import { GRID_AXIS_DEFS, getGridAxisDef, countGridImages, type GridAxisCtx } from '../../lib/gridExperiment'
 import { MAX_PROMPT_EXPANSION_HARD } from '../../lib/promptExpand'
 import Select from '../Select'
 
@@ -94,7 +94,16 @@ export default function GridConfigPopover({ anchorRef, onClose }: Props) {
 
   const hasY = Boolean(yKind) && yKeys.length >= 2
   const cellCount = xKeys.length * (hasY ? yKeys.length : 1)
-  const totalImages = cellCount * params.n
+  // 总图数经 countGridImages 计算:n 作轴时各格 n 不同,不能简单乘基线 n。
+  const totalImages = xKind
+    ? countGridImages(
+        {
+          x: { kind: xKind, values: xKeys.map((k) => ({ key: k, label: k })) },
+          ...(hasY && yKind ? { y: { kind: yKind, values: yKeys.map((k) => ({ key: k, label: k })) } } : {}),
+        },
+        params.n,
+      )
+    : 0
   const overHardLimit = cellCount > MAX_PROMPT_EXPANSION_HARD
   const canGenerate = Boolean(xKind) && xKeys.length >= 2 && !overHardLimit
 

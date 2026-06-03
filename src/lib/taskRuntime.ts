@@ -23,7 +23,7 @@ import {
 } from './promptExpand'
 import { mapWithConcurrency } from './concurrency'
 import { collectReferencedImageIds } from './storageStats'
-import { buildGridCells, countGridCells, reconstructMatrix } from './gridExperiment'
+import { buildGridCells, countGridCells, countGridImages, reconstructMatrix } from './gridExperiment'
 import { getImageDimensions, validateMaskMatchesImage } from './image/canvasImage'
 import { orderInputImagesForMask } from './image/mask'
 import { getChangedParams, normalizeParamsForSettings } from './api/paramCompatibility'
@@ -663,7 +663,7 @@ export async function submitGridTask(
     return
   }
   if (cellCount > MAX_PROMPT_EXPANSION && !options.allowLargeBatch) {
-    const totalImages = cellCount * params.n
+    const totalImages = countGridImages(gridConfig, params.n)
     setConfirmDialog({
       title: '批量生成确认',
       message:
@@ -689,7 +689,9 @@ export async function submitGridTask(
   const cells = buildGridCells(gridConfig, { params: normalizedParams, prompt: prompt.trim() })
   const gridAxes = { x: gridConfig.x, ...(gridConfig.y ? { y: gridConfig.y } : {}) }
   const batchId = genId()
-  showToast(`网格生成：${gridConfig.x.values.length}×${yCount}，共 ${cells.length * normalizedParams.n} 张图片`, 'success')
+  // 真实总图 = Σ 各格 n(n 作轴时各格不同)
+  const totalImages = cells.reduce((sum, c) => sum + c.params.n, 0)
+  showToast(`网格生成：${gridConfig.x.values.length}×${yCount}，共 ${totalImages} 张图片`, 'success')
 
   const taskIds: string[] = []
   for (const cell of cells) {

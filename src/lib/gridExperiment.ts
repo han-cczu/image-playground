@@ -77,9 +77,11 @@ export const GRID_AXIS_DEFS: GridAxisDef[] = [
   {
     kind: 'prompt',
     label: '提示词通配',
-    getCandidates: ({ prompt }) => expandPromptTemplate(prompt.trim()).map((p) => ({ key: p, label: p })),
+    // 去重:expandPromptTemplate 对 {a|a} 等重复通配不去重,重复 key 会引发 React 重复 key 与同格多 task。
+    getCandidates: ({ prompt }) =>
+      Array.from(new Set(expandPromptTemplate(prompt.trim()))).map((p) => ({ key: p, label: p })),
     getDisabledReason: ({ prompt }) =>
-      expandPromptTemplate(prompt.trim()).length < 2 ? '提示词需含 {a|b} 通配才能作为轴' : null,
+      new Set(expandPromptTemplate(prompt.trim())).size < 2 ? '提示词需含 {a|b} 通配才能作为轴' : null,
   },
 ]
 
@@ -146,6 +148,18 @@ export function buildGridCells(axes: { x: GridAxis; y?: GridAxis }, base: { para
 /** 计算总格数,不构造数组(供 popover 预览与规模把关)。 */
 export function countGridCells(axes: { x: GridAxis; y?: GridAxis }): number {
   return axes.x.values.length * (axes.y ? axes.y.values.length : 1)
+}
+
+/**
+ * 计算总图片数。无 n 轴时 = 格数 × baseN;n 轴时各格 n 不同,
+ * 总图 = 非 n 轴格数 × Σ(n 轴各取值)。供预览/确认/toast 显示真实张数。
+ */
+export function countGridImages(axes: { x: GridAxis; y?: GridAxis }, baseN: number): number {
+  const nAxis = [axes.x, axes.y].find((a): a is GridAxis => a?.kind === 'n')
+  if (!nAxis || nAxis.values.length === 0) return countGridCells(axes) * baseN
+  const otherCellCount = countGridCells(axes) / nAxis.values.length
+  const sumN = nAxis.values.reduce((sum, v) => sum + (Number(v.key) || 0), 0)
+  return otherCellCount * sumN
 }
 
 // ===== 矩阵重建 =====

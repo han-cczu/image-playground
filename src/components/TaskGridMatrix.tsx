@@ -29,17 +29,26 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
   const xLabel = getGridAxisDef(axes.x.kind)?.label ?? axes.x.kind
   const yLabel = axes.y ? (getGridAxisDef(axes.y.kind)?.label ?? axes.y.kind) : null
 
-  const doneCount = tasks.filter((t) => t.status === 'done').length
-  const errorCount = tasks.filter((t) => t.status === 'error').length
-  const gaps = cols.length * rows.length - tasks.length
-  const hasFailuresOrGaps = errorCount > 0 || gaps > 0
-
-  /** 同格多 task 取最新为代表 */
+  /** 同格多 task 取最新为代表(补跑会保留旧 task,故每格可能压多条) */
   const repTask = (colKey: string, rowKey: string): TaskRecord | null => {
     const list = cellTasks(colKey, rowKey)
     if (!list.length) return null
     return list.reduce((a, b) => (b.createdAt > a.createdAt ? b : a))
   }
+
+  // 进度 / 缺漏基于「矩阵格」而非成员条数:补跑新建 task 会保留旧 error,成员数会被抬高、
+  // gaps 减法在重复坐标下失真(可负、或与真空格相互抵消)。逐格按代表 task 判定才稳。
+  const totalCells = cols.length * rows.length
+  let doneCells = 0
+  let pendingCells = 0 // 缺失或失败的格
+  for (const col of cols) {
+    for (const row of rows) {
+      const rep = repTask(col.key, row.key)
+      if (rep?.status === 'done') doneCells += 1
+      else if (!rep || rep.status === 'error') pendingCells += 1
+    }
+  }
+  const hasFailuresOrGaps = pendingCells > 0
 
   const allIds = tasks.map((t) => t.id)
   const allSelected = allIds.length > 0 && allIds.every((id) => selectedTaskIds.includes(id))
@@ -63,8 +72,8 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs text-gray-500 dark:text-gray-400">
           参数网格 · X: {xLabel}
-          {yLabel ? ` · Y: ${yLabel}` : ''} · 完成 {doneCount}/{tasks.length}
-          {errorCount > 0 ? ` · 失败 ${errorCount}` : ''}
+          {yLabel ? ` · Y: ${yLabel}` : ''} · 完成 {doneCells}/{totalCells}
+          {pendingCells > 0 ? ` · 待补 ${pendingCells}` : ''}
         </span>
         <div className="flex items-center gap-3">
           <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">

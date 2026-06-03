@@ -3,8 +3,11 @@ import { DEFAULT_PARAMS, type GridAxis, type TaskRecord } from '../types'
 import {
   buildGridCells,
   countGridCells,
+  countGridImages,
+  GRID_AXIS_DEFS,
   groupIntoGridBlocks,
   reconstructMatrix,
+  type GridAxisCtx,
 } from './gridExperiment'
 
 let uid = 0
@@ -122,5 +125,29 @@ describe('groupIntoGridBlocks', () => {
   it('does NOT aggregate a wildcard batch (batchId without gridAxes)', () => {
     const wb = [task({ batchId: 'wb' }), task({ batchId: 'wb' })]
     expect(groupIntoGridBlocks(wb).map((i) => i.type)).toEqual(['card', 'card'])
+  })
+})
+
+describe('countGridImages', () => {
+  const axisN = { kind: 'n' as const, values: [{ key: '1', label: '1' }, { key: '2', label: '2' }, { key: '4', label: '4' }] }
+
+  it('multiplies cells by baseN when there is no n axis', () => {
+    expect(countGridImages({ x: axisQuality }, 2)).toBe(4) // 2 格 × 2
+    expect(countGridImages({ x: axisQuality, y: axisFmt }, 1)).toBe(4) // 4 格 × 1
+  })
+
+  it('sums per-cell n when n is an axis (baseN ignored)', () => {
+    expect(countGridImages({ x: axisN }, 99)).toBe(7) // Σ(1+2+4)
+    expect(countGridImages({ x: axisQuality, y: axisN }, 1)).toBe(14) // otherCount 2 × Σ7
+  })
+})
+
+describe('prompt axis candidates dedup', () => {
+  it('dedupes repeated wildcard expansions (avoids duplicate coord keys)', () => {
+    const def = GRID_AXIS_DEFS.find((d) => d.kind === 'prompt')!
+    const cands = def.getCandidates({ prompt: '{a|a|b}' } as GridAxisCtx)
+    expect(cands.map((c) => c.key)).toEqual(['a', 'b'])
+    // 去重后只剩 1 个的提示词应被判为不可用作轴
+    expect(def.getDisabledReason({ prompt: '{a|a}' } as GridAxisCtx)).toBeTruthy()
   })
 })
