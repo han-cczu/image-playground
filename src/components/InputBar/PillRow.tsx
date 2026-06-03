@@ -6,6 +6,7 @@ import ModelMenu from './ModelMenu'
 import ResolutionMenu from './ResolutionMenu'
 import StylePickerPopover from './StylePickerPopover'
 import AdvancedParamsPopover from './AdvancedParamsPopover'
+import GridConfigPopover from './GridConfigPopover'
 import ButtonTooltip from './ButtonTooltip'
 
 /** 底栏 pill 通用样式 */
@@ -77,12 +78,13 @@ export default function PillRow({
   const [attachHover, setAttachHover] = useState(false)
 
   /** 顶部 pill 弹出层互斥 */
-  type OpenMenu = 'model' | 'style' | 'resolution' | 'advanced' | null
+  type OpenMenu = 'model' | 'style' | 'resolution' | 'advanced' | 'grid' | null
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
 
   const modelPillRef = useRef<HTMLButtonElement>(null)
   const stylePillRef = useRef<HTMLButtonElement>(null)
   const resolutionPillRef = useRef<HTMLButtonElement>(null)
+  const gridPillRef = useRef<HTMLButtonElement>(null)
   const advancedButtonRef = useRef<HTMLButtonElement>(null)
 
   const activeProfile = getActiveApiProfile(settings)
@@ -184,6 +186,31 @@ export default function PillRow({
         </button>
         {openMenu === 'resolution' && (
           <ResolutionMenu anchorRef={resolutionPillRef} onClose={() => setOpenMenu(null)} />
+        )}
+      </div>
+
+      {/* 网格 pill */}
+      <div className="relative">
+        <button
+          ref={gridPillRef}
+          type="button"
+          onClick={() => setOpenMenu((v) => (v === 'grid' ? null : 'grid'))}
+          className={PILL_BASE}
+          aria-haspopup="dialog"
+          aria-expanded={openMenu === 'grid'}
+          title="参数网格（对照实验）"
+        >
+          <svg className="h-3.5 w-3.5 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
+          </svg>
+          <span>网格</span>
+          <Chevron />
+        </button>
+        {openMenu === 'grid' && (
+          <GridConfigPopover anchorRef={gridPillRef} onClose={() => setOpenMenu(null)} />
         )}
       </div>
 

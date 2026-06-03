@@ -9,6 +9,8 @@ import {
   mergePersistedStoreState,
   setTaskFavoriteCategory,
   submitTask,
+  submitGridTask,
+  retryTask,
   updateTaskInStore,
   useStore,
 } from './store'
@@ -366,6 +368,39 @@ describe('task runtime reliability', () => {
     vi.advanceTimersByTime(2_000)
     expect(useStore.getState().tasks[0].status).toBe('error')
     expect(useStore.getState().tasks[0].error).toContain('超时')
+  })
+
+  it('submitGridTask generates one task per axis value, sharing batchId with gridAxes/gridCoord', async () => {
+    vi.mocked(callImageApi).mockImplementation(() => new Promise(() => undefined))
+    useStore.setState({ prompt: 'a cat', params: { ...DEFAULT_PARAMS }, showToast: vi.fn() })
+    const xAxis = { kind: 'quality' as const, values: [{ key: 'low', label: 'low' }, { key: 'high', label: 'high' }] }
+
+    await submitGridTask({ x: xAxis })
+
+    const tasks = useStore.getState().tasks
+    expect(tasks).toHaveLength(2)
+    expect(tasks.every((t) => t.batchId && t.batchId === tasks[0].batchId)).toBe(true)
+    expect(tasks.every((t) => t.gridAxes?.x.kind === 'quality')).toBe(true)
+    expect(tasks.map((t) => t.params.quality).sort()).toEqual(['high', 'low'])
+    expect(tasks.map((t) => t.gridCoord?.x).sort()).toEqual(['high', 'low'])
+  })
+
+  it('retryTask on a grid cell re-enqueues at the same coord under the same batchId', async () => {
+    vi.mocked(callImageApi).mockImplementation(() => new Promise(() => undefined))
+    const gridAxes = { x: { kind: 'quality' as const, values: [{ key: 'low', label: 'low' }, { key: 'high', label: 'high' }] } }
+    const errored = task({ id: 'g-low', batchId: 'gb', gridAxes, gridCoord: { x: 'low' }, status: 'error', params: { ...DEFAULT_PARAMS, quality: 'low' } })
+    const ok = task({ id: 'g-high', batchId: 'gb', gridAxes, gridCoord: { x: 'high' }, status: 'done', params: { ...DEFAULT_PARAMS, quality: 'high' } })
+    useStore.setState({ tasks: [errored, ok], showToast: vi.fn() })
+
+    await retryTask(errored)
+
+    await vi.waitFor(() => {
+      const fresh = useStore.getState().tasks.find((t) => t.status === 'running' && t.gridCoord?.x === 'low')
+      expect(fresh).toBeTruthy()
+      expect(fresh?.batchId).toBe('gb')
+      expect(fresh?.gridCoord).toEqual({ x: 'low' })
+      expect(fresh?.params.quality).toBe('low')
+    })
   })
 })
 

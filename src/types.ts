@@ -127,6 +127,23 @@ export interface MaskDraft {
 
 export type TaskStatus = 'running' | 'done' | 'error'
 
+// ===== XY 参数网格 =====
+
+/** 可作为网格轴的维度 */
+export type GridAxisKey = 'stylePreset' | 'quality' | 'size' | 'output_format' | 'n' | 'prompt'
+
+export interface GridAxisValue {
+  /** 稳定坐标键：size 用 tier 标识（如 '2K'）、prompt 用展开后的具体串、其余用参数值字符串 */
+  key: string
+  /** 展示用标签：size 显示像素串、stylePreset 显示中文名等 */
+  label: string
+}
+
+export interface GridAxis {
+  kind: GridAxisKey
+  values: GridAxisValue[]
+}
+
 export interface FavoriteCategory {
   id: string
   name: string
@@ -187,8 +204,12 @@ export interface TaskRecord {
   sortOrder?: number
   /** 归属的对话 id；运行时由 store/migration 保证非空，仅类型保留可选以兼容旧数据 */
   conversationId?: string
-  /** 同一次批量提交（提示词通配 / 未来网格）展开出的多条 task 的关联 id；单条提交不设 */
+  /** 同一次批量提交（提示词通配 / XY 网格）展开出的多条 task 的关联 id；单条提交不设 */
   batchId?: string
+  /** XY 网格的轴定义（含完整取值集，每条成员冗余写，便于删成员后重建矩阵骨架）；仅网格 task 设 */
+  gridAxes?: { x: GridAxis; y?: GridAxis }
+  /** 本 task 在矩阵中的坐标（存 GridAxisValue.key 稳定键）；仅网格 task 设 */
+  gridCoord?: { x: string; y?: string }
 }
 
 // ===== IndexedDB 存储的图片 =====
