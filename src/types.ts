@@ -187,6 +187,8 @@ export interface TaskRecord {
   sortOrder?: number
   /** 归属的对话 id；运行时由 store/migration 保证非空，仅类型保留可选以兼容旧数据 */
   conversationId?: string
+  /** 同一次批量提交（提示词通配 / 未来网格）展开出的多条 task 的关联 id；单条提交不设 */
+  batchId?: string
 }
 
 // ===== IndexedDB 存储的图片 =====

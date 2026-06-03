@@ -1,4 +1,4 @@
-import type { AppSettings, InputImage, TaskParams, TaskRecord } from '../types'
+import type { ApiProvider, AppSettings, InputImage, TaskParams, TaskRecord } from '../types'
 import { useStore } from '../store'
 import { getActiveApiProfile, validateApiProfile } from './api/apiProfiles'
 import {
@@ -15,6 +15,13 @@ import {
 } from './db'
 import { callImageApi } from './api'
 import { buildFinalPrompt } from './stylePresets'
+import {
+  countPromptExpansion,
+  expandPromptTemplate,
+  MAX_PROMPT_EXPANSION,
+  MAX_PROMPT_EXPANSION_HARD,
+} from './promptExpand'
+import { mapWithConcurrency } from './concurrency'
 import { getImageDimensions, validateMaskMatchesImage } from './image/canvasImage'
 import { orderInputImagesForMask } from './image/mask'
 import { getChangedParams, normalizeParamsForSettings } from './api/paramCompatibility'
@@ -378,8 +385,79 @@ async function maybeUpdateConversationOnFirstTask(conversationId: string, newTas
   }
 }
 
+/** 参数化提交原语：构造一条 TaskRecord、落库（失败回滚内存态）、返回 taskId（失败返回 null）。 */
+interface EnqueueTaskSpec {
+  /** 已展开的具体 prompt（用户原文，不含风格前缀；风格仍在 executeTask 内拼接） */
+  prompt: string
+  /** 已归一化的参数 */
+  params: TaskParams
+  apiProvider: ApiProvider
+  apiProfileName: string
+  apiModel: string
+  /** 已持久化的输入图 id */
+  inputImageIds: string[]
+  maskTargetImageId: string | null
+  maskImageId: string | null
+  conversationId: string
+  /** 同一次批量提交展开出的多条 task 的关联 id；单条提交不设 */
+  batchId?: string
+}
+
+/**
+ * 构造 + 落库一条 running 任务。不触发 executeTask、不回填对话标题——这两件事的时机
+ * 交由调用方决定（单条立即执行；批量先全部落库再受控调度）。
+ */
+async function enqueueTask(spec: EnqueueTaskSpec): Promise<string | null> {
+  const taskId = genId()
+  const task: TaskRecord = {
+    id: taskId,
+    prompt: spec.prompt,
+    params: spec.params,
+    apiProvider: spec.apiProvider,
+    apiProfileName: spec.apiProfileName,
+    apiModel: spec.apiModel,
+    inputImageIds: spec.inputImageIds,
+    maskTargetImageId: spec.maskTargetImageId,
+    maskImageId: spec.maskImageId,
+    outputImages: [],
+    status: 'running',
+    error: null,
+    createdAt: Date.now(),
+    finishedAt: null,
+    elapsed: null,
+    conversationId: spec.conversationId,
+    ...(spec.batchId ? { batchId: spec.batchId } : {}),
+  }
+
+  const latestTasks = useStore.getState().tasks
+  useStore.getState().setTasks([task, ...latestTasks])
+  try {
+    await putTask(task)
+  } catch (err) {
+    // 持久化失败:回滚内存里这条 running 任务,否则会留下无请求 / 无 watchdog 的「幽灵 running」卡片;
+    // 调用方多为 fire-and-forget,reject 会逃逸成未捕获 rejection。
+    const message = err instanceof Error ? err.message : String(err)
+    const state = useStore.getState()
+    state.setTasks(state.tasks.filter((t) => t.id !== taskId))
+    state.showToast(`保存任务失败：${message}`, 'error')
+    return null
+  }
+  return taskId
+}
+
+/** 批量执行的并发上限:批量场景叠加 callImageApi 内部多图拆单会相乘,保守取值避免触发上游 429。 */
+const BATCH_CONCURRENCY = 3
+
+/**
+ * 以并发上限调度一批已落库 task 的 executeTask。每个 task 的成功/失败/取消已由 executeTask
+ * 内部完整收口（落 done/error 态、watchdog、孤儿回滚），故调度器不让单个失败中断整批、也不抛错。
+ */
+async function runEnqueuedTasks(taskIds: string[], limit = BATCH_CONCURRENCY): Promise<void> {
+  await mapWithConcurrency(taskIds, limit, (id) => executeTask(id))
+}
+
 /** 提交新任务 */
-export async function submitTask(options: { allowFullMask?: boolean } = {}) {
+export async function submitTask(options: { allowFullMask?: boolean; allowLargeBatch?: boolean } = {}) {
   const { settings, prompt, inputImages, maskDraft, params, showToast, setConfirmDialog } =
     useStore.getState()
 
@@ -392,6 +470,34 @@ export async function submitTask(options: { allowFullMask?: boolean } = {}) {
 
   if (!prompt.trim()) {
     showToast('请输入提示词', 'error')
+    return
+  }
+
+  // 提示词通配展开规模把关:只依赖 prompt,放在 mask 处理 / 输入图持久化等任何副作用之前,
+  // 这样确认/拒绝发生时尚未产生任何需要回滚的副作用。countPromptExpansion 不构造数组,可安全预判。
+  const trimmedPrompt = prompt.trim()
+  const expansionCount = countPromptExpansion(trimmedPrompt)
+  if (expansionCount > MAX_PROMPT_EXPANSION_HARD) {
+    showToast(
+      `通配展开将生成 ${expansionCount} 张，超过上限 ${MAX_PROMPT_EXPANSION_HARD}，请精简提示词中的 {…|…} 组合`,
+      'error',
+    )
+    return
+  }
+  if (expansionCount > MAX_PROMPT_EXPANSION && !options.allowLargeBatch) {
+    const totalImages = expansionCount * params.n
+    setConfirmDialog({
+      title: '批量生成确认',
+      message:
+        params.n > 1
+          ? `检测到提示词通配，将展开为 ${expansionCount} 条提示词，每条 ${params.n} 张，共 ${totalImages} 张图片。是否继续？`
+          : `检测到提示词通配，将展开为 ${expansionCount} 条提示词（共 ${expansionCount} 张图片）。是否继续？`,
+      confirmText: '继续生成',
+      tone: 'warning',
+      action: () => {
+        void submitTask({ ...options, allowLargeBatch: true })
+      },
+    })
     return
   }
 
@@ -410,7 +516,8 @@ export async function submitTask(options: { allowFullMask?: boolean } = {}) {
           confirmText: '继续提交',
           tone: 'warning',
           action: () => {
-            void submitTask({ allowFullMask: true })
+            // 保留其它确认标志(如 allowLargeBatch),避免大批量 + 整图遮罩双确认互相丢标志形成弹窗循环。
+            void submitTask({ ...options, allowFullMask: true })
           },
         })
         return
@@ -444,50 +551,44 @@ export async function submitTask(options: { allowFullMask?: boolean } = {}) {
     activeConversationId = useStore.getState().createConversation()
   }
 
-  const taskId = genId()
-  const task: TaskRecord = {
-    id: taskId,
-    prompt: prompt.trim(),
-    params: normalizedParams,
-    apiProvider: activeProfile.provider,
-    apiProfileName: activeProfile.name,
-    apiModel: activeProfile.model,
-    inputImageIds: orderedInputImages.map((i) => i.id),
-    maskTargetImageId,
-    maskImageId,
-    outputImages: [],
-    status: 'running',
-    error: null,
-    createdAt: Date.now(),
-    finishedAt: null,
-    elapsed: null,
-    conversationId: activeConversationId,
+  // 通配展开:无通配时为 [trimmedPrompt] 原样(与重构前单条路径严格等价)。
+  const prompts = expandPromptTemplate(trimmedPrompt)
+  const batchId = prompts.length > 1 ? genId() : undefined
+  const taskIds: string[] = []
+  for (const expandedPrompt of prompts) {
+    const id = await enqueueTask({
+      prompt: expandedPrompt,
+      params: normalizedParams,
+      apiProvider: activeProfile.provider,
+      apiProfileName: activeProfile.name,
+      apiModel: activeProfile.model,
+      inputImageIds: orderedInputImages.map((i) => i.id),
+      maskTargetImageId,
+      maskImageId,
+      conversationId: activeConversationId,
+      batchId,
+    })
+    if (id) taskIds.push(id)
   }
-
-  const latestTasks = useStore.getState().tasks
-  useStore.getState().setTasks([task, ...latestTasks])
-  try {
-    await putTask(task)
-  } catch (err) {
-    // 持久化失败:回滚内存里这条 running 任务,否则会留下无请求 / 无 watchdog 的「幽灵 running」卡片;
-    // 且本函数为 fire-and-forget 调用,reject 会逃逸成未捕获 rejection。
-    const message = err instanceof Error ? err.message : String(err)
-    const state = useStore.getState()
-    state.setTasks(state.tasks.filter((t) => t.id !== taskId))
-    state.showToast(`保存任务失败：${message}`, 'error')
-    return
-  }
+  // 全部落库失败:enqueueTask 已逐条回滚内存态并 toast,直接返回。
+  if (!taskIds.length) return
 
   // 首条 task 提交后，若对话仍为「新对话」初始 title，则用 prompt 前 N 字回填，并更新 updatedAt
-  void maybeUpdateConversationOnFirstTask(activeConversationId, task)
+  const firstTask = useStore.getState().tasks.find((t) => t.id === taskIds[0])
+  if (firstTask) void maybeUpdateConversationOnFirstTask(activeConversationId, firstTask)
 
   if (settings.clearInputAfterSubmit) {
     useStore.getState().setPrompt('')
     useStore.getState().clearInputImages()
   }
 
-  // 异步调用 API
-  executeTask(taskId)
+  // 异步调用 API:单条直接执行(与重构前一致);批量经并发闸限流调度。
+  if (taskIds.length === 1) {
+    executeTask(taskIds[0])
+  } else {
+    useStore.getState().showToast(`开始批量生成 ${taskIds.length} 条提示词`, 'success')
+    void runEnqueuedTasks(taskIds)
+  }
 }
 
 async function executeTask(taskId: string) {
@@ -613,7 +714,9 @@ async function executeTask(taskId: string) {
       finishedAt: Date.now(),
       elapsed: Date.now() - task.createdAt,
     })
-    useStore.getState().setDetailTaskId(taskId)
+    // 批量任务(batchId 存在)失败时逐个自动弹详情会互相打架,改由失败卡片的 error 态呈现;
+    // 单任务保持原行为:失败即弹详情。
+    if (!task.batchId) useStore.getState().setDetailTaskId(taskId)
   } finally {
     clearTaskAbortController(taskId)
     // 释放输入图片的内存缓存（已持久化到 IndexedDB，后续按需从 DB 加载）
@@ -725,41 +828,19 @@ export function reorderTask(
 export async function retryTask(task: TaskRecord) {
   const { settings, activeConversationId } = useStore.getState()
   const activeProfile = getActiveApiProfile(settings)
-  const normalizedParams = normalizeParamsForSettings(task.params, settings)
-  const taskId = genId()
-  const newTask: TaskRecord = {
-    id: taskId,
+  // 复用 enqueueTask 原语(含写失败回滚)。重试不继承 batchId:视为一次新的独立生成。
+  const id = await enqueueTask({
     prompt: task.prompt,
-    params: normalizedParams,
+    params: normalizeParamsForSettings(task.params, settings),
     apiProvider: activeProfile.provider,
     apiProfileName: activeProfile.name,
     apiModel: activeProfile.model,
     inputImageIds: [...task.inputImageIds],
     maskTargetImageId: task.maskTargetImageId ?? null,
     maskImageId: task.maskImageId ?? null,
-    outputImages: [],
-    status: 'running',
-    error: null,
-    createdAt: Date.now(),
-    finishedAt: null,
-    elapsed: null,
     conversationId: task.conversationId ?? activeConversationId ?? ARCHIVE_CONVERSATION_ID,
-  }
-
-  const latestTasks = useStore.getState().tasks
-  useStore.getState().setTasks([newTask, ...latestTasks])
-  try {
-    await putTask(newTask)
-  } catch (err) {
-    // 同 submitTask:写失败回滚,避免幽灵 running 卡片与未捕获 rejection。
-    const message = err instanceof Error ? err.message : String(err)
-    const state = useStore.getState()
-    state.setTasks(state.tasks.filter((t) => t.id !== taskId))
-    state.showToast(`保存任务失败：${message}`, 'error')
-    return
-  }
-
-  executeTask(taskId)
+  })
+  if (id) executeTask(id)
 }
 
 /** 复用配置 */

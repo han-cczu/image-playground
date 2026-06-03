@@ -304,6 +304,49 @@ describe('task runtime reliability', () => {
       error: expect.stringContaining('请求超时'),
     })
   })
+
+  it('expands a {a|b} wildcard into sibling tasks sharing one batchId', async () => {
+    // callImageApi 永挂,让任务保持 running,以便稳定检查 enqueue 阶段写入的 prompt / batchId。
+    vi.mocked(callImageApi).mockImplementation(() => new Promise(() => undefined))
+    useStore.setState({ prompt: 'a {x|y} cat', showToast: vi.fn() })
+
+    await submitTask()
+
+    const tasks = useStore.getState().tasks
+    expect(tasks).toHaveLength(2)
+    expect(tasks.map((t) => t.prompt).sort()).toEqual(['a x cat', 'a y cat'])
+    expect(tasks[0].batchId).toBeTruthy()
+    expect(tasks[0].batchId).toBe(tasks[1].batchId)
+  })
+
+  it('keeps a non-wildcard prompt as a single task with no batchId (equivalence)', async () => {
+    vi.mocked(callImageApi).mockImplementation(() => new Promise(() => undefined))
+    useStore.setState({ prompt: 'plain cat', showToast: vi.fn() })
+
+    await submitTask()
+
+    const tasks = useStore.getState().tasks
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0].prompt).toBe('plain cat')
+    expect(tasks[0].batchId).toBeUndefined()
+  })
+
+  it('skips a sibling whose putTask fails but keeps the rest of the batch', async () => {
+    vi.mocked(callImageApi).mockImplementation(() => new Promise(() => undefined))
+    vi.mocked(putTask).mockReset()
+    vi.mocked(putTask)
+      .mockRejectedValueOnce(new Error('idb full')) // 第一条(x)落库失败
+      .mockResolvedValue('ok') // 其余成功
+    const showToast = vi.fn()
+    useStore.setState({ prompt: '{x|y}', showToast })
+
+    await submitTask()
+
+    const tasks = useStore.getState().tasks
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0].prompt).toBe('y')
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('保存任务失败'), 'error')
+  })
 })
 
 describe('favorite category store actions', () => {
