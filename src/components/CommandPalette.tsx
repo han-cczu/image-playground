@@ -41,6 +41,32 @@ function HighlightedTitle({ title, indices }: { title: string; indices: number[]
   )
 }
 
+/**
+ * Enter 执行命令后,在 window 捕获层吞掉本次按住期间的后续 Enter(keydown/keyup),
+ * 直到用户松开为止——防止焦点还原到背景按钮后,OS 按键重复直接激活它。
+ * 模块级单例:重复调用先清理旧监听,页面失焦(blur)兜底移除。
+ */
+let removeEnterSwallow: (() => void) | null = null
+function swallowEnterUntilKeyup() {
+  removeEnterSwallow?.()
+  const onKey = (ev: KeyboardEvent) => {
+    if (ev.key !== 'Enter') return
+    ev.preventDefault()
+    ev.stopPropagation()
+    if (ev.type === 'keyup') cleanup()
+  }
+  const cleanup = () => {
+    window.removeEventListener('keydown', onKey, true)
+    window.removeEventListener('keyup', onKey, true)
+    window.removeEventListener('blur', cleanup)
+    removeEnterSwallow = null
+  }
+  window.addEventListener('keydown', onKey, true)
+  window.addEventListener('keyup', onKey, true)
+  window.addEventListener('blur', cleanup)
+  removeEnterSwallow = cleanup
+}
+
 /** 外层只负责开关：关闭时整体卸载内层，打开时挂载即获得全新 query/高亮状态。 */
 export default function CommandPalette() {
   const showCommandPalette = useStore((s) => s.showCommandPalette)
@@ -143,10 +169,15 @@ function CommandPalettePanel({ close }: { close: () => void }) {
       return
     }
     if (e.key === 'Enter') {
-      // IME 组字确认的 Enter 不执行命令
-      if (e.nativeEvent.isComposing) return
+      // IME 组字确认的 Enter 不执行命令;OS 按键重复的 Enter 也不执行(只认新按下)
+      if (e.nativeEvent.isComposing || e.repeat) return
       e.preventDefault()
-      if (clampedIndex >= 0) flat[clampedIndex].command.run()
+      if (clampedIndex < 0) return
+      // 执行后面板关闭,useFocusTrap 会把焦点还原给打开前的元素(常是 InputBar 提交按钮);
+      // 长按 Enter 的后续重复 keydown 会落在该元素上、原生激活其 click(误触提交)。
+      // 在捕获层吞掉本次按住期间的所有 Enter,直到 keyup 释放(页面失焦时兜底清理)。
+      swallowEnterUntilKeyup()
+      flat[clampedIndex].command.run()
     }
   }
 

@@ -120,6 +120,9 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         const state = useStore.getState()
+        // ConfirmDialog(z-110)在面板(z-105)之上：此时打开面板会被遮罩盖住却抢走焦点，
+        // 用户看着确认框、键盘却困在不可见面板里——确认框打开期间不响应
+        if (state.confirmDialog) return
         state.setShowCommandPalette(!state.showCommandPalette)
       }
     }

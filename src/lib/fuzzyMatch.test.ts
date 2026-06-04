@@ -61,4 +61,12 @@ describe('fuzzyMatch', () => {
     // '🎨' 是一个码点；'a' 命中码点下标 1 而非 UTF-16 下标 2
     expect(fuzzyMatch('a', '🎨a')!.indices).toEqual([1])
   })
+
+  it('keeps indices aligned with the original text when toLowerCase expands codepoints', () => {
+    // 'İ'(U+0130).toLowerCase() 是 'i'+U+0307（1 码点 → 2 码点）；
+    // 整串小写会让后续下标整体右移——indices 必须基于原文 Array.from(text)
+    expect(fuzzyMatch('stanbul', '切换到：İstanbul')!.indices).toEqual([5, 6, 7, 8, 9, 10, 11])
+    // 'İ' 本身仍可被 'i' 命中（取折叠首码点近似），且下标不漂移
+    expect(fuzzyMatch('istanbul', 'İstanbul')!.indices).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+  })
 })
