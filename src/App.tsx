@@ -20,6 +20,7 @@ import ConfirmDialog from './components/ConfirmDialog'
 import Toast from './components/Toast'
 import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
+import CommandPalette from './components/CommandPalette'
 import ErrorBoundary from './components/ErrorBoundary'
 import InsecureContextBanner from './components/InsecureContextBanner'
 
@@ -113,6 +114,23 @@ export default function App() {
     return () => document.removeEventListener('dragstart', preventPageImageDrag)
   }, [])
 
+  // 全局 Ctrl/⌘+K 切换命令面板（再次按下关闭）；不带 Shift/Alt，避开 Ctrl+Shift+K 等浏览器快捷键
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        const state = useStore.getState()
+        // ConfirmDialog(z-110)在面板(z-105)之上：此时打开面板会被遮罩盖住却抢走焦点，
+        // 用户看着确认框、键盘却困在不可见面板里——确认框打开期间不响应
+        if (state.confirmDialog) return
+        state.setShowCommandPalette(!state.showCommandPalette)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   const theme = useStore((s) => s.settings.theme ?? 'light')
 
   useEffect(() => {
@@ -193,6 +211,9 @@ export default function App() {
       </ErrorBoundary>
       <ErrorBoundary region="modal">
         <ImageContextMenu />
+      </ErrorBoundary>
+      <ErrorBoundary region="modal">
+        <CommandPalette />
       </ErrorBoundary>
     </>
   )

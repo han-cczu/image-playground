@@ -32,6 +32,13 @@ import { CaptionerSection } from './CaptionerSection'
 import { FavoriteCategorySection } from './FavoriteCategorySection'
 import { DataManagementSection } from './DataManagementSection'
 import { getDefaultModelForMode } from './helpers'
+import {
+  collectReferencedImageIds,
+  computeStorageStats,
+  formatBytes,
+  pruneOrphanImages,
+  type StorageStats,
+} from '../../lib/storageStats'
 
 function newId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -59,6 +66,19 @@ export default function SettingsModal() {
     String(getActiveCaptionerProfile(settings).timeout),
   )
   const [showCaptionerProfileMenu, setShowCaptionerProfileMenu] = useState(false)
+  const [storageStats, setStorageStats] = useState<StorageStats | null>(null)
+  const [storageLoading, setStorageLoading] = useState(false)
+
+  const refreshStorageStats = useCallback(async () => {
+    setStorageLoading(true)
+    try {
+      const { tasks, inputImages } = useStore.getState()
+      const stats = await computeStorageStats(collectReferencedImageIds(tasks, inputImages))
+      setStorageStats(stats)
+    } finally {
+      setStorageLoading(false)
+    }
+  }, [])
 
   const apiProxyAvailable = isApiProxyAvailable(readClientDevProxyConfig())
   const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
@@ -147,7 +167,8 @@ export default function SettingsModal() {
     setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
     setOptimizerTimeoutInput(String(getActiveOptimizerProfile(nextDraft).timeout))
     setCaptionerTimeoutInput(String(getActiveCaptionerProfile(nextDraft).timeout))
-  }, [apiProxyAvailable, showSettings, settings])
+    void refreshStorageStats()
+  }, [apiProxyAvailable, showSettings, settings, refreshStorageStats])
 
   useEffect(() => {
     setTimeoutInput(String(activeProfile.timeout))
@@ -419,6 +440,28 @@ export default function SettingsModal() {
     })
   }
 
+  const handlePruneOrphans = () => {
+    if (!storageStats || storageStats.orphanCount === 0) return
+    setConfirmDialog({
+      title: '清理孤儿图片',
+      message: `将删除 ${storageStats.orphanCount} 张无引用图片，约 ${formatBytes(storageStats.orphanBytes)}，不可恢复。是否继续？`,
+      confirmText: '清理',
+      tone: 'danger',
+      action: () => {
+        // 确认到执行之间用户可能又生成了图：重读最新引用集，cutoff=now 放过执行期间的新写入。
+        void (async () => {
+          const { tasks, inputImages } = useStore.getState()
+          const refs = collectReferencedImageIds(tasks, inputImages)
+          const { deletedCount, deletedBytes } = await pruneOrphanImages(refs, Date.now())
+          showToast(`已清理 ${deletedCount} 张，释放约 ${formatBytes(deletedBytes)}`, 'success')
+          await refreshStorageStats()
+        })().catch((err) => {
+          showToast(`清理失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+        })
+      },
+    })
+  }
+
   return (
     <div data-no-drag-select className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <div
@@ -582,6 +625,9 @@ export default function SettingsModal() {
               数据管理
             </h4>
             <DataManagementSection
+              storageStats={storageStats}
+              storageLoading={storageLoading}
+              onPruneOrphans={handlePruneOrphans}
               onExport={() => exportData()}
               onImport={runImport}
               onClearAll={handleClearAllData}

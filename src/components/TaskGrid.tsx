@@ -19,8 +19,10 @@ import { CSS } from '@dnd-kit/utilities'
 import type { Conversation, TaskRecord } from '../types'
 import { useStore, reuseConfig, editOutputs, removeTask, reorderTask } from '../store'
 import { filterAndSortTasks } from '../lib/taskFilters'
+import { groupIntoGridBlocks } from '../lib/gridExperiment'
 import { pickFallbackColor } from '../lib/conversations'
 import TaskCard from './TaskCard'
+import TaskGridMatrix from './TaskGridMatrix'
 
 export interface ConversationTag {
   id: string
@@ -129,13 +131,23 @@ export default function TaskGrid() {
     [conversations],
   )
 
+  // 把扁平任务流分组成渲染项:同 batchId 的网格 task 聚合成矩阵块,其余为普通卡片。
+  const renderItems = useMemo(() => groupIntoGridBlocks(filteredTasks), [filteredTasks])
+  const hasGridBlock = useMemo(() => renderItems.some((i) => i.type === 'grid'), [renderItems])
+  // 拖拽排序只在普通卡片间:矩阵成员不进 SortableContext。
+  const sortableIds = useMemo(
+    () => renderItems.flatMap((i) => (i.type === 'card' ? [i.task.id] : [])),
+    [renderItems],
+  )
+
   const dragDisabled =
     galleryView ||
     searchQuery.trim() !== '' ||
     filterStatus !== 'all' ||
     filterFavorite ||
     Boolean(filterFavoriteCategoryId) ||
-    filteredTasks.length < 2
+    filteredTasks.length < 2 ||
+    hasGridBlock
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -300,9 +312,20 @@ export default function TaskGrid() {
       className="relative min-h-[50vh]"
     >
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={filteredTasks.map((t) => t.id)} strategy={rectSortingStrategy}>
+        <SortableContext items={sortableIds} strategy={rectSortingStrategy}>
           <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
-            {filteredTasks.map((task, index) => {
+            {renderItems.map((item, index) => {
+              if (item.type === 'grid') {
+                return (
+                  <TaskGridMatrix
+                    key={`grid-${item.batchId}`}
+                    batchId={item.batchId}
+                    tasks={item.tasks}
+                    onDelete={handleDelete}
+                  />
+                )
+              }
+              const task = item.task
               let conversationTag: ConversationTag | undefined
               if (galleryView && task.conversationId) {
                 const conv = conversationById.get(task.conversationId)

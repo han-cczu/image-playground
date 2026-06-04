@@ -29,6 +29,9 @@ export interface UiSlice {
   setShowSettings: (v: boolean) => void
   showPromptOptimizer: boolean
   setShowPromptOptimizer: (v: boolean) => void
+  /** 命令面板（Ctrl/⌘+K），瞬态不持久化 */
+  showCommandPalette: boolean
+  setShowCommandPalette: (v: boolean) => void
   /** 反推源图（base64 data URL）；非 null 即打开反推 modal */
   captionSource: string | null
   setCaptionSource: (src: string | null) => void
@@ -90,6 +93,8 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   setShowSettings: (showSettings) => set({ showSettings }),
   showPromptOptimizer: false,
   setShowPromptOptimizer: (showPromptOptimizer) => set({ showPromptOptimizer }),
+  showCommandPalette: false,
+  setShowCommandPalette: (showCommandPalette) => set({ showCommandPalette }),
   captionSource: null,
   setCaptionSource: (captionSource) => set({ captionSource }),
 

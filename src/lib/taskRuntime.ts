@@ -1,4 +1,4 @@
-import type { AppSettings, InputImage, TaskParams, TaskRecord } from '../types'
+import type { ApiProvider, AppSettings, GridAxis, InputImage, TaskParams, TaskRecord } from '../types'
 import { useStore } from '../store'
 import { getActiveApiProfile, validateApiProfile } from './api/apiProfiles'
 import {
@@ -15,6 +15,15 @@ import {
 } from './db'
 import { callImageApi } from './api'
 import { buildFinalPrompt } from './stylePresets'
+import {
+  countPromptExpansion,
+  expandPromptTemplate,
+  MAX_PROMPT_EXPANSION,
+  MAX_PROMPT_EXPANSION_HARD,
+} from './promptExpand'
+import { mapWithConcurrency } from './concurrency'
+import { collectReferencedImageIds } from './storageStats'
+import { buildGridCells, countGridCells, countGridImages, reconstructMatrix } from './gridExperiment'
 import { getImageDimensions, validateMaskMatchesImage } from './image/canvasImage'
 import { orderInputImagesForMask } from './image/mask'
 import { getChangedParams, normalizeParamsForSettings } from './api/paramCompatibility'
@@ -165,18 +174,22 @@ export function cancelTask(taskId: string, now = Date.now()): boolean {
   return true
 }
 
-function scheduleSyncHttpWatchdog(taskId: string, timeoutSeconds: number) {
+export function scheduleSyncHttpWatchdog(taskId: string, timeoutSeconds: number) {
   clearSyncHttpWatchdogTimer(taskId)
   const task = useStore.getState().tasks.find((item) => item.id === taskId)
   if (!task || !isRunningSyncHttpTask(task)) return
 
+  // watchdog 总在 executeTask 中、请求即将发起时被调度,故从「此刻」起算完整 timeout。
+  // 不能再用 createdAt 偏移:批量路径下 N 条 task 在 enqueueTask 时统一写 createdAt,但要在并发闸
+  // (runEnqueuedTasks)队列里排队等待才被取出执行;若按 createdAt 计时,排队时长会被错误计入,
+  // 导致后段任务在请求真正开始前(或刚开始)就被误判「请求超时」而假失败。
+  // 注:elapsed(用户感知总耗时)仍基于 createdAt,语义不同,不受此影响。
   const timeoutMs = Math.max(0, timeoutSeconds * 1000)
-  const remainingMs = Math.max(0, timeoutMs - (Date.now() - task.createdAt))
   const timer = setTimeout(() => {
     syncHttpWatchdogTimers.delete(taskId)
     const failed = failSyncHttpTaskIfStillRunning(taskId, createSyncHttpTimeoutError(timeoutSeconds))
     if (failed) useStore.getState().showToast('生成任务请求超时', 'error')
-  }, remainingMs)
+  }, timeoutMs)
   syncHttpWatchdogTimers.set(taskId, timer)
 }
 
@@ -295,17 +308,9 @@ export async function initStore() {
 
   const tasks = finalTasks
 
-  // 收集所有任务引用的图片 id
-  const referencedIds = new Set<string>()
+  // 收集所有任务引用的图片 id（与孤儿 GC / 存储统计共用同一判定，见 lib/storageStats）
   const persistedInputImages = useStore.getState().inputImages
-  for (const img of persistedInputImages) referencedIds.add(img.id)
-  for (const t of tasks) {
-    for (const id of t.inputImageIds || []) referencedIds.add(id)
-    if (t.maskImageId) referencedIds.add(t.maskImageId)
-    for (const id of t.outputImages || []) {
-      referencedIds.add(id)
-    }
-  }
+  const referencedIds = collectReferencedImageIds(tasks, persistedInputImages)
 
   // 清理孤立图片（不预加载到内存，按需在 ensureImageCached 时加载）
   const images = await getAllImages()
@@ -314,13 +319,7 @@ export async function initStore() {
   // 叠加 createdAt >= initStartedAt 守卫,放过 init 期间另一标签刚 storeImage 但其 task 尚未被本页读到的新图。
   // 两层互补,最坏只漏删孤儿(良性存储泄漏),绝不误删在用图。
   const latestState = useStore.getState()
-  const latestReferencedIds = new Set<string>()
-  for (const img of latestState.inputImages) latestReferencedIds.add(img.id)
-  for (const t of latestState.tasks) {
-    for (const id of t.inputImageIds || []) latestReferencedIds.add(id)
-    if (t.maskImageId) latestReferencedIds.add(t.maskImageId)
-    for (const id of t.outputImages || []) latestReferencedIds.add(id)
-  }
+  const latestReferencedIds = collectReferencedImageIds(latestState.tasks, latestState.inputImages)
   for (const img of images) {
     if (referencedIds.has(img.id) || latestReferencedIds.has(img.id)) continue
     if ((img.createdAt ?? 0) >= initStartedAt) continue
@@ -378,22 +377,104 @@ async function maybeUpdateConversationOnFirstTask(conversationId: string, newTas
   }
 }
 
-/** 提交新任务 */
-export async function submitTask(options: { allowFullMask?: boolean } = {}) {
-  const { settings, prompt, inputImages, maskDraft, params, showToast, setConfirmDialog } =
-    useStore.getState()
+/** 参数化提交原语：构造一条 TaskRecord、落库（失败回滚内存态）、返回 taskId（失败返回 null）。 */
+interface EnqueueTaskSpec {
+  /** 已展开的具体 prompt（用户原文，不含风格前缀；风格仍在 executeTask 内拼接） */
+  prompt: string
+  /** 已归一化的参数 */
+  params: TaskParams
+  apiProvider: ApiProvider
+  apiProfileName: string
+  apiModel: string
+  /** 已持久化的输入图 id */
+  inputImageIds: string[]
+  maskTargetImageId: string | null
+  maskImageId: string | null
+  conversationId: string
+  /** 同一次批量提交展开出的多条 task 的关联 id；单条提交不设 */
+  batchId?: string
+  /** XY 网格轴定义；仅网格提交设 */
+  gridAxes?: { x: GridAxis; y?: GridAxis }
+  /** XY 网格坐标；仅网格提交设 */
+  gridCoord?: { x: string; y?: string }
+}
 
-  const activeProfile = getActiveApiProfile(settings)
-  if (validateApiProfile(activeProfile)) {
-    showToast(`请先完善当前 Provider：${validateApiProfile(activeProfile)}`, 'error')
-    useStore.getState().setShowSettings(true)
-    return
+/**
+ * 构造 + 落库一条 running 任务。不触发 executeTask、不回填对话标题——这两件事的时机
+ * 交由调用方决定（单条立即执行；批量先全部落库再受控调度）。
+ */
+async function enqueueTask(spec: EnqueueTaskSpec): Promise<string | null> {
+  const taskId = genId()
+  const task: TaskRecord = {
+    id: taskId,
+    prompt: spec.prompt,
+    params: spec.params,
+    apiProvider: spec.apiProvider,
+    apiProfileName: spec.apiProfileName,
+    apiModel: spec.apiModel,
+    inputImageIds: spec.inputImageIds,
+    maskTargetImageId: spec.maskTargetImageId,
+    maskImageId: spec.maskImageId,
+    outputImages: [],
+    status: 'running',
+    error: null,
+    createdAt: Date.now(),
+    finishedAt: null,
+    elapsed: null,
+    conversationId: spec.conversationId,
+    ...(spec.batchId ? { batchId: spec.batchId } : {}),
+    ...(spec.gridAxes ? { gridAxes: spec.gridAxes, gridCoord: spec.gridCoord } : {}),
   }
 
-  if (!prompt.trim()) {
-    showToast('请输入提示词', 'error')
-    return
+  const latestTasks = useStore.getState().tasks
+  useStore.getState().setTasks([task, ...latestTasks])
+  try {
+    await putTask(task)
+  } catch (err) {
+    // 持久化失败:回滚内存里这条 running 任务,否则会留下无请求 / 无 watchdog 的「幽灵 running」卡片;
+    // 调用方多为 fire-and-forget,reject 会逃逸成未捕获 rejection。
+    const message = err instanceof Error ? err.message : String(err)
+    const state = useStore.getState()
+    state.setTasks(state.tasks.filter((t) => t.id !== taskId))
+    state.showToast(`保存任务失败：${message}`, 'error')
+    return null
   }
+  return taskId
+}
+
+/** 批量执行的并发上限:批量场景叠加 callImageApi 内部多图拆单会相乘,保守取值避免触发上游 429。 */
+const BATCH_CONCURRENCY = 3
+
+/**
+ * 以并发上限调度一批已落库 task 的 executeTask。每个 task 的成功/失败/取消已由 executeTask
+ * 内部完整收口（落 done/error 态、watchdog、孤儿回滚），故调度器不让单个失败中断整批、也不抛错。
+ */
+async function runEnqueuedTasks(taskIds: string[], limit = BATCH_CONCURRENCY): Promise<void> {
+  await mapWithConcurrency(taskIds, limit, (id) => executeTask(id))
+}
+
+interface PreparedSubmission {
+  normalizedParams: TaskParams
+  inputImageIds: string[]
+  maskImageId: string | null
+  maskTargetImageId: string | null
+  activeConversationId: string
+}
+
+/**
+ * 采集全局态的共享副作用段(submitTask 与 submitGridTask 共用):mask 处理(含整图确认）→
+ * 输入图持久化 → 参数归一化回写 → 确保 active conversation。返回准备结果,或在确认中断 /
+ * mask 失败时返回 null(由调用方 return)。
+ *
+ * 注意:profile / prompt 校验**不在此处**,留在各调用方最前,以保持 submitTask 校验顺序不变。
+ * 整图遮罩确认的重入由 onFullMaskRetry 回调驱动,调用方须透传自身的全部确认标志(避免双确认
+ * 互相丢标志形成弹窗循环)。副作用顺序严禁乱序(submitTask 单条路径等价性依赖于此)。
+ */
+async function prepareSubmission(
+  options: { allowFullMask?: boolean },
+  onFullMaskRetry: () => void,
+): Promise<PreparedSubmission | null> {
+  const { settings, inputImages, maskDraft, params, showToast, setConfirmDialog } = useStore.getState()
 
   let orderedInputImages = inputImages
   let maskImageId: string | null = null
@@ -409,11 +490,9 @@ export async function submitTask(options: { allowFullMask?: boolean } = {}) {
           message: '当前遮罩覆盖了整张图片，提交后可能会重绘全部内容。是否继续？',
           confirmText: '继续提交',
           tone: 'warning',
-          action: () => {
-            void submitTask({ allowFullMask: true })
-          },
+          action: onFullMaskRetry,
         })
-        return
+        return null
       }
       maskImageId = await storeImage(maskDraft.maskDataUrl, 'mask')
       setCachedImage(maskImageId, maskDraft.maskDataUrl)
@@ -423,7 +502,7 @@ export async function submitTask(options: { allowFullMask?: boolean } = {}) {
         useStore.getState().clearMaskDraft()
       }
       showToast(err instanceof Error ? err.message : String(err), 'error')
-      return
+      return null
     }
   }
 
@@ -444,50 +523,277 @@ export async function submitTask(options: { allowFullMask?: boolean } = {}) {
     activeConversationId = useStore.getState().createConversation()
   }
 
-  const taskId = genId()
-  const task: TaskRecord = {
-    id: taskId,
-    prompt: prompt.trim(),
-    params: normalizedParams,
-    apiProvider: activeProfile.provider,
-    apiProfileName: activeProfile.name,
-    apiModel: activeProfile.model,
+  return {
+    normalizedParams,
     inputImageIds: orderedInputImages.map((i) => i.id),
-    maskTargetImageId,
     maskImageId,
-    outputImages: [],
-    status: 'running',
-    error: null,
-    createdAt: Date.now(),
-    finishedAt: null,
-    elapsed: null,
-    conversationId: activeConversationId,
+    maskTargetImageId,
+    activeConversationId,
   }
+}
 
-  const latestTasks = useStore.getState().tasks
-  useStore.getState().setTasks([task, ...latestTasks])
-  try {
-    await putTask(task)
-  } catch (err) {
-    // 持久化失败:回滚内存里这条 running 任务,否则会留下无请求 / 无 watchdog 的「幽灵 running」卡片;
-    // 且本函数为 fire-and-forget 调用,reject 会逃逸成未捕获 rejection。
-    const message = err instanceof Error ? err.message : String(err)
-    const state = useStore.getState()
-    state.setTasks(state.tasks.filter((t) => t.id !== taskId))
-    state.showToast(`保存任务失败：${message}`, 'error')
+/** 提交新任务 */
+export async function submitTask(options: { allowFullMask?: boolean; allowLargeBatch?: boolean } = {}) {
+  const { settings, prompt, params, showToast, setConfirmDialog } = useStore.getState()
+
+  const activeProfile = getActiveApiProfile(settings)
+  if (validateApiProfile(activeProfile)) {
+    showToast(`请先完善当前 Provider：${validateApiProfile(activeProfile)}`, 'error')
+    useStore.getState().setShowSettings(true)
     return
   }
 
+  if (!prompt.trim()) {
+    showToast('请输入提示词', 'error')
+    return
+  }
+
+  // 提示词通配展开规模把关:只依赖 prompt,放在 mask 处理 / 输入图持久化等任何副作用之前,
+  // 这样确认/拒绝发生时尚未产生任何需要回滚的副作用。countPromptExpansion 不构造数组,可安全预判。
+  const trimmedPrompt = prompt.trim()
+  const expansionCount = countPromptExpansion(trimmedPrompt)
+  if (expansionCount > MAX_PROMPT_EXPANSION_HARD) {
+    showToast(
+      `通配展开将生成 ${expansionCount} 张，超过上限 ${MAX_PROMPT_EXPANSION_HARD}，请精简提示词中的 {…|…} 组合`,
+      'error',
+    )
+    return
+  }
+  if (expansionCount > MAX_PROMPT_EXPANSION && !options.allowLargeBatch) {
+    const totalImages = expansionCount * params.n
+    setConfirmDialog({
+      title: '批量生成确认',
+      message:
+        params.n > 1
+          ? `检测到提示词通配，将展开为 ${expansionCount} 条提示词，每条 ${params.n} 张，共 ${totalImages} 张图片。是否继续？`
+          : `检测到提示词通配，将展开为 ${expansionCount} 条提示词（共 ${expansionCount} 张图片）。是否继续？`,
+      confirmText: '继续生成',
+      tone: 'warning',
+      action: () => {
+        void submitTask({ ...options, allowLargeBatch: true })
+      },
+    })
+    return
+  }
+
+  const prepared = await prepareSubmission(options, () => {
+    // 保留其它确认标志(如 allowLargeBatch),避免大批量 + 整图遮罩双确认互相丢标志形成弹窗循环。
+    void submitTask({ ...options, allowFullMask: true })
+  })
+  if (!prepared) return
+  const { normalizedParams, inputImageIds, maskImageId, maskTargetImageId, activeConversationId } = prepared
+
+  // 通配展开:无通配时为 [trimmedPrompt] 原样(与重构前单条路径严格等价)。
+  const prompts = expandPromptTemplate(trimmedPrompt)
+  const batchId = prompts.length > 1 ? genId() : undefined
+  if (prompts.length > 1) {
+    // 提交前预告本批将生成的总图片数(展开数 × n),让用户对「一条提示词变多条」有知情(对齐 spec §6)。
+    showToast(`通配将生成 ${prompts.length} 条提示词、共 ${prompts.length * normalizedParams.n} 张图片`, 'success')
+  }
+  const taskIds: string[] = []
+  for (const expandedPrompt of prompts) {
+    const id = await enqueueTask({
+      prompt: expandedPrompt,
+      params: normalizedParams,
+      apiProvider: activeProfile.provider,
+      apiProfileName: activeProfile.name,
+      apiModel: activeProfile.model,
+      inputImageIds,
+      maskTargetImageId,
+      maskImageId,
+      conversationId: activeConversationId,
+      batchId,
+    })
+    if (id) taskIds.push(id)
+  }
+  // 全部落库失败:enqueueTask 已逐条回滚内存态并 toast,直接返回。
+  if (!taskIds.length) return
+
   // 首条 task 提交后，若对话仍为「新对话」初始 title，则用 prompt 前 N 字回填，并更新 updatedAt
-  void maybeUpdateConversationOnFirstTask(activeConversationId, task)
+  const firstTask = useStore.getState().tasks.find((t) => t.id === taskIds[0])
+  if (firstTask) void maybeUpdateConversationOnFirstTask(activeConversationId, firstTask)
 
   if (settings.clearInputAfterSubmit) {
     useStore.getState().setPrompt('')
     useStore.getState().clearInputImages()
   }
 
-  // 异步调用 API
-  executeTask(taskId)
+  // 异步调用 API:单条直接执行(与重构前一致);批量经并发闸限流调度。
+  if (taskIds.length === 1) {
+    executeTask(taskIds[0])
+  } else {
+    void runEnqueuedTasks(taskIds)
+  }
+}
+
+export interface GridSubmitConfig {
+  x: GridAxis
+  y?: GridAxis
+}
+
+/** 提交 XY 参数网格:笛卡尔积 + 复用 batchId/enqueueTask/runEnqueuedTasks。 */
+export async function submitGridTask(
+  gridConfig: GridSubmitConfig,
+  options: { allowFullMask?: boolean; allowLargeBatch?: boolean } = {},
+) {
+  const { settings, prompt, params, showToast, setConfirmDialog } = useStore.getState()
+
+  // profile 校验(与 submitTask 同款,最前)
+  const activeProfile = getActiveApiProfile(settings)
+  const profileError = validateApiProfile(activeProfile)
+  if (profileError) {
+    showToast(`请先完善当前 Provider：${profileError}`, 'error')
+    useStore.getState().setShowSettings(true)
+    return
+  }
+  if (!prompt.trim()) {
+    showToast('请输入提示词', 'error')
+    return
+  }
+  if (!gridConfig.x || gridConfig.x.values.length < 2) {
+    showToast('请在 X 轴至少选择 2 个取值', 'error')
+    return
+  }
+
+  // 规模把关(复用通配阈值)
+  const cellCount = countGridCells(gridConfig)
+  const yCount = gridConfig.y ? gridConfig.y.values.length : 1
+  if (cellCount > MAX_PROMPT_EXPANSION_HARD) {
+    showToast(`网格将生成 ${cellCount} 格，超过上限 ${MAX_PROMPT_EXPANSION_HARD}，请减少轴取值`, 'error')
+    return
+  }
+  if (cellCount > MAX_PROMPT_EXPANSION && !options.allowLargeBatch) {
+    const totalImages = countGridImages(gridConfig, params.n)
+    setConfirmDialog({
+      title: '批量生成确认',
+      message:
+        params.n > 1
+          ? `网格将生成 ${gridConfig.x.values.length}×${yCount} = ${cellCount} 格，每格 ${params.n} 张，共 ${totalImages} 张图片。是否继续？`
+          : `网格将生成 ${gridConfig.x.values.length}×${yCount} = ${cellCount} 格（共 ${cellCount} 张图片）。是否继续？`,
+      confirmText: '继续生成',
+      tone: 'warning',
+      action: () => {
+        void submitGridTask(gridConfig, { ...options, allowLargeBatch: true })
+      },
+    })
+    return
+  }
+
+  const prepared = await prepareSubmission(options, () => {
+    void submitGridTask(gridConfig, { ...options, allowFullMask: true })
+  })
+  if (!prepared) return
+  const { normalizedParams, inputImageIds, maskImageId, maskTargetImageId, activeConversationId } = prepared
+
+  // 笛卡尔积(base 用归一化后的 params 与当前 prompt;prompt 轴取值来自通配展开,见 gridExperiment)
+  const cells = buildGridCells(gridConfig, { params: normalizedParams, prompt: prompt.trim() })
+  const gridAxes = { x: gridConfig.x, ...(gridConfig.y ? { y: gridConfig.y } : {}) }
+  const batchId = genId()
+  // 真实总图 = Σ 各格 n(n 作轴时各格不同)
+  const totalImages = cells.reduce((sum, c) => sum + c.params.n, 0)
+  showToast(`网格生成：${gridConfig.x.values.length}×${yCount}，共 ${totalImages} 张图片`, 'success')
+
+  const taskIds: string[] = []
+  for (const cell of cells) {
+    const id = await enqueueTask({
+      prompt: cell.prompt,
+      params: cell.params,
+      apiProvider: activeProfile.provider,
+      apiProfileName: activeProfile.name,
+      apiModel: activeProfile.model,
+      inputImageIds,
+      maskTargetImageId,
+      maskImageId,
+      conversationId: activeConversationId,
+      batchId,
+      gridAxes,
+      gridCoord: cell.gridCoord,
+    })
+    if (id) taskIds.push(id)
+  }
+  if (!taskIds.length) return
+
+  const firstTask = useStore.getState().tasks.find((t) => t.id === taskIds[0])
+  if (firstTask) void maybeUpdateConversationOnFirstTask(activeConversationId, firstTask)
+
+  if (settings.clearInputAfterSubmit) {
+    useStore.getState().setPrompt('')
+    useStore.getState().clearInputImages()
+  }
+
+  void runEnqueuedTasks(taskIds)
+}
+
+/** 内部:为某网格坐标构造 cell spec 并 enqueue(从存活成员快照取非轴 params/输入图/conversation),返回 taskId。 */
+async function enqueueGridCell(
+  batchId: string,
+  coord: { x: string; y?: string },
+  sample: TaskRecord,
+): Promise<string | null> {
+  if (!sample.gridAxes) return null
+  const { settings, activeConversationId } = useStore.getState()
+  const activeProfile = getActiveApiProfile(settings)
+  const xVal = sample.gridAxes.x.values.find((v) => v.key === coord.x)
+  const yVal = coord.y != null ? sample.gridAxes.y?.values.find((v) => v.key === coord.y) : undefined
+  if (!xVal) return null
+  // 用单值轴重建该格(非轴 params 取 sample 快照),buildGridCells 负责轴 override。
+  const cellAxes = {
+    x: { ...sample.gridAxes.x, values: [xVal] },
+    ...(sample.gridAxes.y && yVal ? { y: { ...sample.gridAxes.y, values: [yVal] } } : {}),
+  }
+  const [cell] = buildGridCells(cellAxes, { params: { ...sample.params }, prompt: sample.prompt })
+  if (!cell) return null
+  return enqueueTask({
+    prompt: cell.prompt,
+    params: cell.params,
+    apiProvider: activeProfile.provider,
+    apiProfileName: activeProfile.name,
+    apiModel: activeProfile.model,
+    inputImageIds: [...sample.inputImageIds],
+    maskTargetImageId: sample.maskTargetImageId ?? null,
+    maskImageId: sample.maskImageId ?? null,
+    conversationId: sample.conversationId ?? activeConversationId ?? ARCHIVE_CONVERSATION_ID,
+    batchId,
+    gridAxes: sample.gridAxes,
+    gridCoord: cell.gridCoord,
+  })
+}
+
+/** 补跑单个网格格(结果回到矩阵原坐标)。 */
+export function retryGridCell(batchId: string, coord: { x: string; y?: string }): void {
+  const sample = useStore.getState().tasks.find((t) => t.batchId === batchId && t.gridAxes)
+  if (!sample) return
+  void enqueueGridCell(batchId, coord, sample).then((id) => {
+    if (id) executeTask(id)
+  })
+}
+
+/** 补跑网格中「缺失或全部失败」的格(scope:全部 / 指定行 / 指定列)。 */
+export function retryGridMissing(batchId: string, scope: 'all' | { row: string } | { col: string }): void {
+  const members = useStore.getState().tasks.filter((t) => t.batchId === batchId && t.gridAxes)
+  const sample = members[0]
+  const matrix = reconstructMatrix(members)
+  if (!sample || !matrix) return
+
+  const targets: { x: string; y?: string }[] = []
+  for (const col of matrix.cols) {
+    if (typeof scope === 'object' && 'col' in scope && col.key !== scope.col) continue
+    for (const row of matrix.rows) {
+      if (typeof scope === 'object' && 'row' in scope && row.key !== scope.row) continue
+      const cellTasks = matrix.cellTasks(col.key, row.key)
+      const hasLive = cellTasks.some((t) => t.status === 'done' || t.status === 'running')
+      if (!hasLive) targets.push({ x: col.key, ...(matrix.axes.y ? { y: row.key } : {}) })
+    }
+  }
+  if (!targets.length) return
+  void (async () => {
+    const ids: string[] = []
+    for (const coord of targets) {
+      const id = await enqueueGridCell(batchId, coord, sample)
+      if (id) ids.push(id)
+    }
+    if (ids.length) void runEnqueuedTasks(ids)
+  })()
 }
 
 async function executeTask(taskId: string) {
@@ -613,7 +919,9 @@ async function executeTask(taskId: string) {
       finishedAt: Date.now(),
       elapsed: Date.now() - task.createdAt,
     })
-    useStore.getState().setDetailTaskId(taskId)
+    // 批量任务(batchId 存在)失败时逐个自动弹详情会互相打架,改由失败卡片的 error 态呈现;
+    // 单任务保持原行为:失败即弹详情。
+    if (!task.batchId) useStore.getState().setDetailTaskId(taskId)
   } finally {
     clearTaskAbortController(taskId)
     // 释放输入图片的内存缓存（已持久化到 IndexedDB，后续按需从 DB 加载）
@@ -723,43 +1031,26 @@ export function reorderTask(
 
 /** 重试失败的任务：创建新任务并执行 */
 export async function retryTask(task: TaskRecord) {
+  // 网格 task 重试走补跑分支:结果回到矩阵原坐标(否则跑出矩阵成散图)。
+  if (task.batchId && task.gridCoord) {
+    retryGridCell(task.batchId, task.gridCoord)
+    return
+  }
   const { settings, activeConversationId } = useStore.getState()
   const activeProfile = getActiveApiProfile(settings)
-  const normalizedParams = normalizeParamsForSettings(task.params, settings)
-  const taskId = genId()
-  const newTask: TaskRecord = {
-    id: taskId,
+  // 复用 enqueueTask 原语(含写失败回滚)。重试不继承 batchId:视为一次新的独立生成。
+  const id = await enqueueTask({
     prompt: task.prompt,
-    params: normalizedParams,
+    params: normalizeParamsForSettings(task.params, settings),
     apiProvider: activeProfile.provider,
     apiProfileName: activeProfile.name,
     apiModel: activeProfile.model,
     inputImageIds: [...task.inputImageIds],
     maskTargetImageId: task.maskTargetImageId ?? null,
     maskImageId: task.maskImageId ?? null,
-    outputImages: [],
-    status: 'running',
-    error: null,
-    createdAt: Date.now(),
-    finishedAt: null,
-    elapsed: null,
     conversationId: task.conversationId ?? activeConversationId ?? ARCHIVE_CONVERSATION_ID,
-  }
-
-  const latestTasks = useStore.getState().tasks
-  useStore.getState().setTasks([newTask, ...latestTasks])
-  try {
-    await putTask(newTask)
-  } catch (err) {
-    // 同 submitTask:写失败回滚,避免幽灵 running 卡片与未捕获 rejection。
-    const message = err instanceof Error ? err.message : String(err)
-    const state = useStore.getState()
-    state.setTasks(state.tasks.filter((t) => t.id !== taskId))
-    state.showToast(`保存任务失败：${message}`, 'error')
-    return
-  }
-
-  executeTask(taskId)
+  })
+  if (id) executeTask(id)
 }
 
 /** 复用配置 */

@@ -7,6 +7,7 @@ import { formatImageRatio } from '../lib/image/size'
 import { ActualValueBadge, DetailParamValue } from '../lib/paramDisplay'
 import { copyBlobToClipboard, copyTextToClipboard, getClipboardFailureMessage } from '../lib/image/clipboard'
 import { createMaskPreviewDataUrl } from '../lib/image/canvasImage'
+import { findChildTasks, findParentTasks, type LineageLink } from '../lib/lineage'
 import FavoriteCategoryMenu from './FavoriteCategoryMenu'
 
 export default function DetailModal() {
@@ -35,6 +36,10 @@ export default function DetailModal() {
     () => tasks.find((t) => t.id === detailTaskId) ?? null,
     [tasks, detailTaskId],
   )
+
+  // 创作血缘:读时按内容寻址 id 求交推断父/子任务（零持久化字段）。
+  const parentLinks = useMemo(() => (task ? findParentTasks(task, tasks) : []), [task, tasks])
+  const childLinks = useMemo(() => (task ? findChildTasks(task, tasks) : []), [task, tasks])
 
   useCloseOnEscape(Boolean(task), () => setDetailTaskId(null))
   useLockBodyScroll(Boolean(task))
@@ -277,6 +282,34 @@ export default function DetailModal() {
   const handleRetry = () => {
     retryTask(task)
     setDetailTaskId(null)
+  }
+
+  const renderLineageLink = (link: LineageLink) => {
+    const src = imageSrcs[link.sharedImageIds[0]] || ''
+    const statusColor =
+      link.task.status === 'done'
+        ? 'bg-green-400'
+        : link.task.status === 'error'
+          ? 'bg-red-400'
+          : 'bg-blue-400'
+    return (
+      <button
+        key={link.task.id}
+        onClick={() => setDetailTaskId(link.task.id)}
+        className="flex max-w-[180px] items-center gap-2 rounded-lg border border-gray-200 p-1 pr-2.5 transition hover:bg-gray-50 dark:border-white/[0.08] dark:hover:bg-white/[0.04]"
+        title={link.task.prompt || '(无提示词)'}
+      >
+        <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-gray-100 dark:bg-black/20">
+          {src && <img src={src} className="h-full w-full object-cover" alt="" />}
+          <span
+            className={`absolute bottom-0.5 right-0.5 h-1.5 w-1.5 rounded-full ring-1 ring-white dark:ring-gray-900 ${statusColor}`}
+          />
+        </span>
+        <span className="min-w-0 truncate text-xs text-gray-600 dark:text-gray-300">
+          {link.task.prompt || '(无提示词)'}
+        </span>
+      </button>
+    )
   }
 
   return (
@@ -546,6 +579,28 @@ export default function DetailModal() {
                     )
                   })}
                 </div>
+              </div>
+            )}
+
+            {/* 创作血缘 */}
+            {(parentLinks.length > 0 || childLinks.length > 0) && (
+              <div className="mb-4 space-y-3">
+                {parentLinks.length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+                      派生自
+                    </h3>
+                    <div className="flex flex-wrap gap-2">{parentLinks.map(renderLineageLink)}</div>
+                  </div>
+                )}
+                {childLinks.length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+                      衍生出
+                    </h3>
+                    <div className="flex flex-wrap gap-2">{childLinks.map(renderLineageLink)}</div>
+                  </div>
+                )}
               </div>
             )}
 
