@@ -21,6 +21,7 @@ import Toast from './components/Toast'
 import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
 import CommandPalette from './components/CommandPalette'
+import CompareModal from './components/CompareModal'
 import ErrorBoundary from './components/ErrorBoundary'
 import InsecureContextBanner from './components/InsecureContextBanner'
 
@@ -214,6 +215,9 @@ export default function App() {
       </ErrorBoundary>
       <ErrorBoundary region="modal">
         <CommandPalette />
+      </ErrorBoundary>
+      <ErrorBoundary region="modal">
+        <CompareModal />
       </ErrorBoundary>
     </>
   )

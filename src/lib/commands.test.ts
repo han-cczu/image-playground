@@ -23,6 +23,9 @@ function makeStore(overrides: Partial<CommandStore> = {}): CommandStore {
       activeProfileId: '',
     } as unknown as CommandStore['settings'],
     setSettings: vi.fn(),
+    prompt: '',
+    setPrompt: vi.fn(),
+    snippets: [],
     ...overrides,
   }
 }
@@ -169,6 +172,19 @@ describe('buildCommands', () => {
       const ctx = makeCtx()
       buildCommands(ctx).find((c) => c.id === 'theme:dark')!.run()
       expect(ctx.store.setSettings).toHaveBeenCalledWith({ theme: 'dark' })
+      expect(ctx.close).toHaveBeenCalledTimes(1)
+    })
+
+    it('snippet command appends content to the prompt (palette has no caret context)', () => {
+      const ctx = makeCtx({
+        prompt: '一只猫,',
+        snippets: [{ id: 'snip-1', name: '光线', content: '{晨光|黄昏}', createdAt: 1, updatedAt: 1, sortOrder: 0 }],
+      })
+      const cmd = buildCommands(ctx).find((c) => c.id === 'snippet:insert:snip-1')!
+      expect(cmd.title).toBe('插入片段：光线')
+      expect(cmd.group).toBe('snippet')
+      cmd.run()
+      expect(ctx.store.setPrompt).toHaveBeenCalledWith('一只猫,{晨光|黄昏}')
       expect(ctx.close).toHaveBeenCalledTimes(1)
     })
 

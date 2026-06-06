@@ -3,6 +3,8 @@ import {
   createDefaultFavoriteCategory,
   normalizeFavoriteCategories,
 } from '../lib/favoriteCategories'
+import { normalizeSnippets } from '../lib/promptSnippets'
+import { normalizeBatchNotes } from '../lib/gridSheet'
 import type { AppState } from './index'
 
 type PersistedStoreState = Partial<AppState> & {
@@ -25,6 +27,8 @@ export function mergePersistedStoreState(
     settings: normalizeSettings(persisted?.settings),
     favoriteCategories: shouldSeedDefaultCategory ? [createDefaultFavoriteCategory()] : normalizedCategories,
     favoriteCategoriesInitialized: true,
+    snippets: normalizeSnippets(persisted?.snippets),
+    batchNotes: normalizeBatchNotes(persisted?.batchNotes),
     filterFavoriteCategoryId: null,
     filterFavorite: false,
     // conversations 列表跟 tasks 一致走 IDB，不进 zustand-persist
@@ -44,6 +48,8 @@ export function partialize(state: AppState) {
     settings: state.settings,
     favoriteCategories: state.favoriteCategories,
     favoriteCategoriesInitialized: state.favoriteCategoriesInitialized,
+    snippets: state.snippets,
+    batchNotes: state.batchNotes,
     params: state.params,
     prompt: state.prompt,
     inputImages: state.inputImages.map((img) => ({ id: img.id, dataUrl: '' })),

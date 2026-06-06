@@ -2,11 +2,12 @@ import type { AppState } from '../store'
 import { exportData } from './exportImport'
 
 /** 命令分组（也是面板里的展示顺序） */
-export type CommandGroup = 'navigation' | 'conversation' | 'provider' | 'theme' | 'action'
+export type CommandGroup = 'navigation' | 'conversation' | 'snippet' | 'provider' | 'theme' | 'action'
 
 export const COMMAND_GROUP_ORDER: CommandGroup[] = [
   'navigation',
   'conversation',
+  'snippet',
   'provider',
   'theme',
   'action',
@@ -15,6 +16,7 @@ export const COMMAND_GROUP_ORDER: CommandGroup[] = [
 export const COMMAND_GROUP_LABELS: Record<CommandGroup, string> = {
   navigation: '导航',
   conversation: '对话',
+  snippet: '片段',
   provider: 'Provider',
   theme: '主题',
   action: '操作',
@@ -49,6 +51,9 @@ export type CommandStore = Pick<
   | 'setActiveConversation'
   | 'settings'
   | 'setSettings'
+  | 'prompt'
+  | 'setPrompt'
+  | 'snippets'
 >
 
 export interface CommandCtx {
@@ -126,6 +131,21 @@ export function buildCommands(ctx: CommandCtx): Command[] {
       run: () => {
         store.setActiveConversation(conversation.id)
         store.setGalleryView(false)
+        close()
+      },
+    })
+  }
+
+  // ----- snippet -----
+  // 面板打开时 textarea 光标态不可得 → append 语义(光标处插入走底栏「片段」pill)
+  for (const snippet of store.snippets) {
+    commands.push({
+      id: `snippet:insert:${snippet.id}`,
+      title: `插入片段：${snippet.name}`,
+      group: 'snippet',
+      keywords: 'snippet insert prompt pianduan charu',
+      run: () => {
+        store.setPrompt(store.prompt + snippet.content)
         close()
       },
     })

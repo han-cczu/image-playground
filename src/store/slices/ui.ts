@@ -32,6 +32,9 @@ export interface UiSlice {
   /** 命令面板（Ctrl/⌘+K），瞬态不持久化 */
   showCommandPalette: boolean
   setShowCommandPalette: (v: boolean) => void
+  /** A/B 并排对比：选中的 2~4 个 task id；null=关闭。瞬态不持久化 */
+  compareTaskIds: string[] | null
+  setCompareTaskIds: (ids: string[] | null) => void
   /** 反推源图（base64 data URL）；非 null 即打开反推 modal */
   captionSource: string | null
   setCaptionSource: (src: string | null) => void
@@ -95,6 +98,8 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   setShowPromptOptimizer: (showPromptOptimizer) => set({ showPromptOptimizer }),
   showCommandPalette: false,
   setShowCommandPalette: (showCommandPalette) => set({ showCommandPalette }),
+  compareTaskIds: null,
+  setCompareTaskIds: (compareTaskIds) => set({ compareTaskIds }),
   captionSource: null,
   setCaptionSource: (captionSource) => set({ captionSource }),
 

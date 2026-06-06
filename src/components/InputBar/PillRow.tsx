@@ -7,6 +7,7 @@ import ResolutionMenu from './ResolutionMenu'
 import StylePickerPopover from './StylePickerPopover'
 import AdvancedParamsPopover from './AdvancedParamsPopover'
 import GridConfigPopover from './GridConfigPopover'
+import SnippetPopover from './SnippetPopover'
 import ButtonTooltip from './ButtonTooltip'
 
 /** 底栏 pill 通用样式 */
@@ -46,6 +47,8 @@ export interface PillRowProps {
   captionTooltipText: string
   onCaption: () => void
   onAttach: () => void
+  /** 把片段正文插入输入框光标处 */
+  onInsertSnippet: (content: string) => void
 }
 
 /** 顶部 pill 行（模型 / 风格 / 比例 / 分辨率 / 优化 + 上传 + 高级） */
@@ -62,6 +65,7 @@ export default function PillRow({
   captionTooltipText,
   onCaption,
   onAttach,
+  onInsertSnippet,
 }: PillRowProps) {
   const prompt = useStore((s) => s.prompt)
   const setPrompt = useStore((s) => s.setPrompt)
@@ -78,13 +82,14 @@ export default function PillRow({
   const [attachHover, setAttachHover] = useState(false)
 
   /** 顶部 pill 弹出层互斥 */
-  type OpenMenu = 'model' | 'style' | 'resolution' | 'advanced' | 'grid' | null
+  type OpenMenu = 'model' | 'style' | 'resolution' | 'advanced' | 'grid' | 'snippet' | null
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
 
   const modelPillRef = useRef<HTMLButtonElement>(null)
   const stylePillRef = useRef<HTMLButtonElement>(null)
   const resolutionPillRef = useRef<HTMLButtonElement>(null)
   const gridPillRef = useRef<HTMLButtonElement>(null)
+  const snippetPillRef = useRef<HTMLButtonElement>(null)
   const advancedButtonRef = useRef<HTMLButtonElement>(null)
 
   const activeProfile = getActiveApiProfile(settings)
@@ -211,6 +216,33 @@ export default function PillRow({
         </button>
         {openMenu === 'grid' && (
           <GridConfigPopover anchorRef={gridPillRef} onClose={() => setOpenMenu(null)} />
+        )}
+      </div>
+
+      {/* 片段 pill */}
+      <div className="relative">
+        <button
+          ref={snippetPillRef}
+          type="button"
+          onClick={() => setOpenMenu((v) => (v === 'snippet' ? null : 'snippet'))}
+          className={PILL_BASE}
+          aria-haspopup="dialog"
+          aria-expanded={openMenu === 'snippet'}
+          title="提示词片段（保存/插入常用片段与模板）"
+        >
+          <svg className="h-3.5 w-3.5 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M4 4h16v12H8l-4 4V4z" />
+            <path d="M8 8h8M8 12h5" />
+          </svg>
+          <span>片段</span>
+          <Chevron />
+        </button>
+        {openMenu === 'snippet' && (
+          <SnippetPopover
+            anchorRef={snippetPillRef}
+            onClose={() => setOpenMenu(null)}
+            onInsert={onInsertSnippet}
+          />
         )}
       </div>
 

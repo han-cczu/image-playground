@@ -1,7 +1,9 @@
-import { Fragment } from 'react'
+import { Fragment, useState } from 'react'
 import type { TaskRecord } from '../types'
 import { useStore, reuseConfig, editOutputs, retryGridCell, retryGridMissing } from '../store'
 import { reconstructMatrix, getGridAxisDef } from '../lib/gridExperiment'
+import { MAX_BATCH_NOTE_LEN, pickCellRepresentative } from '../lib/gridSheet'
+import { exportGridSheet } from '../lib/gridSheetRender'
 import TaskCard from './TaskCard'
 
 interface Props {
@@ -20,6 +22,13 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
   const selectedTaskIds = useStore((s) => s.selectedTaskIds)
   const setSelectedTaskIds = useStore((s) => s.setSelectedTaskIds)
   const toggleTaskSelection = useStore((s) => s.toggleTaskSelection)
+  const batchNote = useStore((s) => s.batchNotes[batchId])
+  const setBatchNote = useStore((s) => s.setBatchNote)
+  const showToast = useStore((s) => s.showToast)
+
+  const [editingNote, setEditingNote] = useState(false)
+  const [noteDraft, setNoteDraft] = useState('')
+  const [exporting, setExporting] = useState(false)
 
   const matrix = reconstructMatrix(tasks)
   if (!matrix) return null
@@ -29,11 +38,29 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
   const xLabel = getGridAxisDef(axes.x.kind)?.label ?? axes.x.kind
   const yLabel = axes.y ? (getGridAxisDef(axes.y.kind)?.label ?? axes.y.kind) : null
 
-  /** 同格多 task 取最新为代表(补跑会保留旧 task,故每格可能压多条) */
-  const repTask = (colKey: string, rowKey: string): TaskRecord | null => {
-    const list = cellTasks(colKey, rowKey)
-    if (!list.length) return null
-    return list.reduce((a, b) => (b.createdAt > a.createdAt ? b : a))
+  /** 同格多 task 取最新为代表(补跑会保留旧 task,故每格可能压多条);与导出共用同一判定 */
+  const repTask = (colKey: string, rowKey: string): TaskRecord | null =>
+    pickCellRepresentative(cellTasks(colKey, rowKey))
+
+  const handleExport = () => {
+    if (exporting) return
+    setExporting(true)
+    exportGridSheet({ tasks, batchId, note: batchNote?.text })
+      .then(() => showToast('对照图已导出', 'success'))
+      .catch((err) => {
+        showToast(`导出失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+      })
+      .finally(() => setExporting(false))
+  }
+
+  const startEditNote = () => {
+    setNoteDraft(batchNote?.text ?? '')
+    setEditingNote(true)
+  }
+
+  const saveNote = () => {
+    setBatchNote(batchId, noteDraft)
+    setEditingNote(false)
   }
 
   // 进度 / 缺漏基于「矩阵格」而非成员条数:补跑新建 task 会保留旧 error,成员数会被抬高、
@@ -80,6 +107,23 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
             <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-3.5 w-3.5 accent-blue-500" />
             选中整批
           </label>
+          <button
+            type="button"
+            onClick={startEditNote}
+            className="rounded-lg px-2 py-1 text-xs text-gray-500 transition hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/[0.06]"
+            title={batchNote ? '编辑批次笔记' : '添加批次笔记'}
+          >
+            {batchNote ? '笔记 ✓' : '笔记'}
+          </button>
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={doneCells < 1 || exporting}
+            className="rounded-lg bg-blue-50 px-2.5 py-1 text-xs text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20"
+            title={doneCells < 1 ? '至少 1 格完成后可导出' : '导出带轴标签的对照图 PNG'}
+          >
+            {exporting ? '导出中…' : '导出对照图'}
+          </button>
           {hasFailuresOrGaps && (
             <button
               type="button"
@@ -91,6 +135,48 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
           )}
         </div>
       </div>
+
+      {/* 批次笔记:展示行 / 行内编辑 */}
+      {editingNote ? (
+        <div className="mb-3 flex flex-col gap-1.5">
+          <textarea
+            value={noteDraft}
+            onChange={(e) => setNoteDraft(e.target.value)}
+            maxLength={MAX_BATCH_NOTE_LEN}
+            rows={2}
+            placeholder="记录这组实验的结论（导出对照图时会带上）"
+            aria-label="批次笔记"
+            className="w-full resize-none rounded-xl border border-gray-200/70 bg-white/60 px-2.5 py-1.5 text-xs leading-relaxed text-gray-700 outline-none focus:border-blue-300 custom-scrollbar dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/40"
+          />
+          <div className="flex items-center justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={() => setEditingNote(false)}
+              className="rounded-lg px-2 py-1 text-xs text-gray-500 transition hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/[0.06]"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={saveNote}
+              className="rounded-lg bg-blue-500 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-blue-600"
+            >
+              保存笔记
+            </button>
+          </div>
+        </div>
+      ) : (
+        batchNote && (
+          <button
+            type="button"
+            onClick={startEditNote}
+            title={batchNote.text}
+            className="mb-3 block w-full truncate rounded-lg bg-white/50 px-2.5 py-1.5 text-left text-xs text-gray-500 transition hover:bg-white dark:bg-white/[0.03] dark:text-gray-400 dark:hover:bg-white/[0.06]"
+          >
+            📝 {batchNote.text}
+          </button>
+        )
+      )}
 
       {/* 矩阵:第一列为行表头(无 Y 轴时占位),其余为 X 列 */}
       <div className="overflow-x-auto">

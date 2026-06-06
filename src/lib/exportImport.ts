@@ -4,6 +4,8 @@ import { DEFAULT_PARAMS } from '../types'
 import { useStore } from '../store'
 import { mergeImportedSettings, DEFAULT_SETTINGS, normalizeSettings } from './api/apiProfiles'
 import { createDefaultFavoriteCategory, mergeFavoriteCategories, normalizeFavoriteCategories } from './favoriteCategories'
+import { mergeSnippets, normalizeSnippets } from './promptSnippets'
+import { normalizeBatchNotes } from './gridSheet'
 import {
   getAllTasks,
   putTask,
@@ -132,6 +134,8 @@ export async function clearAllData() {
   } = useStore.getState()
   setTasks([])
   setFavoriteCategories([createDefaultFavoriteCategory()])
+  useStore.getState().setSnippets([])
+  useStore.setState({ batchNotes: {} })
   const archive = createArchiveConversation()
   await persistConversationMigration([archive], [])
   setConversations([archive])
@@ -150,8 +154,14 @@ export async function exportData() {
     const tasks = await getAllTasks()
     const images = await getAllImages()
     const conversations = await getAllConversations()
-    const { settings, favoriteCategories } = useStore.getState()
+    const { settings, favoriteCategories, snippets, batchNotes } = useStore.getState()
     const exportedAt = Date.now()
+
+    // 批次笔记:仅导出仍有 task 引用的(孤儿笔记不进备份)
+    const referencedBatchIds = new Set(tasks.map((task) => task.batchId).filter(Boolean))
+    const exportedBatchNotes = Object.fromEntries(
+      Object.entries(normalizeBatchNotes(batchNotes)).filter(([batchId]) => referencedBatchIds.has(batchId)),
+    )
     const imageCreatedAtFallback = new Map<string, number>()
 
     for (const task of tasks) {
@@ -186,6 +196,8 @@ export async function exportData() {
       exportedAt: new Date(exportedAt).toISOString(),
       settings: redactSettingsForExport(settings),
       favoriteCategories: normalizeFavoriteCategories(favoriteCategories),
+      snippets: normalizeSnippets(snippets),
+      batchNotes: exportedBatchNotes,
       conversations: normalizeConversations(conversations),
       tasks,
       imageFiles,
@@ -289,6 +301,24 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
     } else if (importedCategories.length) {
       const state = useStore.getState()
       state.setFavoriteCategories(mergeFavoriteCategories(state.favoriteCategories, importedCategories))
+    }
+
+    // 提示词片段:旧备份无 snippets 字段 → 空数组(replace 清空 / merge 不变)
+    const importedSnippets = normalizeSnippets(data.snippets)
+    if (isReplaceMode) {
+      useStore.getState().setSnippets(importedSnippets)
+    } else if (importedSnippets.length) {
+      const state = useStore.getState()
+      state.setSnippets(mergeSnippets(state.snippets, importedSnippets))
+    }
+
+    // 批次笔记:merge=本地同 batchId 优先;replace=直接覆盖;旧备份缺字段同上
+    const importedBatchNotes = normalizeBatchNotes(data.batchNotes)
+    if (isReplaceMode) {
+      useStore.setState({ batchNotes: importedBatchNotes })
+    } else if (Object.keys(importedBatchNotes).length) {
+      const localNotes = useStore.getState().batchNotes
+      useStore.setState({ batchNotes: { ...importedBatchNotes, ...localNotes } })
     }
 
     /*

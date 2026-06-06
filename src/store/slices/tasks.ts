@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand'
 import type {
   Conversation,
   FavoriteCategory,
+  PromptSnippet,
   TaskParams,
   InputImage,
   MaskDraft,
@@ -19,6 +20,14 @@ import {
   genConversationId,
   isArchiveConversation,
 } from '../../lib/conversations'
+import {
+  genSnippetId,
+  MAX_SNIPPET_CONTENT_LEN,
+  MAX_SNIPPET_NAME_LEN,
+  MAX_SNIPPETS,
+  normalizeSnippets,
+} from '../../lib/promptSnippets'
+import { MAX_BATCH_NOTE_LEN, type BatchNote } from '../../lib/gridSheet'
 import {
   deleteConversation as dbDeleteConversation,
   putConversation,
@@ -103,6 +112,20 @@ export interface TasksSlice {
   updateFavoriteCategory: (id: string, patch: Partial<Pick<FavoriteCategory, 'name' | 'color'>>) => void
   deleteFavoriteCategory: (id: string) => Promise<void>
   moveFavoriteCategory: (id: string, direction: -1 | 1) => void
+
+  // 提示词片段（snippets）
+  snippets: PromptSnippet[]
+  setSnippets: (snippets: PromptSnippet[]) => void
+  /** 满 MAX_SNIPPETS 或 content 为空时返回 null（前者带 toast） */
+  createSnippet: (input: { name: string; content: string }) => string | null
+  updateSnippet: (id: string, patch: Partial<Pick<PromptSnippet, 'name' | 'content'>>) => void
+  deleteSnippet: (id: string) => void
+  moveSnippet: (id: string, direction: -1 | 1) => void
+
+  // 批次笔记（batchId → 笔记;批次实体不进 IDB,笔记走 persist）
+  batchNotes: Record<string, BatchNote>
+  /** trim 后为空 → 删除条目;超长截断 */
+  setBatchNote: (batchId: string, text: string) => void
 
   // 对话（conversations）
   conversations: Conversation[]
@@ -261,6 +284,82 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
       const [moved] = next.splice(index, 1)
       next.splice(nextIndex, 0, moved)
       return { favoriteCategories: next.map((category, sortOrder) => ({ ...category, sortOrder })) }
+    }),
+
+  // Prompt snippets
+  snippets: [],
+  setSnippets: (snippets) => set({ snippets: normalizeSnippets(snippets) }),
+  createSnippet: ({ name, content }) => {
+    const trimmedContent = content.trim()
+    if (!trimmedContent) return null
+    const state = get()
+    if (state.snippets.length >= MAX_SNIPPETS) {
+      state.showToast(`片段已达上限（${MAX_SNIPPETS} 条），请先清理`, 'error')
+      return null
+    }
+    const id = genSnippetId()
+    const now = Date.now()
+    set((s) => ({
+      snippets: [
+        ...s.snippets,
+        {
+          id,
+          name: name.trim().slice(0, MAX_SNIPPET_NAME_LEN) || '未命名片段',
+          content: trimmedContent.slice(0, MAX_SNIPPET_CONTENT_LEN),
+          createdAt: now,
+          updatedAt: now,
+          sortOrder: s.snippets.length,
+        },
+      ],
+    }))
+    return id
+  },
+  updateSnippet: (id, patch) =>
+    set((s) => ({
+      snippets: s.snippets.map((snippet) => {
+        if (snippet.id !== id) return snippet
+        // content 提供但 trim 后为空 → 忽略该字段（片段本体不允许置空）
+        const nextContent =
+          patch.content !== undefined && patch.content.trim()
+            ? patch.content.trim().slice(0, MAX_SNIPPET_CONTENT_LEN)
+            : snippet.content
+        const nextName =
+          patch.name !== undefined
+            ? patch.name.trim().slice(0, MAX_SNIPPET_NAME_LEN) || '未命名片段'
+            : snippet.name
+        if (nextContent === snippet.content && nextName === snippet.name) return snippet
+        return { ...snippet, name: nextName, content: nextContent, updatedAt: Date.now() }
+      }),
+    })),
+  deleteSnippet: (id) =>
+    set((s) => ({
+      snippets: s.snippets
+        .filter((snippet) => snippet.id !== id)
+        .map((snippet, sortOrder) => ({ ...snippet, sortOrder })),
+    })),
+  moveSnippet: (id, direction) =>
+    set((s) => {
+      const index = s.snippets.findIndex((snippet) => snippet.id === id)
+      const nextIndex = index + direction
+      if (index < 0 || nextIndex < 0 || nextIndex >= s.snippets.length) return s
+      const next = [...s.snippets]
+      const [moved] = next.splice(index, 1)
+      next.splice(nextIndex, 0, moved)
+      return { snippets: next.map((snippet, sortOrder) => ({ ...snippet, sortOrder })) }
+    }),
+
+  // Batch notes
+  batchNotes: {},
+  setBatchNote: (batchId, text) =>
+    set((s) => {
+      const trimmed = text.trim().slice(0, MAX_BATCH_NOTE_LEN)
+      if (!trimmed) {
+        if (!(batchId in s.batchNotes)) return s
+        const next = { ...s.batchNotes }
+        delete next[batchId]
+        return { batchNotes: next }
+      }
+      return { batchNotes: { ...s.batchNotes, [batchId]: { text: trimmed, updatedAt: Date.now() } } }
     }),
 
   // Conversations
