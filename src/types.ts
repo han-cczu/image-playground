@@ -152,6 +152,19 @@ export interface FavoriteCategory {
   createdAt: number
 }
 
+/** 提示词片段：可命名保存/插入复用的文本，content 可含通配组（提交时正常展开） */
+export interface PromptSnippet {
+  id: string
+  /** 显示名，搜索目标；trim 后非空，≤ MAX_SNIPPET_NAME_LEN */
+  name: string
+  /** 片段正文；非空，≤ MAX_SNIPPET_CONTENT_LEN */
+  content: string
+  createdAt: number
+  updatedAt: number
+  /** 列表序，normalize 后为连续整数 */
+  sortOrder: number
+}
+
 export interface Conversation {
   id: string
   title: string
@@ -299,6 +312,8 @@ export interface ExportData {
   settings: AppSettings
   favoriteCategories?: FavoriteCategory[]
   conversations?: Conversation[]
+  /** 提示词片段（可选：旧备份无此字段，导入回退空数组） */
+  snippets?: PromptSnippet[]
   tasks: TaskRecord[]
   /** imageId → 图片信息 */
   imageFiles: Record<string, {

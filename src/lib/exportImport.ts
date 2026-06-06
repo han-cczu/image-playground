@@ -4,6 +4,7 @@ import { DEFAULT_PARAMS } from '../types'
 import { useStore } from '../store'
 import { mergeImportedSettings, DEFAULT_SETTINGS, normalizeSettings } from './api/apiProfiles'
 import { createDefaultFavoriteCategory, mergeFavoriteCategories, normalizeFavoriteCategories } from './favoriteCategories'
+import { mergeSnippets, normalizeSnippets } from './promptSnippets'
 import {
   getAllTasks,
   putTask,
@@ -132,6 +133,7 @@ export async function clearAllData() {
   } = useStore.getState()
   setTasks([])
   setFavoriteCategories([createDefaultFavoriteCategory()])
+  useStore.getState().setSnippets([])
   const archive = createArchiveConversation()
   await persistConversationMigration([archive], [])
   setConversations([archive])
@@ -150,7 +152,7 @@ export async function exportData() {
     const tasks = await getAllTasks()
     const images = await getAllImages()
     const conversations = await getAllConversations()
-    const { settings, favoriteCategories } = useStore.getState()
+    const { settings, favoriteCategories, snippets } = useStore.getState()
     const exportedAt = Date.now()
     const imageCreatedAtFallback = new Map<string, number>()
 
@@ -186,6 +188,7 @@ export async function exportData() {
       exportedAt: new Date(exportedAt).toISOString(),
       settings: redactSettingsForExport(settings),
       favoriteCategories: normalizeFavoriteCategories(favoriteCategories),
+      snippets: normalizeSnippets(snippets),
       conversations: normalizeConversations(conversations),
       tasks,
       imageFiles,
@@ -289,6 +292,15 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
     } else if (importedCategories.length) {
       const state = useStore.getState()
       state.setFavoriteCategories(mergeFavoriteCategories(state.favoriteCategories, importedCategories))
+    }
+
+    // 提示词片段:旧备份无 snippets 字段 → 空数组(replace 清空 / merge 不变)
+    const importedSnippets = normalizeSnippets(data.snippets)
+    if (isReplaceMode) {
+      useStore.getState().setSnippets(importedSnippets)
+    } else if (importedSnippets.length) {
+      const state = useStore.getState()
+      state.setSnippets(mergeSnippets(state.snippets, importedSnippets))
     }
 
     /*

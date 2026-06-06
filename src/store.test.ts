@@ -761,3 +761,81 @@ describe('insecure context banner state', () => {
     expect(useStore.getState().dismissedInsecureContextBanner).toBe(false)
   })
 })
+
+describe('prompt snippet store actions', () => {
+  beforeEach(() => {
+    useStore.setState({ snippets: [], showToast: vi.fn() })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('creates, updates, moves, and deletes snippets with compact sortOrder', () => {
+    const a = useStore.getState().createSnippet({ name: '光线', content: '{晨光|黄昏}' })!
+    const b = useStore.getState().createSnippet({ name: '镜头', content: '85mm lens' })!
+
+    useStore.getState().updateSnippet(a, { name: '光线组', content: '{晨光|正午|黄昏}' })
+    useStore.getState().moveSnippet(b, -1)
+
+    expect(useStore.getState().snippets).toEqual([
+      expect.objectContaining({ id: b, name: '镜头', sortOrder: 0 }),
+      expect.objectContaining({ id: a, name: '光线组', content: '{晨光|正午|黄昏}', sortOrder: 1 }),
+    ])
+
+    useStore.getState().deleteSnippet(b)
+    expect(useStore.getState().snippets).toEqual([
+      expect.objectContaining({ id: a, sortOrder: 0 }),
+    ])
+  })
+
+  it('rejects empty content on create and keeps content on empty-content update', () => {
+    expect(useStore.getState().createSnippet({ name: 'x', content: '   ' })).toBeNull()
+
+    const id = useStore.getState().createSnippet({ name: 'x', content: 'keep' })!
+    useStore.getState().updateSnippet(id, { content: '   ' })
+    expect(useStore.getState().snippets[0].content).toBe('keep')
+  })
+
+  it('falls back to default name and bumps updatedAt on update', () => {
+    const id = useStore.getState().createSnippet({ name: '  ', content: 'c' })!
+    const created = useStore.getState().snippets[0]
+    expect(created.name).toBe('未命名片段')
+
+    vi.useFakeTimers()
+    vi.setSystemTime(created.updatedAt + 1000)
+    useStore.getState().updateSnippet(id, { name: '新名' })
+    expect(useStore.getState().snippets[0].updatedAt).toBe(created.updatedAt + 1000)
+    vi.useRealTimers()
+  })
+
+  it('rejects creation past MAX_SNIPPETS with a toast', () => {
+    const many = Array.from({ length: 200 }, (_, i) => ({
+      id: `s${i}`, name: `n${i}`, content: 'c', createdAt: i, updatedAt: i, sortOrder: i,
+    }))
+    useStore.setState({ snippets: many })
+
+    expect(useStore.getState().createSnippet({ name: 'x', content: 'c' })).toBeNull()
+    expect(useStore.getState().showToast).toHaveBeenCalledWith(
+      expect.stringContaining('上限'), 'error',
+    )
+  })
+
+  it('normalizes snippets through setSnippets and persisted-state merge', () => {
+    useStore.getState().setSnippets([
+      { id: 's1', name: 'a', content: 'c', createdAt: 1, updatedAt: 1, sortOrder: 9 },
+      { id: '', name: 'bad', content: 'c', createdAt: 1, updatedAt: 1, sortOrder: 0 },
+    ] as never)
+    expect(useStore.getState().snippets).toEqual([
+      expect.objectContaining({ id: 's1', sortOrder: 0 }),
+    ])
+
+    const merged = mergePersistedStoreState({
+      settings: DEFAULT_SETTINGS,
+      snippets: [{ id: 's2', content: 'from-persist' }],
+    }, useStore.getInitialState())
+    expect(merged.snippets).toEqual([
+      expect.objectContaining({ id: 's2', content: 'from-persist', name: '未命名片段' }),
+    ])
+  })
+})

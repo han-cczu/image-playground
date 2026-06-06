@@ -4,6 +4,7 @@ import { getChangedParams, normalizeParamsForSettings } from '../../lib/api/para
 import { createMaskPreviewDataUrl } from '../../lib/image/canvasImage'
 import { filterAndSortTasks } from '../../lib/taskFilters'
 import { normalizeImageSize, detectTier } from '../../lib/image/size'
+import { insertAtCursor } from '../../lib/promptSnippets'
 import { DEFAULT_PARAMS } from '../../types'
 import SelectionActionBar from './SelectionActionBar'
 import SizePickerModal from '../SizePickerModal'
@@ -219,6 +220,26 @@ export default function InputBar() {
     }
   }
 
+  /** 片段插入：基于 textarea 光标位（失焦后浏览器保留 selectionStart），插入后恢复焦点与光标 */
+  const handleInsertSnippet = (content: string) => {
+    const el = textareaRef.current
+    const { next, caret } = insertAtCursor(
+      prompt,
+      el?.selectionStart ?? prompt.length,
+      el?.selectionEnd ?? prompt.length,
+      content,
+    )
+    setPrompt(next)
+    requestAnimationFrame(() => {
+      const node = textareaRef.current
+      if (node) {
+        node.focus()
+        node.setSelectionRange(caret, caret)
+      }
+      adjustTextareaHeight()
+    })
+  }
+
   const pillRowElement = (
     <PillRow
       ratioLabel={ratioLabel}
@@ -233,6 +254,7 @@ export default function InputBar() {
       captionTooltipText={captionTooltipText}
       onCaption={() => captionFileInputRef.current?.click()}
       onAttach={() => fileInputRef.current?.click()}
+      onInsertSnippet={handleInsertSnippet}
     />
   )
 

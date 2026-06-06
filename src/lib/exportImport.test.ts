@@ -485,3 +485,108 @@ describe('export/import reliability', () => {
     expect(conversations.some((c) => c.id === '__archive__')).toBe(true)
   })
 })
+
+describe('prompt snippets export/import', () => {
+  const snippetA = {
+    id: 'snip-a', name: '光线', content: '{晨光|黄昏}', createdAt: 1, updatedAt: 1, sortOrder: 0,
+  }
+  const snippetB = {
+    id: 'snip-b', name: '镜头', content: '85mm lens', createdAt: 2, updatedAt: 2, sortOrder: 1,
+  }
+
+  beforeEach(() => {
+    vi.mocked(getAllTasks).mockResolvedValue([])
+    vi.mocked(getAllImages).mockResolvedValue([])
+    vi.mocked(getAllConversations).mockResolvedValue([])
+    vi.mocked(persistConversationMigration).mockResolvedValue(undefined)
+    useStore.setState({
+      settings: { ...DEFAULT_SETTINGS },
+      snippets: [],
+      favoriteCategories: [],
+      tasks: [],
+      showToast: vi.fn(),
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function makeBackup(extra: Partial<ExportData>): File {
+    return createImportFile({
+      version: 4,
+      exportedAt: new Date(0).toISOString(),
+      settings: DEFAULT_SETTINGS,
+      tasks: [],
+      imageFiles: {},
+      ...extra,
+    })
+  }
+
+  it('exports snippets in the manifest', async () => {
+    let exportedBlob: Blob | null = null
+    const click = vi.fn()
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn((blob: Blob) => {
+        exportedBlob = blob
+        return 'blob:test'
+      }),
+      revokeObjectURL: vi.fn(),
+    })
+    vi.stubGlobal('document', {
+      createElement: vi.fn(() => ({ href: '', download: '', click })),
+    })
+    useStore.setState({ snippets: [snippetA] })
+
+    await exportData()
+
+    const unzipped = unzipSync(new Uint8Array(await exportedBlob!.arrayBuffer()))
+    const manifest = JSON.parse(strFromU8(unzipped['manifest.json'])) as ExportData
+    expect(manifest.snippets).toEqual([snippetA])
+  })
+
+  it('merges imported snippets keeping local on id conflict', async () => {
+    useStore.setState({ snippets: [{ ...snippetA, content: 'local-content' }] })
+    const file = makeBackup({ snippets: [snippetA, snippetB] })
+
+    await importData(file, { mode: 'merge' })
+
+    expect(useStore.getState().snippets).toEqual([
+      expect.objectContaining({ id: 'snip-a', content: 'local-content' }),
+      expect.objectContaining({ id: 'snip-b', content: '85mm lens' }),
+    ])
+  })
+
+  it('replaces local snippets in replace mode and clears them for legacy backups', async () => {
+    useStore.setState({ snippets: [snippetA] })
+
+    await importData(makeBackup({ snippets: [snippetB] }), { mode: 'replace' })
+    expect(useStore.getState().snippets).toEqual([
+      expect.objectContaining({ id: 'snip-b', sortOrder: 0 }),
+    ])
+
+    useStore.setState({ snippets: [snippetA] })
+    // 旧备份:无 snippets 字段 → replace 清空
+    await importData(makeBackup({}), { mode: 'replace' })
+    expect(useStore.getState().snippets).toEqual([])
+  })
+
+  it('keeps local snippets when merging a legacy backup without snippets field', async () => {
+    useStore.setState({ snippets: [snippetA] })
+
+    await importData(makeBackup({}), { mode: 'merge' })
+
+    expect(useStore.getState().snippets).toEqual([snippetA])
+  })
+
+  it('clears snippets on clearAllData', async () => {
+    vi.mocked(clearTasks).mockResolvedValue(undefined)
+    vi.mocked(clearImages).mockResolvedValue(undefined)
+    vi.mocked(clearConversations).mockResolvedValue(undefined)
+    useStore.setState({ snippets: [snippetA] })
+
+    await clearAllData()
+
+    expect(useStore.getState().snippets).toEqual([])
+  })
+})

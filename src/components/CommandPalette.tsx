@@ -90,6 +90,9 @@ function CommandPalettePanel({ close }: { close: () => void }) {
   const setActiveConversation = useStore((s) => s.setActiveConversation)
   const settings = useStore((s) => s.settings)
   const setSettings = useStore((s) => s.setSettings)
+  const prompt = useStore((s) => s.prompt)
+  const setPrompt = useStore((s) => s.setPrompt)
+  const snippets = useStore((s) => s.snippets)
 
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
@@ -110,6 +113,9 @@ function CommandPalettePanel({ close }: { close: () => void }) {
           setActiveConversation,
           settings,
           setSettings,
+          prompt,
+          setPrompt,
+          snippets,
         },
         close,
       }),
@@ -124,6 +130,9 @@ function CommandPalettePanel({ close }: { close: () => void }) {
       setActiveConversation,
       settings,
       setSettings,
+      prompt,
+      setPrompt,
+      snippets,
       close,
     ],
   )
