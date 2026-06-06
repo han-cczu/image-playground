@@ -314,6 +314,8 @@ export interface ExportData {
   conversations?: Conversation[]
   /** 提示词片段（可选：旧备份无此字段，导入回退空数组） */
   snippets?: PromptSnippet[]
+  /** 批次笔记（可选；导出时已过滤为仅 tasks 中存在的 batchId） */
+  batchNotes?: Record<string, { text: string; updatedAt: number }>
   tasks: TaskRecord[]
   /** imageId → 图片信息 */
   imageFiles: Record<string, {

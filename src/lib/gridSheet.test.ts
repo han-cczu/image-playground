@@ -1,0 +1,140 @@
+import { describe, expect, it } from 'vitest'
+import {
+  computeSheetLayout,
+  MAX_BATCH_NOTE_LEN,
+  normalizeBatchNotes,
+  pickCellRepresentative,
+  SHEET_CELL_SIZE,
+  SHEET_COL_HEADER_H,
+  SHEET_GAP,
+  SHEET_NOTE_LINE_H,
+  SHEET_NOTE_MAX_LINES,
+  SHEET_PADDING,
+  SHEET_ROW_HEADER_W,
+} from './gridSheet'
+import { DEFAULT_PARAMS } from '../types'
+import type { TaskRecord } from '../types'
+
+/** 测试用:每字符 10px 的等宽近似 */
+const measure10 = (text: string) => Array.from(text).length * 10
+
+function makeTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
+  return {
+    id: 't1',
+    prompt: 'p',
+    params: { ...DEFAULT_PARAMS },
+    inputImageIds: [],
+    maskTargetImageId: null,
+    maskImageId: null,
+    outputImages: [],
+    status: 'done',
+    error: null,
+    createdAt: 1,
+    finishedAt: 2,
+    elapsed: 1,
+    ...overrides,
+  }
+}
+
+describe('computeSheetLayout', () => {
+  it('computes width/height for a 2x2 grid with Y axis and no note', () => {
+    const layout = computeSheetLayout({ cols: 2, rows: 2, hasY: true, measureWidth: measure10 })
+    const expectedWidth =
+      SHEET_PADDING * 2 + SHEET_ROW_HEADER_W + SHEET_GAP + 2 * SHEET_CELL_SIZE + SHEET_GAP
+    expect(layout.width).toBe(expectedWidth)
+    const cellsTop = SHEET_PADDING + SHEET_COL_HEADER_H + SHEET_GAP
+    expect(layout.height).toBe(cellsTop + 2 * SHEET_CELL_SIZE + SHEET_GAP + SHEET_PADDING)
+    expect(layout.noteLines).toEqual([])
+    expect(layout.noteRect).toBeNull()
+  })
+
+  it('omits the row header column without a Y axis', () => {
+    const layout = computeSheetLayout({ cols: 3, rows: 1, hasY: false, measureWidth: measure10 })
+    expect(layout.width).toBe(SHEET_PADDING * 2 + 3 * SHEET_CELL_SIZE + 2 * SHEET_GAP)
+    expect(layout.rowHeaderRect(0).w).toBe(0)
+    // 首格紧贴 padding(无行头与其 gap)
+    expect(layout.cellRect(0, 0).x).toBe(SHEET_PADDING)
+  })
+
+  it('positions rects on the expected grid lines', () => {
+    const layout = computeSheetLayout({ cols: 2, rows: 2, hasY: true, measureWidth: measure10 })
+    const c00 = layout.cellRect(0, 0)
+    const c11 = layout.cellRect(1, 1)
+    expect(c11.x - c00.x).toBe(SHEET_CELL_SIZE + SHEET_GAP)
+    expect(c11.y - c00.y).toBe(SHEET_CELL_SIZE + SHEET_GAP)
+    // 列头与数据列对齐
+    expect(layout.colHeaderRect(1).x).toBe(c11.x)
+    // 行头与数据行对齐
+    expect(layout.rowHeaderRect(1).y).toBe(c11.y)
+  })
+
+  it('reserves a note area and shifts the grid down', () => {
+    const without = computeSheetLayout({ cols: 2, rows: 1, hasY: false, measureWidth: measure10 })
+    const withNote = computeSheetLayout({
+      cols: 2, rows: 1, hasY: false, note: '短笔记', measureWidth: measure10,
+    })
+    expect(withNote.noteLines).toEqual(['短笔记'])
+    expect(withNote.noteRect).toEqual({
+      x: SHEET_PADDING, y: SHEET_PADDING, w: withNote.width - SHEET_PADDING * 2, h: SHEET_NOTE_LINE_H,
+    })
+    expect(withNote.height - without.height).toBe(SHEET_NOTE_LINE_H + SHEET_GAP)
+    expect(withNote.cellRect(0, 0).y - without.cellRect(0, 0).y).toBe(SHEET_NOTE_LINE_H + SHEET_GAP)
+  })
+
+  it('wraps long notes and truncates at max lines with ellipsis', () => {
+    // 宽度 = padding*2 + 2*cell + gap;可用 = 宽-2*padding = 2*512+12 = 1036 → 每行 103 字(10px/字)
+    const longNote = 'x'.repeat(103 * SHEET_NOTE_MAX_LINES + 50)
+    const layout = computeSheetLayout({
+      cols: 2, rows: 1, hasY: false, note: longNote, measureWidth: measure10,
+    })
+    expect(layout.noteLines).toHaveLength(SHEET_NOTE_MAX_LINES)
+    expect(layout.noteLines[SHEET_NOTE_MAX_LINES - 1].endsWith('…')).toBe(true)
+    // 每行不超过可用宽度
+    for (const line of layout.noteLines) {
+      expect(measure10(line)).toBeLessThanOrEqual(1036)
+    }
+  })
+
+  it('collapses whitespace in notes', () => {
+    const layout = computeSheetLayout({
+      cols: 1, rows: 1, hasY: false, note: '  a \n b  ', measureWidth: measure10,
+    })
+    expect(layout.noteLines).toEqual(['a b'])
+  })
+})
+
+describe('pickCellRepresentative', () => {
+  it('returns null for empty and the newest task otherwise', () => {
+    expect(pickCellRepresentative([])).toBeNull()
+    const tasks = [
+      makeTask({ id: 'a', createdAt: 100 }),
+      makeTask({ id: 'b', createdAt: 300 }),
+      makeTask({ id: 'c', createdAt: 200 }),
+    ]
+    expect(pickCellRepresentative(tasks)!.id).toBe('b')
+  })
+})
+
+describe('normalizeBatchNotes', () => {
+  it('returns {} for non-object input', () => {
+    expect(normalizeBatchNotes(undefined)).toEqual({})
+    expect(normalizeBatchNotes(null)).toEqual({})
+    expect(normalizeBatchNotes([])).toEqual({})
+    expect(normalizeBatchNotes('x')).toEqual({})
+  })
+
+  it('drops invalid entries and blank texts, trims and clamps long ones', () => {
+    const result = normalizeBatchNotes({
+      '': { text: 'no-id' },
+      'b1': null,
+      'b2': { text: 42 },
+      'b3': { text: '   ' },
+      'b4': { text: '  好实验  ', updatedAt: 123 },
+      'b5': { text: 'x'.repeat(MAX_BATCH_NOTE_LEN + 99) },
+    }, 999)
+    expect(Object.keys(result)).toEqual(['b4', 'b5'])
+    expect(result.b4).toEqual({ text: '好实验', updatedAt: 123 })
+    expect(result.b5.text).toHaveLength(MAX_BATCH_NOTE_LEN)
+    expect(result.b5.updatedAt).toBe(999)
+  })
+})

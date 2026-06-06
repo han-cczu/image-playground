@@ -27,6 +27,7 @@ import {
   MAX_SNIPPETS,
   normalizeSnippets,
 } from '../../lib/promptSnippets'
+import { MAX_BATCH_NOTE_LEN, type BatchNote } from '../../lib/gridSheet'
 import {
   deleteConversation as dbDeleteConversation,
   putConversation,
@@ -120,6 +121,11 @@ export interface TasksSlice {
   updateSnippet: (id: string, patch: Partial<Pick<PromptSnippet, 'name' | 'content'>>) => void
   deleteSnippet: (id: string) => void
   moveSnippet: (id: string, direction: -1 | 1) => void
+
+  // 批次笔记（batchId → 笔记;批次实体不进 IDB,笔记走 persist）
+  batchNotes: Record<string, BatchNote>
+  /** trim 后为空 → 删除条目;超长截断 */
+  setBatchNote: (batchId: string, text: string) => void
 
   // 对话（conversations）
   conversations: Conversation[]
@@ -340,6 +346,20 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
       const [moved] = next.splice(index, 1)
       next.splice(nextIndex, 0, moved)
       return { snippets: next.map((snippet, sortOrder) => ({ ...snippet, sortOrder })) }
+    }),
+
+  // Batch notes
+  batchNotes: {},
+  setBatchNote: (batchId, text) =>
+    set((s) => {
+      const trimmed = text.trim().slice(0, MAX_BATCH_NOTE_LEN)
+      if (!trimmed) {
+        if (!(batchId in s.batchNotes)) return s
+        const next = { ...s.batchNotes }
+        delete next[batchId]
+        return { batchNotes: next }
+      }
+      return { batchNotes: { ...s.batchNotes, [batchId]: { text: trimmed, updatedAt: Date.now() } } }
     }),
 
   // Conversations

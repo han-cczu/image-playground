@@ -839,3 +839,40 @@ describe('prompt snippet store actions', () => {
     ])
   })
 })
+
+describe('batch note store actions', () => {
+  beforeEach(() => {
+    useStore.setState({ batchNotes: {} })
+  })
+
+  it('creates, updates, and deletes notes (blank text deletes)', () => {
+    useStore.getState().setBatchNote('b1', '  对照结论 A  ')
+    expect(useStore.getState().batchNotes.b1.text).toBe('对照结论 A')
+
+    useStore.getState().setBatchNote('b1', '更新后')
+    expect(useStore.getState().batchNotes.b1.text).toBe('更新后')
+
+    useStore.getState().setBatchNote('b1', '   ')
+    expect(useStore.getState().batchNotes.b1).toBeUndefined()
+  })
+
+  it('clamps note length and no-ops blank delete on missing id', () => {
+    const before = useStore.getState().batchNotes
+    useStore.getState().setBatchNote('missing', '')
+    expect(useStore.getState().batchNotes).toBe(before) // 引用不变,无多余渲染
+
+    useStore.getState().setBatchNote('b2', 'x'.repeat(600))
+    expect(useStore.getState().batchNotes.b2.text).toHaveLength(500)
+  })
+
+  it('normalizes batchNotes through persisted-state merge', () => {
+    const merged = mergePersistedStoreState({
+      settings: DEFAULT_SETTINGS,
+      batchNotes: {
+        good: { text: '有效', updatedAt: 1 },
+        bad: { text: '   ' },
+      },
+    } as never, useStore.getInitialState())
+    expect(Object.keys(merged.batchNotes)).toEqual(['good'])
+  })
+})
