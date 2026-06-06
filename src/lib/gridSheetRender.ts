@@ -2,6 +2,7 @@ import type { TaskRecord } from '../types'
 import { reconstructMatrix } from './gridExperiment'
 import { ensureImageCached } from './imageCache'
 import {
+  computeSafeCellSize,
   computeSheetLayout,
   pickCellRepresentative,
   type SheetRect,
@@ -61,6 +62,13 @@ export async function exportGridSheet(args: {
   const { cols, rows, cellTasks, axes } = matrix
   const hasY = Boolean(axes.y)
 
+  // 浏览器 canvas 单边上限 ~16384px:大矩阵收缩格子尺寸;收缩到下限仍超限给明确文案
+  // (否则 toBlob 静默返回 null,用户只看到一句没有原因的「生成 PNG 失败」)
+  const cellSize = computeSafeCellSize(cols.length, rows.length, hasY)
+  if (cellSize === null) {
+    throw new Error(`网格过大(${cols.length}×${rows.length}),超出浏览器画布上限,无法导出`)
+  }
+
   // 逐格代表图 id(与矩阵 UI 同判定:最新 task 的首图)
   const cellImageIds: (string | null)[][] = rows.map((row) =>
     cols.map((col) => {
@@ -95,6 +103,7 @@ export async function exportGridSheet(args: {
     hasY,
     note: args.note,
     measureWidth: (text) => ctx.measureText(text).width,
+    cellSize,
   })
   canvas.width = layout.width
   canvas.height = layout.height

@@ -13,6 +13,12 @@ export const SHEET_ROW_HEADER_W = 120
 export const SHEET_NOTE_LINE_H = 28
 export const SHEET_NOTE_MAX_LINES = 4
 export const MAX_BATCH_NOTE_LEN = 500
+/** 笔记条数上限:防恶意/损坏备份把 localStorage 顶爆致 persist 整体静默失效 */
+export const MAX_BATCH_NOTES = 500
+/** 浏览器 canvas 单边硬上限 ~16384(Chrome/Safari),留余量 */
+export const SHEET_MAX_EDGE = 16000
+/** 收缩后的格子尺寸下限:再小轴标签/图片已不可读,不如明确拒绝 */
+export const SHEET_MIN_CELL_SIZE = 96
 
 export interface SheetRect {
   x: number
@@ -75,6 +81,21 @@ function wrapText(
 }
 
 /**
+ * 计算不超出 SHEET_MAX_EDGE 的格子尺寸(≤ SHEET_CELL_SIZE):大矩阵按列/行数收缩;
+ * 收缩到 SHEET_MIN_CELL_SIZE 仍超限返回 null(调用方给明确文案,不让 toBlob 静默 null)。
+ * 注:高度上限按无笔记估算;笔记区最多 4 行(~124px),已被余量(16384-16000)覆盖。
+ */
+export function computeSafeCellSize(cols: number, rows: number, hasY: boolean): number | null {
+  const overheadW =
+    SHEET_PADDING * 2 + (hasY ? SHEET_ROW_HEADER_W + SHEET_GAP : 0) + (cols - 1) * SHEET_GAP
+  const overheadH = SHEET_PADDING * 2 + SHEET_COL_HEADER_H + SHEET_GAP + (rows - 1) * SHEET_GAP
+  const maxByWidth = Math.floor((SHEET_MAX_EDGE - overheadW) / cols)
+  const maxByHeight = Math.floor((SHEET_MAX_EDGE - overheadH) / rows)
+  const cellSize = Math.min(SHEET_CELL_SIZE, maxByWidth, maxByHeight)
+  return cellSize >= SHEET_MIN_CELL_SIZE ? cellSize : null
+}
+
+/**
  * 计算整图布局。结构(上→下):padding / 笔记区(可选) / 列头行 / 数据行×N / padding;
  * 左侧依次:padding / 行头列(无 Y 轴时宽 0) / 数据列×N。
  */
@@ -84,15 +105,18 @@ export function computeSheetLayout(opts: {
   hasY: boolean
   note?: string
   measureWidth: (text: string) => number
+  /** 格子边长,默认 SHEET_CELL_SIZE;大矩阵传 computeSafeCellSize 的收缩值 */
+  cellSize?: number
 }): SheetLayout {
   const { cols, rows, hasY, note, measureWidth } = opts
+  const cellSize = opts.cellSize ?? SHEET_CELL_SIZE
   const rowHeaderW = hasY ? SHEET_ROW_HEADER_W : 0
 
   const width =
     SHEET_PADDING * 2 +
     rowHeaderW +
     (hasY ? SHEET_GAP : 0) +
-    cols * SHEET_CELL_SIZE +
+    cols * cellSize +
     (cols - 1) * SHEET_GAP
 
   const noteLines = note ? wrapText(note, width - SHEET_PADDING * 2, SHEET_NOTE_MAX_LINES, measureWidth) : []
@@ -106,19 +130,19 @@ export function computeSheetLayout(opts: {
   const cellsLeft = SHEET_PADDING + rowHeaderW + (hasY ? SHEET_GAP : 0)
   const cellsTop = gridTop + SHEET_COL_HEADER_H + SHEET_GAP
 
-  const height = cellsTop + rows * SHEET_CELL_SIZE + (rows - 1) * SHEET_GAP + SHEET_PADDING
+  const height = cellsTop + rows * cellSize + (rows - 1) * SHEET_GAP + SHEET_PADDING
 
-  const cellX = (col: number) => cellsLeft + col * (SHEET_CELL_SIZE + SHEET_GAP)
-  const cellY = (row: number) => cellsTop + row * (SHEET_CELL_SIZE + SHEET_GAP)
+  const cellX = (col: number) => cellsLeft + col * (cellSize + SHEET_GAP)
+  const cellY = (row: number) => cellsTop + row * (cellSize + SHEET_GAP)
 
   return {
     width,
     height,
     noteLines,
     noteRect,
-    colHeaderRect: (col) => ({ x: cellX(col), y: gridTop, w: SHEET_CELL_SIZE, h: SHEET_COL_HEADER_H }),
-    rowHeaderRect: (row) => ({ x: SHEET_PADDING, y: cellY(row), w: rowHeaderW, h: SHEET_CELL_SIZE }),
-    cellRect: (col, row) => ({ x: cellX(col), y: cellY(row), w: SHEET_CELL_SIZE, h: SHEET_CELL_SIZE }),
+    colHeaderRect: (col) => ({ x: cellX(col), y: gridTop, w: cellSize, h: SHEET_COL_HEADER_H }),
+    rowHeaderRect: (row) => ({ x: SHEET_PADDING, y: cellY(row), w: rowHeaderW, h: cellSize }),
+    cellRect: (col, row) => ({ x: cellX(col), y: cellY(row), w: cellSize, h: cellSize }),
   }
 }
 
@@ -128,7 +152,11 @@ export function pickCellRepresentative(tasks: TaskRecord[]): TaskRecord | null {
   return tasks.reduce((a, b) => (b.createdAt > a.createdAt ? b : a))
 }
 
-/** 持久化/导入兜底:跳过无效条目、trim 空文本剔除、截断超长、修补 updatedAt。 */
+/**
+ * 持久化/导入兜底:跳过无效条目、trim 空文本剔除、截断超长、修补 updatedAt;
+ * 条数超 MAX_BATCH_NOTES 时保留 updatedAt 最新的(防不可信备份顶爆 localStorage 配额,
+ * 否则 persist setItem 抛 QuotaExceededError 后全部持久化静默失效)。
+ */
 export function normalizeBatchNotes(value: unknown, now = Date.now()): Record<string, BatchNote> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   const result: Record<string, BatchNote> = {}
@@ -145,5 +173,10 @@ export function normalizeBatchNotes(value: unknown, now = Date.now()): Record<st
         typeof item.updatedAt === 'number' && Number.isFinite(item.updatedAt) ? item.updatedAt : now,
     }
   }
-  return result
+
+  const entries = Object.entries(result)
+  if (entries.length <= MAX_BATCH_NOTES) return result
+  return Object.fromEntries(
+    entries.sort((a, b) => b[1].updatedAt - a[1].updatedAt).slice(0, MAX_BATCH_NOTES),
+  )
 }

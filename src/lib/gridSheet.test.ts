@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
+  computeSafeCellSize,
   computeSheetLayout,
   MAX_BATCH_NOTE_LEN,
+  MAX_BATCH_NOTES,
   normalizeBatchNotes,
   pickCellRepresentative,
   SHEET_CELL_SIZE,
   SHEET_COL_HEADER_H,
   SHEET_GAP,
+  SHEET_MAX_EDGE,
+  SHEET_MIN_CELL_SIZE,
   SHEET_NOTE_LINE_H,
   SHEET_NOTE_MAX_LINES,
   SHEET_PADDING,
@@ -136,5 +140,48 @@ describe('normalizeBatchNotes', () => {
     expect(result.b4).toEqual({ text: '好实验', updatedAt: 123 })
     expect(result.b5.text).toHaveLength(MAX_BATCH_NOTE_LEN)
     expect(result.b5.updatedAt).toBe(999)
+  })
+})
+
+describe('computeSafeCellSize(审查修复:canvas 单边上限)', () => {
+  it('keeps full size for normal grids', () => {
+    expect(computeSafeCellSize(8, 8, true)).toBe(SHEET_CELL_SIZE)
+    expect(computeSafeCellSize(2, 1, false)).toBe(SHEET_CELL_SIZE)
+  })
+
+  it('shrinks cell size so the sheet stays within SHEET_MAX_EDGE', () => {
+    // 40 列单轴:512px/格 → 20996px 超限;收缩后须 ≤ 上限且 ≥ 下限
+    const cell = computeSafeCellSize(40, 1, false)
+    expect(cell).not.toBeNull()
+    expect(cell).toBeLessThan(SHEET_CELL_SIZE)
+    expect(cell).toBeGreaterThanOrEqual(SHEET_MIN_CELL_SIZE)
+    const layout = computeSheetLayout({ cols: 40, rows: 1, hasY: false, measureWidth: measure10, cellSize: cell! })
+    expect(layout.width).toBeLessThanOrEqual(SHEET_MAX_EDGE)
+  })
+
+  it('returns null when even the min cell size cannot fit (caller shows a clear message)', () => {
+    expect(computeSafeCellSize(200, 1, false)).toBeNull()
+  })
+
+  it('layout respects a custom cellSize in every rect', () => {
+    const layout = computeSheetLayout({ cols: 2, rows: 2, hasY: true, measureWidth: measure10, cellSize: 100 })
+    expect(layout.cellRect(0, 0).w).toBe(100)
+    expect(layout.cellRect(1, 1).x - layout.cellRect(0, 1).x).toBe(100 + SHEET_GAP)
+    expect(layout.rowHeaderRect(0).h).toBe(100)
+  })
+})
+
+describe('normalizeBatchNotes 条数上限(审查修复:localStorage 配额炸弹)', () => {
+  it('caps entries at MAX_BATCH_NOTES keeping the most recently updated', () => {
+    const flood = Object.fromEntries(
+      Array.from({ length: MAX_BATCH_NOTES + 100 }, (_, i) => [`b${i}`, { text: 'x', updatedAt: i }]),
+    )
+    const result = normalizeBatchNotes(flood)
+    expect(Object.keys(result)).toHaveLength(MAX_BATCH_NOTES)
+    // 保留 updatedAt 最大的一批:最小的 100 条被丢弃
+    expect(result.b0).toBeUndefined()
+    expect(result.b99).toBeUndefined()
+    expect(result.b100).toBeDefined()
+    expect(result[`b${MAX_BATCH_NOTES + 99}`]).toBeDefined()
   })
 })
