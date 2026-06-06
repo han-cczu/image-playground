@@ -13,6 +13,7 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
   const clearSelection = useStore((s) => s.clearSelection)
   const tasks = useStore((s) => s.tasks)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
+  const setCompareTaskIds = useStore((s) => s.setCompareTaskIds)
 
   const allVisibleSelected =
     selectedTaskIds.length === filteredTasks.length && filteredTasks.length > 0
@@ -80,6 +81,15 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
     selectedTaskIds.length > 0 &&
     selectedTaskIds.every((id) => tasks.find((t) => t.id === id)?.isFavorite)
 
+  // 对比:2~4 条已完成且有输出图的任务
+  const canCompare =
+    selectedTaskIds.length >= 2 &&
+    selectedTaskIds.length <= 4 &&
+    selectedTaskIds.every((id) => {
+      const t = tasks.find((task) => task.id === id)
+      return t?.status === 'done' && (t.outputImages?.length ?? 0) > 0
+    })
+
   return (
     <div className="flex justify-center mb-3">
       <div className="bg-gray-800/90 dark:bg-gray-800/90 backdrop-blur shadow-lg rounded-full flex items-center p-1 border border-white/10 pointer-events-auto">
@@ -139,6 +149,23 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
             )}
           />
         </div>
+        <div className="w-px h-5 bg-white/20 mx-1"></div>
+        <button
+          onClick={() => canCompare && setCompareTaskIds(selectedTaskIds)}
+          disabled={!canCompare}
+          className={`p-2 transition-colors ${
+            canCompare
+              ? 'text-emerald-400 hover:text-emerald-300'
+              : 'text-gray-500 cursor-not-allowed'
+          }`}
+          title={canCompare ? '并排对比选中任务' : '选择 2~4 条已完成任务进行对比'}
+          aria-label="并排对比"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+            <rect x="3" y="4" width="8" height="16" rx="2" />
+            <rect x="13" y="4" width="8" height="16" rx="2" />
+          </svg>
+        </button>
         <div className="w-px h-5 bg-white/20 mx-1"></div>
         <button
           onClick={handleDeleteSelected}
