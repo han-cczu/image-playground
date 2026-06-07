@@ -96,7 +96,7 @@ export default function PillRow({
   const modelText = activeProfile.model || activeProfile.name || '未配置'
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div data-tour-id="pillrow" className="flex flex-wrap items-center gap-1.5">
       {/* 模型 pill */}
       <div className="relative">
         <button

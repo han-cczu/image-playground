@@ -21,6 +21,7 @@ export default function SubmitButton({
 }: SubmitButtonProps) {
   return (
     <div
+      data-tour-id="submit"
       className="relative flex shrink-0 items-end pb-0.5"
       onMouseEnter={() => onHoverChange(true)}
       onMouseLeave={() => onHoverChange(false)}

@@ -1,5 +1,6 @@
 import { useStore } from '../store'
 import { getActiveApiProfile } from '../lib/api/apiProfiles'
+import HelpButton from './HelpButton'
 
 type Theme = 'light' | 'dark' | 'system'
 
@@ -114,8 +115,9 @@ export default function Header({ onOpenMobileSidebar }: HeaderProps) {
           </div>
         </div>
 
-        {/* 右上：仅主题切换 */}
+        {/* 右上：重看引导 + 主题切换 */}
         <div className="flex shrink-0 items-center gap-1">
+          <HelpButton />
           <button
             type="button"
             onClick={cycleTheme}
