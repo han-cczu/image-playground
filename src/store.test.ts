@@ -16,6 +16,8 @@ import {
 } from './store'
 import { DEFAULT_FAVORITE_CATEGORY_COLOR, DEFAULT_FAVORITE_CATEGORY_ID } from './lib/favoriteCategories'
 import { MAX_BATCH_NOTES } from './lib/gridSheet'
+import { partialize } from './store/persist'
+import { shouldAutoStartTour } from './lib/tour/autoStart'
 
 vi.mock('./lib/db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./lib/db')>()
@@ -888,5 +890,85 @@ describe('batch note store actions', () => {
       },
     } as never, useStore.getInitialState())
     expect(Object.keys(merged.batchNotes)).toEqual(['good'])
+  })
+})
+
+describe('onboarding tour state', () => {
+  it('tour fields default off and setters update them', () => {
+    useStore.setState({ tourActive: false, tourStep: 0, hasSeenTour: false })
+    expect(useStore.getState().tourActive).toBe(false)
+    expect(useStore.getState().tourStep).toBe(0)
+    expect(useStore.getState().hasSeenTour).toBe(false)
+
+    useStore.getState().setTourActive(true)
+    useStore.getState().setTourStep(3)
+    useStore.getState().setHasSeenTour(true)
+    expect(useStore.getState().tourActive).toBe(true)
+    expect(useStore.getState().tourStep).toBe(3)
+    expect(useStore.getState().hasSeenTour).toBe(true)
+
+    useStore.getState().setMobileInputCollapsed(true)
+    expect(useStore.getState().mobileInputCollapsed).toBe(true)
+    useStore.getState().setMobileInputCollapsed(false)
+  })
+
+  it('mergePersistedStoreState normalizes hasSeenTour with strict === true', () => {
+    const initial = useStore.getInitialState()
+    expect(mergePersistedStoreState({}, initial).hasSeenTour).toBe(false)
+    expect(mergePersistedStoreState({ hasSeenTour: true }, initial).hasSeenTour).toBe(true)
+    expect(
+      mergePersistedStoreState({ hasSeenTour: 'yes' as unknown as boolean }, initial).hasSeenTour,
+    ).toBe(false)
+  })
+
+  it('partialize persists hasSeenTour but never the transient tour fields', () => {
+    useStore.setState({ tourActive: true, tourStep: 5, hasSeenTour: true, mobileInputCollapsed: true })
+    const persisted = partialize(useStore.getState()) as Record<string, unknown>
+    expect(persisted.hasSeenTour).toBe(true)
+    expect(persisted).not.toHaveProperty('tourActive')
+    expect(persisted).not.toHaveProperty('tourStep')
+    expect(persisted).not.toHaveProperty('mobileInputCollapsed')
+    useStore.setState({ tourActive: false, tourStep: 0, hasSeenTour: false, mobileInputCollapsed: false })
+  })
+
+  it('shouldAutoStartTour: start only for a true first-run user with no overlay open', () => {
+    const initial = useStore.getInitialState()
+    const fresh = {
+      hasSeenTour: false,
+      settings: initial.settings,
+      tasks: [] as TaskRecord[],
+      confirmDialog: null,
+      showSettings: false,
+      showCommandPalette: false,
+    }
+    expect(shouldAutoStartTour(fresh)).toBe('start')
+
+    // 已看过 → none
+    expect(shouldAutoStartTour({ ...fresh, hasSeenTour: true })).toBe('none')
+
+    // 任一 profile 配过 key → 老用户豁免(顶层 apiKey 只镜像 active,按 profiles 判)
+    const withKey = {
+      ...fresh,
+      settings: {
+        ...initial.settings,
+        profiles: initial.settings.profiles.map((p, i) =>
+          i === 0 ? { ...p, apiKey: 'sk-test' } : p,
+        ),
+      },
+    }
+    expect(shouldAutoStartTour(withKey)).toBe('exempt')
+
+    // 已有任务 → 老用户豁免
+    expect(shouldAutoStartTour({ ...fresh, tasks: [task()] })).toBe('exempt')
+
+    // 弹窗互斥:确认框/设置/命令面板打开 → none(不豁免,下次再判)
+    expect(
+      shouldAutoStartTour({
+        ...fresh,
+        confirmDialog: { title: 't', message: 'm', action: () => undefined },
+      }),
+    ).toBe('none')
+    expect(shouldAutoStartTour({ ...fresh, showSettings: true })).toBe('none')
+    expect(shouldAutoStartTour({ ...fresh, showCommandPalette: true })).toBe('none')
   })
 })

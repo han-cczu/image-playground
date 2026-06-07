@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { initStore } from './store'
 import { useStore } from './store'
 import { normalizeSettings, switchApiProfileProvider } from './lib/api/apiProfiles'
+import { maybeStartTour } from './lib/tour/autoStart'
 import { readUrlBootstrap } from './lib/urlBootstrap'
 import { filterAndSortTasks } from './lib/taskFilters'
 import Header from './components/Header'
@@ -24,6 +25,7 @@ import CommandPalette from './components/CommandPalette'
 import CompareModal from './components/CompareModal'
 import ErrorBoundary from './components/ErrorBoundary'
 import InsecureContextBanner from './components/InsecureContextBanner'
+import TourOverlay from './components/TourOverlay'
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
@@ -101,7 +103,10 @@ export default function App() {
     if (Object.keys(nextSettings).length) setSettings(nextSettings)
     if (bootstrap.changed) window.history.replaceState(null, '', bootstrap.cleanUrl)
 
-    initStore()
+    // 新手引导自动触发挂在 initStore 之后:老用户判定需要 tasks(IDB 异步)就位。
+    // finally:即使 IDB 初始化失败引导也照常评估(profiles key 判定仍兜底),
+    // 且不吞 initStore 的 rejection(与原 fire-and-forget 错误语义一致)
+    void initStore().finally(() => maybeStartTour())
   }, [setSettings])
 
   useEffect(() => {
@@ -122,8 +127,9 @@ export default function App() {
         e.preventDefault()
         const state = useStore.getState()
         // ConfirmDialog(z-110)在面板(z-105)之上：此时打开面板会被遮罩盖住却抢走焦点，
-        // 用户看着确认框、键盘却困在不可见面板里——确认框打开期间不响应
-        if (state.confirmDialog) return
+        // 用户看着确认框、键盘却困在不可见面板里——确认框打开期间不响应。
+        // 新手引导(z-130)同理:捕获层只吞指针不吞键盘,面板会开在遮罩下偷走焦点
+        if (state.confirmDialog || state.tourActive) return
         state.setShowCommandPalette(!state.showCommandPalette)
       }
     }
@@ -218,6 +224,9 @@ export default function App() {
       </ErrorBoundary>
       <ErrorBoundary region="modal">
         <CompareModal />
+      </ErrorBoundary>
+      <ErrorBoundary region="modal">
+        <TourOverlay />
       </ErrorBoundary>
     </>
   )

@@ -38,6 +38,11 @@ export function mergePersistedStoreState(
     sidebarCollapsed: persisted?.sidebarCollapsed === true,
     dismissedInsecureContextBanner: persisted?.dismissedInsecureContextBanner === true,
     dismissedPlaintextKeyNotice: persisted?.dismissedPlaintextKeyNotice === true,
+    hasSeenTour: persisted?.hasSeenTour === true,
+    // 瞬态字段显式复位:...persisted 整体展开的是磁盘原始对象,手工塞入的键不受 partialize 白名单约束
+    tourActive: false,
+    tourStep: 0,
+    mobileInputCollapsed: false,
     // 旧用户持久化数据没有 galleryView 字段；显式 normalize 为 boolean，避免 undefined 渗透到组件
     galleryView: persisted?.galleryView === true,
   }
@@ -59,5 +64,6 @@ export function partialize(state: AppState) {
     dismissedInsecureContextBanner: state.dismissedInsecureContextBanner,
     dismissedPlaintextKeyNotice: state.dismissedPlaintextKeyNotice,
     galleryView: state.galleryView,
+    hasSeenTour: state.hasSeenTour,
   }
 }

@@ -15,6 +15,21 @@ export interface UiSlice {
   dismissedPlaintextKeyNotice: boolean
   setDismissedPlaintextKeyNotice: (v: boolean) => void
 
+  // 新手引导(聚光灯分步导览)
+  /** 引导进行中;瞬态不持久化 */
+  tourActive: boolean
+  setTourActive: (v: boolean) => void
+  /** 当前步下标(指向 buildTourSteps 过滤后的数组);瞬态不持久化 */
+  tourStep: number
+  setTourStep: (step: number) => void
+  /** 已看过/跳过引导(自动触发只认它);持久化 */
+  hasSeenTour: boolean
+  setHasSeenTour: (v: boolean) => void
+
+  /** InputBar 移动端折叠态;提升入 store 使引导(进阶 pill 步)可驱动展开。瞬态不持久化 */
+  mobileInputCollapsed: boolean
+  setMobileInputCollapsed: (v: boolean) => void
+
   // 图库视图：跨对话查看全部 task
   galleryView: boolean
   setGalleryView: (view: boolean) => void
@@ -77,6 +92,17 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   dismissedPlaintextKeyNotice: false,
   setDismissedPlaintextKeyNotice: (dismissedPlaintextKeyNotice) =>
     set({ dismissedPlaintextKeyNotice }),
+
+  // 新手引导
+  tourActive: false,
+  setTourActive: (tourActive) => set({ tourActive }),
+  tourStep: 0,
+  setTourStep: (tourStep) => set({ tourStep }),
+  hasSeenTour: false,
+  setHasSeenTour: (hasSeenTour) => set({ hasSeenTour }),
+
+  mobileInputCollapsed: false,
+  setMobileInputCollapsed: (mobileInputCollapsed) => set({ mobileInputCollapsed }),
 
   // Gallery view
   galleryView: false,

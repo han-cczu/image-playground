@@ -1,11 +1,19 @@
-import { useState, useRef, useEffect, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useRef, useEffect, type Dispatch, type SetStateAction } from 'react'
+import { useStore } from '../../../store'
 
 export function useMobileGestures(): {
   mobileCollapsed: boolean
   setMobileCollapsed: Dispatch<SetStateAction<boolean>>
   dragHandleRef: React.RefObject<HTMLDivElement | null>
 } {
-  const [mobileCollapsed, setMobileCollapsed] = useState(false)
+  // 折叠态存 ui slice(瞬态):新手引导的「进阶 pill」步需要在组件外驱动展开
+  const mobileCollapsed = useStore((s) => s.mobileInputCollapsed)
+  const setMobileCollapsed = useCallback<Dispatch<SetStateAction<boolean>>>((action) => {
+    const state = useStore.getState()
+    state.setMobileInputCollapsed(
+      typeof action === 'function' ? action(state.mobileInputCollapsed) : action,
+    )
+  }, [])
   const dragHandleRef = useRef<HTMLDivElement>(null)
   const dragTouchRef = useRef({ startY: 0, moved: false })
 
@@ -35,7 +43,7 @@ export function useMobileGestures(): {
       el.removeEventListener('touchmove', onTouchMove)
       el.removeEventListener('touchend', onTouchEnd)
     }
-  }, [])
+  }, [setMobileCollapsed])
 
   return { mobileCollapsed, setMobileCollapsed, dragHandleRef }
 }
