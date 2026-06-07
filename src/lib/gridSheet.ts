@@ -83,12 +83,20 @@ function wrapText(
 /**
  * 计算不超出 SHEET_MAX_EDGE 的格子尺寸(≤ SHEET_CELL_SIZE):大矩阵按列/行数收缩;
  * 收缩到 SHEET_MIN_CELL_SIZE 仍超限返回 null(调用方给明确文案,不让 toBlob 静默 null)。
- * 注:高度上限按无笔记估算;笔记区最多 4 行(~124px),已被余量(16384-16000)覆盖。
+ * 有笔记时高度预算按笔记区上限(SHEET_NOTE_MAX_LINES 行)预留,不依赖 16384-16000 的隐式余量——
+ * 否则调大行高/行数常量后,带笔记的极限网格会静默超 canvas 上限,toBlob 返回 null。
  */
-export function computeSafeCellSize(cols: number, rows: number, hasY: boolean): number | null {
+export function computeSafeCellSize(
+  cols: number,
+  rows: number,
+  hasY: boolean,
+  hasNote = false,
+): number | null {
   const overheadW =
     SHEET_PADDING * 2 + (hasY ? SHEET_ROW_HEADER_W + SHEET_GAP : 0) + (cols - 1) * SHEET_GAP
-  const overheadH = SHEET_PADDING * 2 + SHEET_COL_HEADER_H + SHEET_GAP + (rows - 1) * SHEET_GAP
+  const noteOverhead = hasNote ? SHEET_NOTE_MAX_LINES * SHEET_NOTE_LINE_H + SHEET_GAP : 0
+  const overheadH =
+    SHEET_PADDING * 2 + noteOverhead + SHEET_COL_HEADER_H + SHEET_GAP + (rows - 1) * SHEET_GAP
   const maxByWidth = Math.floor((SHEET_MAX_EDGE - overheadW) / cols)
   const maxByHeight = Math.floor((SHEET_MAX_EDGE - overheadH) / rows)
   const cellSize = Math.min(SHEET_CELL_SIZE, maxByWidth, maxByHeight)
@@ -179,4 +187,16 @@ export function normalizeBatchNotes(value: unknown, now = Date.now()): Record<st
   return Object.fromEntries(
     entries.sort((a, b) => b[1].updatedAt - a[1].updatedAt).slice(0, MAX_BATCH_NOTES),
   )
+}
+
+/**
+ * 导入合并:本地同 batchId 优先,备份只追加新 id;合并结果重过 normalizeBatchNotes
+ * 截断回 MAX_BATCH_NOTES(语义对齐 mergeSnippets/mergeFavoriteCategories——
+ * 两侧各自 ≤ 上限不代表并集 ≤ 上限,不重截会绕过配额防线)。
+ */
+export function mergeBatchNotes(
+  local: Record<string, BatchNote>,
+  imported: Record<string, BatchNote>,
+): Record<string, BatchNote> {
+  return normalizeBatchNotes({ ...imported, ...local })
 }

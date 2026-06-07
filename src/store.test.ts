@@ -15,6 +15,7 @@ import {
   useStore,
 } from './store'
 import { DEFAULT_FAVORITE_CATEGORY_COLOR, DEFAULT_FAVORITE_CATEGORY_ID } from './lib/favoriteCategories'
+import { MAX_BATCH_NOTES } from './lib/gridSheet'
 
 vi.mock('./lib/db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./lib/db')>()
@@ -863,6 +864,19 @@ describe('batch note store actions', () => {
 
     useStore.getState().setBatchNote('b2', 'x'.repeat(600))
     expect(useStore.getState().batchNotes.b2.text).toHaveLength(500)
+  })
+
+  it('caps live notes at MAX_BATCH_NOTES on write, evicting the oldest (审查修复:写入路径绕过上限)', () => {
+    useStore.setState({
+      batchNotes: Object.fromEntries(
+        Array.from({ length: MAX_BATCH_NOTES }, (_, i) => [`b${i}`, { text: 'x', updatedAt: i + 1 }]),
+      ),
+    })
+    useStore.getState().setBatchNote('overflow', '新笔记')
+    const notes = useStore.getState().batchNotes
+    expect(Object.keys(notes)).toHaveLength(MAX_BATCH_NOTES)
+    expect(notes.overflow.text).toBe('新笔记') // 新条目 updatedAt 最新,必被保留
+    expect(notes.b0).toBeUndefined() // updatedAt 最旧的被挤出
   })
 
   it('normalizes batchNotes through persisted-state merge', () => {

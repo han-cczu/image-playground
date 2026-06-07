@@ -27,7 +27,7 @@ import {
   MAX_SNIPPETS,
   normalizeSnippets,
 } from '../../lib/promptSnippets'
-import { MAX_BATCH_NOTE_LEN, type BatchNote } from '../../lib/gridSheet'
+import { MAX_BATCH_NOTE_LEN, normalizeBatchNotes, type BatchNote } from '../../lib/gridSheet'
 import {
   deleteConversation as dbDeleteConversation,
   putConversation,
@@ -359,7 +359,14 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
         delete next[batchId]
         return { batchNotes: next }
       }
-      return { batchNotes: { ...s.batchNotes, [batchId]: { text: trimmed, updatedAt: Date.now() } } }
+      // 写入路径同样过 normalize 截断条数:cap 只在读取/合并时生效的话,
+      // live map 可超 MAX_BATCH_NOTES 直到下次 reload 才被裁(新条目 updatedAt 最新,必被保留)
+      return {
+        batchNotes: normalizeBatchNotes({
+          ...s.batchNotes,
+          [batchId]: { text: trimmed, updatedAt: Date.now() },
+        }),
+      }
     }),
 
   // Conversations

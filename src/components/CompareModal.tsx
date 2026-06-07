@@ -8,10 +8,19 @@ import type { TaskRecord } from '../types'
 
 const COLUMN_LETTERS = ['A', 'B', 'C', 'D']
 
-/** 列头副标题：网格坐标优先，否则创建时间 */
+/**
+ * 列头副标题：网格坐标优先，否则创建时间。
+ * 坐标存的是 GridAxisValue.key（稳定键），展示用成员自带的 gridAxes 反查 label——
+ * 与矩阵 UI 同源；不反查的话 size 轴显示档位简写、无风格 cell 的 key 是 '' 直接渲染成空白。
+ * 注意 y === ''（Y 轴的空键取值）≠ y === undefined（无 Y 轴），不能用 truthy 判断。
+ */
 function columnSubtitle(task: TaskRecord): string {
-  if (task.gridCoord) {
-    return task.gridCoord.y ? `${task.gridCoord.x} × ${task.gridCoord.y}` : task.gridCoord.x
+  const coord = task.gridCoord
+  if (coord) {
+    const axisLabel = (axis: 'x' | 'y', key: string) =>
+      task.gridAxes?.[axis]?.values.find((v) => v.key === key)?.label || key || '—'
+    const xLabel = axisLabel('x', coord.x)
+    return coord.y === undefined ? xLabel : `${xLabel} × ${axisLabel('y', coord.y)}`
   }
   return `创建于 ${new Date(task.createdAt).toLocaleTimeString('zh-CN', { hour12: false })}`
 }
@@ -171,9 +180,10 @@ function ComparePanel({ compareTasks, close }: { compareTasks: TaskRecord[]; clo
                   )}
                   {outputs.length > 1 && (
                     <div className="flex items-center justify-center gap-1.5">
+                      {/* key 带下标:输出图 id 是内容寻址哈希,同批两张字节相同的图会撞 id */}
                       {outputs.map((id, i) => (
                         <button
-                          key={id}
+                          key={`${id}-${i}`}
                           type="button"
                           onClick={() => setImageIndexById((prev) => ({ ...prev, [task.id]: i }))}
                           aria-label={`第 ${COLUMN_LETTERS[columnIndex]} 列第 ${i + 1} 张`}
