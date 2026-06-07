@@ -46,6 +46,16 @@ import { SORT_STEP, SORT_EPSILON, computeReorderedSortOrders } from './taskSort'
 
 const syncHttpWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const taskAbortControllers = new Map<string, AbortController>()
+
+/**
+ * 仅测试用:清空模块级运行期 Map。永挂的 callImageApi mock 会让 executeTask 阻塞在 await、
+ * 永不进 finally 清理,controller/watchdog 条目跨用例残留——cancelBatch 的 has() 计数会被污染。
+ */
+export function resetTaskRuntimeForTest(): void {
+  for (const timer of syncHttpWatchdogTimers.values()) clearTimeout(timer)
+  syncHttpWatchdogTimers.clear()
+  taskAbortControllers.clear()
+}
 const SYNC_HTTP_INTERRUPTED_ERROR = '请求中断'
 const TASK_CANCELLED_ERROR = '已取消生成'
 
@@ -172,6 +182,44 @@ export function cancelTask(taskId: string, now = Date.now()): boolean {
     elapsed: Math.max(0, now - task.createdAt),
   })
   return true
+}
+
+export interface CancelBatchResult {
+  /** 在途被中止(已注册 AbortController,请求被 abort) */
+  aborted: number
+  /** 排队被跳过(尚未被并发闸取出,翻 error 后由 executeTask 入口守卫拦截,不发请求) */
+  skipped: number
+}
+
+/** 按谓词圈定 running 成员逐条 cancelTask(语义单点:中止/清理/落态全继承,自带幂等)。 */
+function cancelRunningTasks(predicate: (task: TaskRecord) => boolean): CancelBatchResult {
+  const members = useStore.getState().tasks.filter((t) => t.status === 'running' && predicate(t))
+  const result: CancelBatchResult = { aborted: 0, skipped: 0 }
+  for (const member of members) {
+    // 在途/排队的区分仅用于反馈文案:controller 只在 executeTask 进入时注册,
+    // 依赖「所有在途任务必有条目」——ApiProvider 全集 openai|gemini 均走注册分支(executeTask 入口)
+    const inFlight = taskAbortControllers.has(member.id)
+    if (cancelTask(member.id)) {
+      if (inFlight) result.aborted += 1
+      else result.skipped += 1
+    }
+  }
+  // React 19 自动批处理:同一事件流内逐条 setTasks 合并为一次渲染,无需批量 patch
+  return result
+}
+
+/**
+ * 取消整个批次:在途成员 abort 请求,排队成员翻态后被 executeTask 入口守卫跳过。
+ * 口径 = 取消时刻该 batchId 下全部 running 成员(含正在补跑的格);取消落 error+取消文案,
+ * 仍可被「补跑全部失败格」复活(取消=失败的一种,补跑语义保持可预测)。
+ */
+export function cancelBatch(batchId: string): CancelBatchResult {
+  return cancelRunningTasks((t) => t.batchId === batchId)
+}
+
+/** 取消全部在途任务(不限批次,含无 batchId 单条):429 急停 / 命令面板入口。 */
+export function cancelAllRunning(): CancelBatchResult {
+  return cancelRunningTasks(() => true)
 }
 
 export function scheduleSyncHttpWatchdog(taskId: string, timeoutSeconds: number) {
@@ -442,15 +490,15 @@ async function enqueueTask(spec: EnqueueTaskSpec): Promise<string | null> {
   return taskId
 }
 
-/** 批量执行的并发上限:批量场景叠加 callImageApi 内部多图拆单会相乘,保守取值避免触发上游 429。 */
-const BATCH_CONCURRENCY = 3
-
 /**
  * 以并发上限调度一批已落库 task 的 executeTask。每个 task 的成功/失败/取消已由 executeTask
  * 内部完整收口（落 done/error 态、watchdog、孤儿回滚），故调度器不让单个失败中断整批、也不抛错。
+ * 并发上限默认读 settings.batchConcurrency(normalizeSettings 已 clamp 到 1~6,读取处信任);
+ * mapWithConcurrency 开闸即固定 worker 数,改设置仅对新批次生效。
  */
-async function runEnqueuedTasks(taskIds: string[], limit = BATCH_CONCURRENCY): Promise<void> {
-  await mapWithConcurrency(taskIds, limit, (id) => executeTask(id))
+async function runEnqueuedTasks(taskIds: string[], limit?: number): Promise<void> {
+  const effective = limit ?? useStore.getState().settings.batchConcurrency
+  await mapWithConcurrency(taskIds, effective, (id) => executeTask(id))
 }
 
 interface PreparedSubmission {
@@ -800,6 +848,10 @@ async function executeTask(taskId: string) {
   const { settings } = useStore.getState()
   const task = useStore.getState().tasks.find((t) => t.id === taskId)
   if (!task) return
+  // 状态守卫(批次取消的「排队跳过」机制):排队成员被 cancelBatch 翻 error 后,并发闸 worker
+  // 取出时在建 controller / 起 watchdog / 发请求之前直接早退,不空打配额。
+  // 安全性:enqueueTask 恒写 'running',所有新建/补跑路径取出执行瞬间必是 running,不误伤。
+  if (task.status !== 'running') return
   const activeProfile = getActiveApiProfile(settings)
   const taskProvider = task.apiProvider ?? activeProfile.provider
 

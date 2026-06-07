@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from 'react'
 import type { TaskRecord } from '../types'
-import { useStore, reuseConfig, editOutputs, retryGridCell, retryGridMissing } from '../store'
+import { useStore, reuseConfig, editOutputs, retryGridCell, retryGridMissing, cancelBatch } from '../store'
 import { reconstructMatrix, getGridAxisDef } from '../lib/gridExperiment'
 import { MAX_BATCH_NOTE_LEN, pickCellRepresentative } from '../lib/gridSheet'
 import { exportGridSheet } from '../lib/gridSheetRender'
@@ -25,6 +25,7 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
   const batchNote = useStore((s) => s.batchNotes[batchId])
   const setBatchNote = useStore((s) => s.setBatchNote)
   const showToast = useStore((s) => s.showToast)
+  const setConfirmDialog = useStore((s) => s.setConfirmDialog)
 
   const [editingNote, setEditingNote] = useState(false)
   const [noteDraft, setNoteDraft] = useState('')
@@ -74,6 +75,27 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
         showToast(`导出失败：${err instanceof Error ? err.message : String(err)}`, 'error')
       })
       .finally(() => setExporting(false))
+  }
+
+  // 批内是否有在途成员:遍历成员而非格代表(进度统计按格,取消按条)
+  const runningCount = tasks.filter((t) => t.status === 'running').length
+  const handleCancelBatch = () => {
+    setConfirmDialog({
+      title: '取消整批生成?',
+      message: `将取消 ${runningCount} 条进行中的任务(含排队未发出的),已发请求会被丢弃。取消的格仍可用「补跑全部失败格」重新触发。`,
+      confirmText: '取消整批',
+      // danger:确认主按钮红色——'warning' 映射橙色,与「补跑全部失败格」(amber)同色族,会抹掉红/橙语义分区
+      tone: 'danger',
+      action: () => {
+        // 实时返回兜住弹窗到确认之间的状态漂移:期间成员可能已全部自然完成
+        const { aborted, skipped } = cancelBatch(batchId)
+        if (aborted + skipped === 0) {
+          showToast('该批次已全部完成,无可取消任务', 'info')
+        } else {
+          showToast(`已取消 ${aborted + skipped} 条:中止 ${aborted} 条在途、跳过 ${skipped} 条排队`, 'success')
+        }
+      },
+    })
   }
 
   const startEditNote = () => {
@@ -154,6 +176,16 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
               className="rounded-lg bg-amber-50 px-2.5 py-1 text-xs text-amber-600 transition hover:bg-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:hover:bg-amber-500/20"
             >
               补跑全部失败格
+            </button>
+          )}
+          {runningCount > 0 && (
+            <button
+              type="button"
+              onClick={handleCancelBatch}
+              className="rounded-lg bg-red-50 px-2.5 py-1 text-xs text-red-600 transition hover:bg-red-100 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20"
+              title="中止在途请求并跳过排队任务,取消的格可补跑"
+            >
+              取消批次
             </button>
           )}
         </div>

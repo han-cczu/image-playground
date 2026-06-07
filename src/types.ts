@@ -73,6 +73,8 @@ export interface AppSettings {
   codexCli: boolean
   apiProxy: boolean
   clearInputAfterSubmit: boolean
+  /** 批量调度并发上限(1~6,默认 3);全局顶层标量,只作用于 runEnqueuedTasks 批量路径 */
+  batchConcurrency: number
   theme: 'light' | 'dark' | 'system'
   profiles: ApiProfile[]
   activeProfileId: string

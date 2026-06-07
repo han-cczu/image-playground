@@ -1,5 +1,6 @@
 import type { AppState } from '../store'
 import { exportData } from './exportImport'
+import { cancelAllRunning } from './taskRuntime'
 
 /** 命令分组（也是面板里的展示顺序） */
 export type CommandGroup = 'navigation' | 'conversation' | 'snippet' | 'provider' | 'theme' | 'action'
@@ -54,7 +55,11 @@ export type CommandStore = Pick<
   | 'prompt'
   | 'setPrompt'
   | 'snippets'
->
+  | 'showToast'
+> & {
+  /** 是否存在在途任务。收窄为布尔:面板打开期间 tasks 数组高频变化,全量订阅会每次重建命令列表 */
+  hasRunningTasks: boolean
+}
 
 export interface CommandCtx {
   store: CommandStore
@@ -193,6 +198,23 @@ export function buildCommands(ctx: CommandCtx): Command[] {
       close()
     },
   })
+  // 仅存在在途任务时出现:429 急停 / 通配批散卡免多选的全局取消口径
+  if (store.hasRunningTasks) {
+    commands.push({
+      id: 'action:cancel-running',
+      title: '取消所有在途任务',
+      group: 'action',
+      keywords: 'cancel stop abort running quxiao zhongzhi',
+      run: () => {
+        const { aborted, skipped } = cancelAllRunning()
+        store.showToast(
+          `已取消 ${aborted + skipped} 条:中止 ${aborted} 条在途、跳过 ${skipped} 条排队`,
+          'success',
+        )
+        close()
+      },
+    })
+  }
 
   return commands
 }

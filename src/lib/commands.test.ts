@@ -4,8 +4,12 @@ import { buildCommands, COMMAND_GROUP_ORDER, type CommandCtx, type CommandStore 
 vi.mock('./exportImport', () => ({
   exportData: vi.fn().mockResolvedValue(undefined),
 }))
+vi.mock('./taskRuntime', () => ({
+  cancelAllRunning: vi.fn(() => ({ aborted: 1, skipped: 2 })),
+}))
 
 import { exportData } from './exportImport'
+import { cancelAllRunning } from './taskRuntime'
 
 function makeStore(overrides: Partial<CommandStore> = {}): CommandStore {
   return {
@@ -26,6 +30,8 @@ function makeStore(overrides: Partial<CommandStore> = {}): CommandStore {
     prompt: '',
     setPrompt: vi.fn(),
     snippets: [],
+    hasRunningTasks: false,
+    showToast: vi.fn(),
     ...overrides,
   }
 }
@@ -192,6 +198,25 @@ describe('buildCommands', () => {
       const ctx = makeCtx()
       buildCommands(ctx).find((c) => c.id === 'action:export')!.run()
       expect(exportData).toHaveBeenCalledTimes(1)
+      expect(ctx.close).toHaveBeenCalledTimes(1)
+    })
+
+    it('action:cancel-running appears only with running tasks and reports counts', () => {
+      // 无在途任务:命令不出现
+      expect(
+        buildCommands(makeCtx()).find((c) => c.id === 'action:cancel-running'),
+      ).toBeUndefined()
+
+      // 有在途任务:命令出现,run 调 cancelAllRunning 并 toast 细分计数
+      const ctx = makeCtx({ hasRunningTasks: true })
+      const cmd = buildCommands(ctx).find((c) => c.id === 'action:cancel-running')!
+      expect(cmd.group).toBe('action')
+      cmd.run()
+      expect(cancelAllRunning).toHaveBeenCalledTimes(1)
+      expect(ctx.store.showToast).toHaveBeenCalledWith(
+        '已取消 3 条:中止 1 条在途、跳过 2 条排队',
+        'success',
+      )
       expect(ctx.close).toHaveBeenCalledTimes(1)
     })
   })
