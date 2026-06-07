@@ -80,6 +80,17 @@ export default function InputBar() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const imagesRef = useRef<HTMLDivElement>(null)
+  /** textarea 是否被聚焦过:未聚焦时 selectionStart 恒为 0(Chrome),不能当光标位用 */
+  const textareaTouchedRef = useRef(false)
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    const markTouched = () => {
+      textareaTouchedRef.current = true
+    }
+    el.addEventListener('focus', markTouched)
+    return () => el.removeEventListener('focus', markTouched)
+  }, [])
 
   const [submitHover, setSubmitHover] = useState(false)
   const [showSizePicker, setShowSizePicker] = useState(false)
@@ -220,13 +231,16 @@ export default function InputBar() {
     }
   }
 
-  /** 片段插入：基于 textarea 光标位（失焦后浏览器保留 selectionStart），插入后恢复焦点与光标 */
+  /**
+   * 片段插入：基于 textarea 光标位（失焦后浏览器保留 selectionStart），插入后恢复焦点与光标。
+   * 从未聚焦过时 selectionStart 是 0 而非 null（?? 兜不住），靠 touched 标记落到「追加到末尾」。
+   */
   const handleInsertSnippet = (content: string) => {
-    const el = textareaRef.current
+    const el = textareaTouchedRef.current ? textareaRef.current : null
     const { next, caret } = insertAtCursor(
       prompt,
-      el?.selectionStart ?? prompt.length,
-      el?.selectionEnd ?? prompt.length,
+      el ? el.selectionStart : prompt.length,
+      el ? el.selectionEnd : prompt.length,
       content,
     )
     setPrompt(next)

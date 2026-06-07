@@ -42,21 +42,24 @@ export default function SnippetPopover({ anchorRef, onClose, onInsert }: Props) 
   const [query, setQuery] = useState('')
   const [edit, setEdit] = useState<EditState | null>(null)
 
-  /** Esc 关闭、点击外部关闭（编辑态下 Esc 先退回列表） */
+  /** Esc 关闭、点击外部关闭（编辑态下 Esc 先退回列表）。依赖布尔态而非 edit 对象,编辑表单逐键输入不重挂监听 */
+  const inEdit = edit !== null
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        setEdit((current) => {
-          if (current) return null
-          onClose()
-          return current
-        })
-      }
+      if (e.key !== 'Escape') return
+      // IME 组字中按 Esc 是取消候选词,留给输入法处理(对齐 useCloseOnEscape 的守卫)
+      if (e.isComposing || e.keyCode === 229) return
+      // 删除确认弹窗打开时把 Esc 让给它(其 useCloseOnEscape 在 window 层,会被这里的 stopPropagation 挡掉)
+      if (useStore.getState().confirmDialog) return
+      e.stopPropagation()
+      if (inEdit) setEdit(null)
+      else onClose()
     }
     const onPointer = (e: MouseEvent) => {
       const target = e.target as Node | null
       if (!target) return
+      // 删除确认弹窗(渲染在 App 根、popover DOM 之外)打开时不算外部点击:点「取消」不应顺带关掉 popover
+      if (useStore.getState().confirmDialog) return
       if (popoverRef.current?.contains(target)) return
       if (anchorRef.current?.contains(target)) return
       onClose()
@@ -67,7 +70,7 @@ export default function SnippetPopover({ anchorRef, onClose, onInsert }: Props) 
       document.removeEventListener('keydown', onKey)
       document.removeEventListener('mousedown', onPointer)
     }
-  }, [anchorRef, onClose])
+  }, [anchorRef, onClose, inEdit])
 
   /** fuzzy 过滤排序：空 query 按 sortOrder（store 已保证有序），命中按得分降序 */
   const filtered = useMemo(() => {

@@ -5,6 +5,7 @@ import {
   computeSafeCellSize,
   computeSheetLayout,
   pickCellRepresentative,
+  SHEET_NOTE_LINE_H,
   type SheetRect,
 } from './gridSheet'
 
@@ -37,7 +38,7 @@ function drawContainedImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement
   ctx.drawImage(img, rect.x + (rect.w - w) / 2, rect.y + (rect.h - h) / 2, w, h)
 }
 
-/** blob URL → HTMLImageElement;加载失败返回 null(单格失败不中断整图) */
+/** data URL → HTMLImageElement;加载失败返回 null(单格失败不中断整图) */
 function loadImage(url: string | null): Promise<HTMLImageElement | null> {
   if (!url) return Promise.resolve(null)
   return new Promise((resolve) => {
@@ -64,7 +65,7 @@ export async function exportGridSheet(args: {
 
   // 浏览器 canvas 单边上限 ~16384px:大矩阵收缩格子尺寸;收缩到下限仍超限给明确文案
   // (否则 toBlob 静默返回 null,用户只看到一句没有原因的「生成 PNG 失败」)
-  const cellSize = computeSafeCellSize(cols.length, rows.length, hasY)
+  const cellSize = computeSafeCellSize(cols.length, rows.length, hasY, Boolean(args.note?.trim()))
   if (cellSize === null) {
     throw new Error(`网格过大(${cols.length}×${rows.length}),超出浏览器画布上限,无法导出`)
   }
@@ -119,7 +120,7 @@ export async function exportGridSheet(args: {
     ctx.textAlign = 'left'
     ctx.textBaseline = 'middle'
     layout.noteLines.forEach((line, i) => {
-      ctx.fillText(line, layout.noteRect!.x, layout.noteRect!.y + (i + 0.5) * 28)
+      ctx.fillText(line, layout.noteRect!.x, layout.noteRect!.y + (i + 0.5) * SHEET_NOTE_LINE_H)
     })
   }
 

@@ -45,6 +45,38 @@ describe('buildCompareRows', () => {
     ])
   })
 
+  it('adds a 模型 row when any column has source info; legacy tasks omit it (审查修复:仅模型不同零高亮)', () => {
+    const rows = buildCompareRows([
+      makeTask({ apiProvider: 'openai', apiProfileName: 'A', apiModel: 'gpt-image-1' }),
+      makeTask({ id: 'task-2', apiProvider: 'gemini', apiProfileName: 'B', apiModel: 'gemini-image' }),
+    ])
+    const source = rows.find((r) => r.key === 'source')!
+    expect(source.values).toEqual(['OpenAI · A · gpt-image-1', 'Gemini · B · gemini-image'])
+    expect(source.differs).toBe(true)
+    // 行序:模型紧随风格之后
+    expect(rows.map((r) => r.key)).toEqual([
+      'prompt', 'style', 'source', 'size', 'quality', 'output_format', 'moderation', 'n', 'elapsed',
+    ])
+    // 单列有来源信息也出行,缺失列兜底「未知」
+    const partial = buildCompareRows([
+      makeTask({ apiModel: 'gpt-image-1' }),
+      makeTask({ id: 'task-2' }),
+    ])
+    expect(partial.find((r) => r.key === 'source')!.values).toEqual([
+      '未知 · 未知 · gpt-image-1', '未知 · 未知 · 未知',
+    ])
+  })
+
+  it('renders — for png columns in the compression row instead of literal "null" (审查修复)', () => {
+    const rows = buildCompareRows([
+      makeTask(), // png:output_compression 为 null
+      makeTask({ id: 'task-2', params: { ...DEFAULT_PARAMS, output_format: 'jpeg', output_compression: 80 } }),
+    ])
+    const compression = rows.find((r) => r.key === 'output_compression')!
+    expect(compression.values).toEqual(['—', '80'])
+    expect(compression.differs).toBe(true)
+  })
+
   it('flags differs only for rows whose values are not all the same', () => {
     const rows = buildCompareRows([
       makeTask({ prompt: 'a cat' }),

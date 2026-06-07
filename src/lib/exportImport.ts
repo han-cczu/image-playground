@@ -5,7 +5,7 @@ import { useStore } from '../store'
 import { mergeImportedSettings, DEFAULT_SETTINGS, normalizeSettings } from './api/apiProfiles'
 import { createDefaultFavoriteCategory, mergeFavoriteCategories, normalizeFavoriteCategories } from './favoriteCategories'
 import { mergeSnippets, normalizeSnippets } from './promptSnippets'
-import { normalizeBatchNotes } from './gridSheet'
+import { mergeBatchNotes, normalizeBatchNotes } from './gridSheet'
 import {
   getAllTasks,
   putTask,
@@ -318,7 +318,7 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
       useStore.setState({ batchNotes: importedBatchNotes })
     } else if (Object.keys(importedBatchNotes).length) {
       const localNotes = useStore.getState().batchNotes
-      useStore.setState({ batchNotes: { ...importedBatchNotes, ...localNotes } })
+      useStore.setState({ batchNotes: mergeBatchNotes(localNotes, importedBatchNotes) })
     }
 
     /*

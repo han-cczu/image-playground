@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import type { TaskRecord } from '../types'
 import { useStore, reuseConfig, editOutputs, retryGridCell, retryGridMissing } from '../store'
 import { reconstructMatrix, getGridAxisDef } from '../lib/gridExperiment'
@@ -30,17 +30,40 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
   const [noteDraft, setNoteDraft] = useState('')
   const [exporting, setExporting] = useState(false)
 
-  const matrix = reconstructMatrix(tasks)
+  const matrix = useMemo(() => reconstructMatrix(tasks), [tasks])
+
+  /**
+   * 逐格代表 task(同格多 task 取最新,与导出共用 pickCellRepresentative 判定):
+   * 一次 O(成员数) 分组建表,进度统计与渲染循环共查——原先每格调 cellTasks(filter 全量成员),
+   * 两个 cols×rows 循环下是 O(格数²),且本组件订阅 selectedTaskIds,每次框选/Ctrl 点选都全量重算。
+   * 复合键以 NUL 分隔:prompt 轴的 key 是提示词原文,可含空格等任意可见字符,普通分隔符会撞键。
+   */
+  const repByCell = useMemo(() => {
+    const groups = new Map<string, TaskRecord[]>()
+    for (const t of tasks) {
+      if (!t.gridCoord) continue
+      const key = `${t.gridCoord.x}\u0000${t.gridCoord.y ?? ''}`
+      const group = groups.get(key)
+      if (group) group.push(t)
+      else groups.set(key, [t])
+    }
+    const map = new Map<string, TaskRecord>()
+    for (const [key, group] of groups) {
+      const rep = pickCellRepresentative(group)
+      if (rep) map.set(key, rep)
+    }
+    return map
+  }, [tasks])
+
   if (!matrix) return null
-  const { axes, cols, rows, cellTasks } = matrix
+  const { axes, cols, rows } = matrix
   const hasY = Boolean(axes.y)
 
   const xLabel = getGridAxisDef(axes.x.kind)?.label ?? axes.x.kind
   const yLabel = axes.y ? (getGridAxisDef(axes.y.kind)?.label ?? axes.y.kind) : null
 
-  /** 同格多 task 取最新为代表(补跑会保留旧 task,故每格可能压多条);与导出共用同一判定 */
   const repTask = (colKey: string, rowKey: string): TaskRecord | null =>
-    pickCellRepresentative(cellTasks(colKey, rowKey))
+    repByCell.get(`${colKey}\u0000${rowKey}`) ?? null
 
   const handleExport = () => {
     if (exporting) return
