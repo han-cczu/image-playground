@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import type { TaskRecord } from '../../types'
-import { clearTaskFavorite, removeMultipleTasks, setTaskFavoriteCategory, useStore } from '../../store'
+import { cancelTask, clearTaskFavorite, removeMultipleTasks, setTaskFavoriteCategory, useStore } from '../../store'
 import FavoriteCategoryMenu from '../FavoriteCategoryMenu'
 
 interface Props {
@@ -80,6 +80,30 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
   const allSelectedFavorite =
     selectedTaskIds.length > 0 &&
     selectedTaskIds.every((id) => tasks.find((t) => t.id === id)?.isFavorite)
+
+  // 取消生成:选中集里的在途任务(通配批散卡多选取消的入口;取消≠删除,记录保留可重试/补跑)
+  const runningSelected = selectedTaskIds.filter(
+    (id) => tasks.find((t) => t.id === id)?.status === 'running',
+  )
+  const handleCancelRunning = () => {
+    setConfirmDialog({
+      title: '取消生成',
+      message: `确定取消选中的 ${runningSelected.length} 条进行中任务?已发请求会被丢弃,记录保留可重试。`,
+      confirmText: '取消生成',
+      tone: 'danger',
+      action: () => {
+        // cancelTask 自带 status guard:弹窗期间转 done 的成员幂等跳过,计数取实际值
+        let cancelled = 0
+        for (const id of runningSelected) if (cancelTask(id)) cancelled += 1
+        useStore
+          .getState()
+          .showToast(
+            cancelled > 0 ? `已取消 ${cancelled} 条任务` : '选中任务已全部完成,无可取消',
+            cancelled > 0 ? 'success' : 'info',
+          )
+      },
+    })
+  }
 
   // 对比:2~4 条已完成且有输出图的任务
   const canCompare =
@@ -166,6 +190,22 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
             <rect x="13" y="4" width="8" height="16" rx="2" />
           </svg>
         </button>
+        {runningSelected.length > 0 && (
+          <>
+            <div className="w-px h-5 bg-white/20 mx-1"></div>
+            <button
+              onClick={handleCancelRunning}
+              className="p-2 text-red-400 hover:text-red-300 transition-colors"
+              title={`取消生成(${runningSelected.length} 条在途)`}
+              aria-label="取消选中的在途任务"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" />
+                <rect x="9" y="9" width="6" height="6" />
+              </svg>
+            </button>
+          </>
+        )}
         <div className="w-px h-5 bg-white/20 mx-1"></div>
         <button
           onClick={handleDeleteSelected}

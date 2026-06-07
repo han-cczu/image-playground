@@ -93,6 +93,9 @@ function CommandPalettePanel({ close }: { close: () => void }) {
   const prompt = useStore((s) => s.prompt)
   const setPrompt = useStore((s) => s.setPrompt)
   const snippets = useStore((s) => s.snippets)
+  // 布尔 selector:zustand 仅在值翻转时重渲染,避免批量生成期间 tasks 引用高频变化重建命令列表
+  const hasRunningTasks = useStore((s) => s.tasks.some((t) => t.status === 'running'))
+  const showToast = useStore((s) => s.showToast)
 
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
@@ -116,6 +119,8 @@ function CommandPalettePanel({ close }: { close: () => void }) {
           prompt,
           setPrompt,
           snippets,
+          hasRunningTasks,
+          showToast,
         },
         close,
       }),
@@ -133,6 +138,8 @@ function CommandPalettePanel({ close }: { close: () => void }) {
       prompt,
       setPrompt,
       snippets,
+      hasRunningTasks,
+      showToast,
       close,
     ],
   )

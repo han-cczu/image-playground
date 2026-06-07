@@ -21,6 +21,22 @@ export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-image'
 export const DEFAULT_OPENAI_PROFILE_ID = 'default-openai'
 export const DEFAULT_API_TIMEOUT = 600
 
+/**
+ * 批量调度并发上限的取值域。默认沿用原 taskRuntime 写死常量(3):批量场景叠加
+ * callImageApi 内部多图拆单(codexCli && n>1 时各图一个子请求)会相乘,保守默认防上游 429;
+ * 上界 6 在 codexCli n=10 下已达 ~60 子请求,不再上调,UI 文案提示相乘风险。
+ */
+export const BATCH_CONCURRENCY_MIN = 1
+export const BATCH_CONCURRENCY_MAX = 6
+export const DEFAULT_BATCH_CONCURRENCY = 3
+
+/** 整数化 + 双向夹紧,非数兜默认;唯一净化口在 normalizeSettings 白名单(读取处信任不再 clamp) */
+export function clampBatchConcurrency(value: unknown): number {
+  const n = Math.trunc(Number(value))
+  if (!Number.isFinite(n)) return DEFAULT_BATCH_CONCURRENCY
+  return Math.min(BATCH_CONCURRENCY_MAX, Math.max(BATCH_CONCURRENCY_MIN, n))
+}
+
 export const DEFAULT_OPTIMIZER_MODEL = 'gpt-4o-mini'
 export const DEFAULT_OPTIMIZER_TIMEOUT = 60
 export const DEFAULT_OPTIMIZER_PROFILE_ID = 'default-optimizer'
@@ -361,6 +377,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     codexCli: activeAsOpenAI?.codexCli ?? false,
     apiProxy: activeAsOpenAI?.apiProxy ?? false,
     clearInputAfterSubmit: typeof record.clearInputAfterSubmit === 'boolean' ? record.clearInputAfterSubmit : false,
+    batchConcurrency: clampBatchConcurrency(record.batchConcurrency),
     theme: record.theme === 'light' || record.theme === 'dark' || record.theme === 'system' ? record.theme : 'light',
     profiles,
     activeProfileId,
@@ -652,4 +669,5 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   codexCli: false,
   apiProxy: false,
   clearInputAfterSubmit: false,
+  batchConcurrency: DEFAULT_BATCH_CONCURRENCY,
 })

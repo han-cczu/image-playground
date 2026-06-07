@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from './types'
-import { DEFAULT_SETTINGS } from './lib/api/apiProfiles'
+import { DEFAULT_SETTINGS, mergeImportedSettings, normalizeSettings } from './lib/api/apiProfiles'
 import type { FavoriteCategory, TaskRecord } from './types'
 import {
+  cancelAllRunning,
+  cancelBatch,
+  cancelTask,
   clearTaskFavorite,
   editOutputs,
   markInterruptedSyncHttpTasks,
   mergePersistedStoreState,
+  retryGridMissing,
   setTaskFavoriteCategory,
   submitTask,
   submitGridTask,
@@ -38,10 +42,20 @@ vi.mock('./lib/api', async (importOriginal) => {
   }
 })
 
+// 透传 spy:只记录调用不改行为,用于断言单条路径不经并发闸
+vi.mock('./lib/concurrency', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./lib/concurrency')>()
+  return {
+    ...actual,
+    mapWithConcurrency: vi.fn(actual.mapWithConcurrency),
+  }
+})
+
 import { deleteConversation, putConversation, putTask, storeImage } from './lib/db'
 import { callImageApi } from './lib/api'
 import { ARCHIVE_CONVERSATION_ID } from './lib/conversations'
-import { scheduleSyncHttpWatchdog } from './lib/taskRuntime'
+import { resetTaskRuntimeForTest, scheduleSyncHttpWatchdog } from './lib/taskRuntime'
+import { mapWithConcurrency } from './lib/concurrency'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 const categoryA: FavoriteCategory = {
@@ -970,5 +984,225 @@ describe('onboarding tour state', () => {
     ).toBe('none')
     expect(shouldAutoStartTour({ ...fresh, showSettings: true })).toBe('none')
     expect(shouldAutoStartTour({ ...fresh, showCommandPalette: true })).toBe('none')
+  })
+})
+
+describe('batch concurrency & cancellation (B3)', () => {
+  beforeEach(() => {
+    // 清模块级 controller/watchdog Map:前用例永挂 mock 的 executeTask 不会走 finally 清理,
+    // 残留条目会污染本用例 cancelBatch 的 aborted/skipped 区分计数
+    resetTaskRuntimeForTest()
+    vi.mocked(putTask).mockReset()
+    vi.mocked(putTask).mockResolvedValue('task-id')
+    vi.mocked(storeImage).mockReset()
+    vi.mocked(storeImage).mockResolvedValue('generated-image-id')
+    vi.mocked(callImageApi).mockReset()
+    useStore.setState({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', timeout: 1 },
+      prompt: 'prompt',
+      inputImages: [],
+      maskDraft: null,
+      maskEditorImageId: null,
+      params: { ...DEFAULT_PARAMS },
+      tasks: [],
+      toast: null,
+      showToast: vi.fn(),
+      setConfirmDialog: vi.fn(),
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('clamps batchConcurrency at the normalizeSettings whitelist (唯一净化口)', () => {
+    expect(normalizeSettings({ batchConcurrency: 0 }).batchConcurrency).toBe(1)
+    expect(normalizeSettings({ batchConcurrency: -5 }).batchConcurrency).toBe(1)
+    expect(normalizeSettings({ batchConcurrency: 99 }).batchConcurrency).toBe(6)
+    expect(normalizeSettings({ batchConcurrency: 3.7 }).batchConcurrency).toBe(3)
+    expect(normalizeSettings({}).batchConcurrency).toBe(3) // 旧持久化缺字段兜默认
+    expect(normalizeSettings({ batchConcurrency: 'x' }).batchConcurrency).toBe(3)
+    expect(DEFAULT_SETTINGS.batchConcurrency).toBe(3)
+    // 导入 round-trip 不丢
+    expect(
+      mergeImportedSettings(DEFAULT_SETTINGS, { batchConcurrency: 5 }).batchConcurrency,
+    ).toBe(5)
+  })
+
+  it('runEnqueuedTasks honors settings.batchConcurrency as the worker limit', async () => {
+    const rejecters: Array<() => void> = []
+    vi.mocked(callImageApi).mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          rejecters.push(() => reject(new Error('released')))
+        }),
+    )
+    useStore.setState({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', timeout: 1, batchConcurrency: 1 },
+      prompt: '{a|b|c}',
+      showToast: vi.fn(),
+    })
+
+    await submitTask()
+    expect(useStore.getState().tasks).toHaveLength(3)
+
+    // 并发 1:任一时刻仅 1 条在途
+    await vi.waitFor(() => expect(vi.mocked(callImageApi).mock.calls.length).toBe(1))
+    rejecters[0]() // 释放首条 → worker 才取下一条
+    await vi.waitFor(() => expect(vi.mocked(callImageApi).mock.calls.length).toBe(2))
+    rejecters[1]()
+    await vi.waitFor(() => expect(vi.mocked(callImageApi).mock.calls.length).toBe(3))
+  })
+
+  it('single-task path bypasses the concurrency gate regardless of batchConcurrency (等价基线)', async () => {
+    vi.mocked(mapWithConcurrency).mockClear()
+    vi.mocked(callImageApi).mockImplementation(() => new Promise(() => undefined))
+    useStore.setState({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', timeout: 1, batchConcurrency: 1 },
+      prompt: 'plain cat',
+      showToast: vi.fn(),
+    })
+    await submitTask()
+    await vi.waitFor(() => expect(vi.mocked(callImageApi).mock.calls.length).toBe(1))
+    expect(useStore.getState().tasks[0].batchId).toBeUndefined()
+    // 关键区分:executeTask 直跑,不经 runEnqueuedTasks/mapWithConcurrency(limit=1 的闸同样只发 1 次请求,calls 计数无法区分)
+    expect(vi.mocked(mapWithConcurrency)).not.toHaveBeenCalled()
+  })
+
+  it('with batchConcurrency=2 a third request waits until a slot frees (峰值 ≤ 2)', async () => {
+    const rejecters: Array<() => void> = []
+    vi.mocked(callImageApi).mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          rejecters.push(() => reject(new Error('released')))
+        }),
+    )
+    useStore.setState({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', timeout: 1, batchConcurrency: 2 },
+      prompt: '{a|b|c|d}',
+      showToast: vi.fn(),
+    })
+
+    await submitTask()
+    await vi.waitFor(() => expect(vi.mocked(callImageApi).mock.calls.length).toBe(2))
+    // flush 一拍确认第三条没有越闸发出
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(vi.mocked(callImageApi).mock.calls.length).toBe(2)
+
+    rejecters[0]() // 释放一个槽位 → 第三条才发出
+    await vi.waitFor(() => expect(vi.mocked(callImageApi).mock.calls.length).toBe(3))
+  })
+
+  it('a queued member cancelled before dispatch never fires its request (executeTask 入口守卫)', async () => {
+    let releaseFirst: (() => void) | undefined
+    vi.mocked(callImageApi).mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          if (!releaseFirst) releaseFirst = () => reject(new Error('released'))
+        }),
+    )
+    useStore.setState({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', timeout: 1, batchConcurrency: 1 },
+      prompt: '{a|b|c}',
+      showToast: vi.fn(),
+    })
+
+    await submitTask()
+    await vi.waitFor(() => expect(vi.mocked(callImageApi).mock.calls.length).toBe(1))
+
+    // 首条在途,其余两条排队(status 同为 running,无 controller)——对排队项逐条取消。
+    // 注:callImageApi 收到的是 buildFinalPrompt(task.prompt, stylePreset) 的结果,
+    // DEFAULT_PARAMS 无 stylePreset 时与 task.prompt 恒等;若默认参数未来引入风格前缀,此识别需改
+    const inFlightPrompt = (vi.mocked(callImageApi).mock.calls[0][0] as { prompt: string }).prompt
+    const queued = useStore.getState().tasks.filter((t) => t.prompt !== inFlightPrompt)
+    expect(queued).toHaveLength(2)
+    for (const q of queued) expect(cancelTask(q.id)).toBe(true)
+
+    releaseFirst?.() // 释放首条,worker 取出两条已取消的排队项
+    await vi.waitFor(() =>
+      expect(useStore.getState().tasks.every((t) => t.status === 'error')).toBe(true),
+    )
+    // 入口守卫拦截:被取消的排队项从未发出请求
+    expect(vi.mocked(callImageApi).mock.calls.length).toBe(1)
+    for (const q of queued) {
+      expect(useStore.getState().tasks.find((t) => t.id === q.id)?.error).toBe('已取消生成')
+    }
+  })
+
+  it('cancelBatch aborts in-flight members and skips queued ones, reporting counts', async () => {
+    const signals: AbortSignal[] = []
+    vi.mocked(callImageApi).mockImplementation((opts) => {
+      signals.push((opts as { signal: AbortSignal }).signal)
+      return new Promise(() => undefined)
+    })
+    useStore.setState({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', timeout: 1, batchConcurrency: 2 },
+      prompt: '{a|b|c|d}',
+      showToast: vi.fn(),
+    })
+
+    await submitTask()
+    await vi.waitFor(() => expect(signals.length).toBe(2)) // 2 在途 + 2 排队
+    const batchId = useStore.getState().tasks[0].batchId
+
+    expect(cancelBatch(batchId ?? '')).toEqual({ aborted: 2, skipped: 2 })
+    expect(signals.every((s) => s.aborted)).toBe(true) // 在途请求被真中止
+    const tasks = useStore.getState().tasks
+    expect(tasks).toHaveLength(4)
+    expect(tasks.every((t) => t.status === 'error' && t.error === '已取消生成')).toBe(true)
+    // 幂等:已无 running 成员
+    expect(cancelBatch(batchId ?? '')).toEqual({ aborted: 0, skipped: 0 })
+    // 守卫兜底:排队项被取出时不发请求
+    expect(vi.mocked(callImageApi).mock.calls.length).toBe(2)
+  })
+
+  it('cancelBatch never reverts a done member and scopes to its batchId; cancelAllRunning sweeps all', () => {
+    const done = task({ id: 'd1', batchId: 'A', status: 'done' })
+    const runningA = task({ id: 'r1', batchId: 'A', status: 'running' })
+    const runningB = task({ id: 'r2', batchId: 'B', status: 'running' })
+    const loner = task({ id: 'r3', status: 'running' }) // 无 batchId 单条
+    useStore.setState({ tasks: [done, runningA, runningB, loner] })
+
+    // TOCTOU 竞态守卫(spec §4.3):filter 快照后成员翻 done → cancelTask 重 find 命中
+    // status guard 不回改。同步循环内无法自然触发该窗口,直接对 done 任务调 cancelTask
+    // 验证 guard 本身(filter 作用域的排除在下面 cancelBatch 断言中另行覆盖)
+    expect(cancelTask('d1')).toBe(false)
+    expect(useStore.getState().tasks.find((t) => t.id === 'd1')?.status).toBe('done')
+
+    // 只圈定 A 的 running 成员(无 controller → skipped);done 不回改
+    expect(cancelBatch('A')).toEqual({ aborted: 0, skipped: 1 })
+    expect(useStore.getState().tasks.find((t) => t.id === 'd1')?.status).toBe('done')
+    expect(useStore.getState().tasks.find((t) => t.id === 'r1')?.error).toBe('已取消生成')
+    expect(useStore.getState().tasks.find((t) => t.id === 'r2')?.status).toBe('running')
+    expect(useStore.getState().tasks.find((t) => t.id === 'r3')?.status).toBe('running')
+
+    // cancelAllRunning 扫掉剩余全部在途(跨 batchId + 无 batchId 单条)
+    expect(cancelAllRunning()).toEqual({ aborted: 0, skipped: 2 })
+    expect(useStore.getState().tasks.filter((t) => t.status === 'running')).toHaveLength(0)
+  })
+
+  it('cancelled grid cells are revivable via retryGridMissing (取消=失败的一种,补跑语义)', async () => {
+    vi.mocked(callImageApi).mockImplementation(() => new Promise(() => undefined))
+    useStore.setState({ prompt: 'a cat', params: { ...DEFAULT_PARAMS }, showToast: vi.fn() })
+    const xAxis = {
+      kind: 'quality' as const,
+      values: [{ key: 'low', label: 'low' }, { key: 'high', label: 'high' }],
+    }
+    await submitGridTask({ x: xAxis })
+    const batchId = useStore.getState().tasks[0].batchId ?? ''
+
+    cancelBatch(batchId)
+    expect(
+      useStore.getState().tasks.every((t) => t.status === 'error' && t.error === '已取消生成'),
+    ).toBe(true)
+
+    // 取消格被判缺漏,补跑重新 enqueue 新 running task(gridAxes/gridCoord 保留使矩阵可重建)
+    retryGridMissing(batchId, 'all')
+    await vi.waitFor(() => {
+      const running = useStore.getState().tasks.filter((t) => t.status === 'running')
+      expect(running).toHaveLength(2)
+      expect(running.every((t) => t.batchId === batchId && t.gridCoord)).toBe(true)
+    })
   })
 })

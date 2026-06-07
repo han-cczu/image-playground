@@ -13,6 +13,8 @@ import {
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_GEMINI_MODEL,
   DEFAULT_SETTINGS,
+  BATCH_CONCURRENCY_MAX,
+  BATCH_CONCURRENCY_MIN,
   getActiveApiProfile,
   getActiveOptimizerProfile,
   getActiveCaptionerProfile,
@@ -519,6 +521,37 @@ export default function SettingsModal() {
                 </div>
                 <div data-selectable-text className="text-xs text-gray-400 dark:text-gray-500">
                   开启后，提交成功创建任务时会清空提示词和参考图。
+                </div>
+              </div>
+              <div className="block">
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="block text-xs text-gray-500 dark:text-gray-400">批量并发上限</span>
+                  {/* select 离散下拉:直接 setDraft 进脏检测闭环,不必像 timeout 那样接 string-state flush */}
+                  <select
+                    value={draft.batchConcurrency}
+                    onChange={(e) => setDraft({ ...draft, batchConcurrency: Number(e.target.value) })}
+                    aria-label="批量并发上限"
+                    className="rounded-lg border border-gray-200/70 bg-white/60 px-2 py-1 text-xs text-gray-700 outline-none focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/40"
+                  >
+                    {Array.from(
+                      { length: BATCH_CONCURRENCY_MAX - BATCH_CONCURRENCY_MIN + 1 },
+                      (_, i) => BATCH_CONCURRENCY_MIN + i,
+                    ).map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div data-selectable-text className="text-xs text-gray-400 dark:text-gray-500">
+                  批量提交(通配 / 参数网格 / 补跑)同时进行的任务数,调整后对新批次生效。
+                  {activeProfile.provider === 'openai' && activeProfile.codexCli ? (
+                    <span className="text-amber-500 dark:text-amber-400">
+                      {' '}当前 Codex CLI 兼容模式下,多图(n&gt;1)会再按图拆分并发,实际请求数约为本值×单批图数,过高易触发上游 429。
+                    </span>
+                  ) : (
+                    ' 过高可能触发上游限流(429)。'
+                  )}
                 </div>
               </div>
             </div>

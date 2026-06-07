@@ -56,6 +56,8 @@ export {
   removeTask,
   removeMultipleTasks,
   cancelTask,
+  cancelBatch,
+  cancelAllRunning,
   rollbackStoredImages,
   reorderTask,
   updateTaskInStore,
