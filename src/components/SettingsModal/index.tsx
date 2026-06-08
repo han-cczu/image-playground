@@ -12,6 +12,7 @@ import {
   DEFAULT_CAPTIONER_PROFILE_ID,
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_GEMINI_MODEL,
+  DEFAULT_GEMINI_CHAT_MODEL,
   DEFAULT_SETTINGS,
   BATCH_CONCURRENCY_MAX,
   BATCH_CONCURRENCY_MIN,
@@ -207,28 +208,32 @@ export default function SettingsModal() {
       }
     })
     const fallbackProfile = createDefaultOpenAIProfile({ id: newId('openai') })
-    const normalizedOptimizerProfiles: PromptOptimizerProfile[] = nextDraft.optimizerProfiles.map((profile) =>
-      normalizeOptimizerProfile({
+    const normalizedOptimizerProfiles: PromptOptimizerProfile[] = nextDraft.optimizerProfiles.map((profile) => {
+      // Gemini provider 的 baseUrl/model 兜默认必须用 Gemini 端点/模型,否则空 baseUrl 会被强制写成
+      // OpenAI 默认 URL,保存后 Gemini 请求打到错误端点(...profile spread 已带 provider,normalize 读取)
+      const isGemini = profile.provider === 'gemini'
+      return normalizeOptimizerProfile({
         ...profile,
         name: profile.name.trim() || (profile.id === DEFAULT_OPTIMIZER_PROFILE_ID ? '默认' : '新配置'),
-        baseUrl: profile.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl,
+        baseUrl: profile.baseUrl.trim() || (isGemini ? DEFAULT_GEMINI_BASE_URL : DEFAULT_SETTINGS.baseUrl),
         apiKey: profile.apiKey.trim(),
-        model: profile.model.trim(),
-      }),
-    )
+        model: profile.model.trim() || (isGemini ? DEFAULT_GEMINI_CHAT_MODEL : ''),
+      })
+    })
     const fallbackOptimizer = createDefaultOptimizerProfile({ id: newId('optimizer') })
     const optimizerProfiles = normalizedOptimizerProfiles.length
       ? normalizedOptimizerProfiles
       : [fallbackOptimizer]
-    const normalizedCaptionerProfiles: CaptionerProfile[] = nextDraft.captionerProfiles.map((profile) =>
-      normalizeCaptionerProfile({
+    const normalizedCaptionerProfiles: CaptionerProfile[] = nextDraft.captionerProfiles.map((profile) => {
+      const isGemini = profile.provider === 'gemini'
+      return normalizeCaptionerProfile({
         ...profile,
         name: profile.name.trim() || (profile.id === DEFAULT_CAPTIONER_PROFILE_ID ? '默认' : '新配置'),
-        baseUrl: profile.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl,
+        baseUrl: profile.baseUrl.trim() || (isGemini ? DEFAULT_GEMINI_BASE_URL : DEFAULT_SETTINGS.baseUrl),
         apiKey: profile.apiKey.trim(),
-        model: profile.model.trim(),
-      }),
-    )
+        model: profile.model.trim() || (isGemini ? DEFAULT_GEMINI_CHAT_MODEL : ''),
+      })
+    })
     const fallbackCaptioner = createDefaultCaptionerProfile({ id: newId('captioner') })
     const captionerProfiles = normalizedCaptionerProfiles.length
       ? normalizedCaptionerProfiles

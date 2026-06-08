@@ -308,6 +308,7 @@ describe('optimizer profiles 归一化与迁移', () => {
       model: 'gpt-4o-mini',
       timeout: 45,
       systemPrompt: '自定义提示词',
+      provider: 'openai',
     })
   })
 
@@ -451,6 +452,7 @@ describe('captioner profiles 归一化与迁移', () => {
       model: 'gpt-4o',
       timeout: 50,
       systemPrompt: '反推系统提示词',
+      provider: 'openai',
     })
   })
 
@@ -483,6 +485,33 @@ describe('captioner profiles 归一化与迁移', () => {
     expect(DEFAULT_SETTINGS.captionerProfiles).toHaveLength(1)
     expect(DEFAULT_SETTINGS.activeCaptionerProfileId).toBe(DEFAULT_CAPTIONER_PROFILE_ID)
     expect(DEFAULT_SETTINGS.captionerProfiles[0].apiKey).toBe('')
+  })
+
+  it('B2: provider 字段缺省兜 openai,显式 gemini 经镜像 round-trip 不丢', () => {
+    // 缺省 provider → openai
+    expect(DEFAULT_SETTINGS.captioner.provider).toBe('openai')
+    expect(DEFAULT_SETTINGS.promptOptimizer.provider).toBe('openai')
+
+    // 显式 gemini captioner/optimizer profile → 镜像与 round-trip 保留 provider
+    const once = normalizeSettings({
+      captionerProfiles: [
+        { id: 'g', name: 'G', baseUrl: 'https://gem/v1beta', apiKey: 'gk', model: 'gemini-2.5-flash', timeout: 30, systemPrompt: 's', provider: 'gemini' },
+      ],
+      activeCaptionerProfileId: 'g',
+      optimizerProfiles: [
+        { id: 'go', name: 'GO', baseUrl: 'https://gem/v1beta', apiKey: 'gk', model: 'gemini-2.5-flash', timeout: 30, systemPrompt: 's', provider: 'gemini' },
+      ],
+      activeOptimizerProfileId: 'go',
+    })
+    expect(once.captioner.provider).toBe('gemini')
+    expect(once.promptOptimizer.provider).toBe('gemini')
+    expect(once.captionerProfiles[0].provider).toBe('gemini')
+    expect(once.optimizerProfiles[0].provider).toBe('gemini')
+
+    // round-trip:再归一一次仍是 gemini(白名单逐字段重建不丢)
+    const twice = normalizeSettings(once)
+    expect(twice.captioner.provider).toBe('gemini')
+    expect(twice.promptOptimizer.provider).toBe('gemini')
   })
 
   it('createDefaultCaptionerProfile 可被 overrides 覆盖', () => {

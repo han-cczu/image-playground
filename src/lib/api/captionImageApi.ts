@@ -5,6 +5,8 @@ import {
   parseSseLine,
   resolveChatTimeoutMs,
 } from './chatCompletionsShared'
+import { streamGeminiChat } from './geminiChatShared'
+import { dataUrlToInlinePart } from './geminiImageApi'
 import { DEFAULT_CAPTIONER_TIMEOUT } from './apiProfiles'
 
 export interface CaptionImageOptions {
@@ -18,7 +20,8 @@ export interface CaptionImageOptions {
 const USER_GUIDE_TEXT = 'Describe this image as a detailed text-to-image prompt.'
 
 /**
- * 对一张图片做反推：通过 OpenAI 兼容 chat completions（vision，stream=true）生成文生图提示词。
+ * 对一张图片做反推：vision + stream 生成文生图提示词。
+ * provider='gemini' 走原生 generateContent(inlineData + systemInstruction);否则 OpenAI 兼容 chat completions。
  *
  * @param imageDataUrl base64 data URL（如 data:image/png;base64,...）
  * @returns 完整的反推文本
@@ -34,6 +37,16 @@ export async function captionImageStream(
   }
   if (!imageDataUrl.trim()) {
     throw new Error('未选择图片')
+  }
+
+  // provider 分流(缺省/undefined 走 OpenAI,守住现有测试)
+  if (config.provider === 'gemini') {
+    return streamGeminiChat(
+      config,
+      [{ text: USER_GUIDE_TEXT }, dataUrlToInlinePart(imageDataUrl)],
+      '反推结果为空',
+      options,
+    )
   }
 
   const url = buildChatCompletionsUrl(config.baseUrl)

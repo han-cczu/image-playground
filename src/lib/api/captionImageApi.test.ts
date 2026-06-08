@@ -107,3 +107,64 @@ describe('captionImageStream', () => {
     await expect(pending).rejects.toThrow(/已取消/)
   })
 })
+
+describe('captionImageStream — Gemini provider', () => {
+  const geminiConfig: CaptionerConfig = {
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    apiKey: 'gm-key',
+    model: 'gemini-2.5-flash',
+    timeout: 30,
+    systemPrompt: 'You reverse-engineer image prompts.',
+    provider: 'gemini',
+  }
+  const fetchMock = vi.fn<typeof fetch>()
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('走 streamGenerateContent?alt=sse,x-goog-api-key 鉴权,inlineData + systemInstruction', async () => {
+    fetchMock.mockResolvedValue(
+      makeSseResponse([
+        'data: {"candidates":[{"content":{"parts":[{"text":"a "}]}}]}\n\n',
+        'data: {"candidates":[{"content":{"parts":[{"text":"cat"}]}}]}\n\n',
+      ]),
+    )
+    const deltas: string[] = []
+    const result = await captionImageStream(geminiConfig, IMG, { onDelta: (c) => deltas.push(c) })
+    expect(result).toBe('a cat')
+    expect(deltas).toEqual(['a ', 'cat'])
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toContain('/models/gemini-2.5-flash:streamGenerateContent?alt=sse')
+    const headers = (init as RequestInit).headers as Record<string, string>
+    expect(headers['x-goog-api-key']).toBe('gm-key')
+    expect(headers.Authorization).toBeUndefined() // 非 Bearer
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.systemInstruction.parts[0].text).toBe(geminiConfig.systemPrompt)
+    const parts = body.contents[0].parts
+    expect(parts[0].text).toBeTruthy()
+    expect(parts[1].inline_data.mime_type).toBe('image/png')
+    expect(parts[1].inline_data.data).toBe('iVBORw0KGgo=') // data URL 拆出的纯 base64
+  })
+
+  it('拼接一帧内多个 text part(thinking/多 part)', async () => {
+    fetchMock.mockResolvedValue(
+      makeSseResponse([
+        'data: {"candidates":[{"content":{"parts":[{"text":"foo"},{"functionCall":{}},{"text":"bar"}]}}]}\n\n',
+      ]),
+    )
+    expect(await captionImageStream(geminiConfig, IMG)).toBe('foobar')
+  })
+
+  it('200 流内 blockReason 在空结果时被抠出为可读错误(非"结果为空")', async () => {
+    fetchMock.mockResolvedValue(
+      makeSseResponse(['data: {"promptFeedback":{"blockReason":"SAFETY"}}\n\n']),
+    )
+    await expect(captionImageStream(geminiConfig, IMG)).rejects.toThrow(/SAFETY/)
+  })
+})

@@ -43,7 +43,7 @@ function mapSizeToAspectRatio(size: string): string | undefined {
   return best.ratio
 }
 
-function dataUrlToInlinePart(dataUrl: string): { inline_data: { mime_type: string; data: string } } {
+export function dataUrlToInlinePart(dataUrl: string): { inline_data: { mime_type: string; data: string } } {
   const match = dataUrl.match(/^data:([^;]+);base64,(.*)$/)
   if (!match) throw new Error('输入图片格式无效')
   return {

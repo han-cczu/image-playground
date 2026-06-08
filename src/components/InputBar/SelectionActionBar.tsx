@@ -14,6 +14,7 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
   const tasks = useStore((s) => s.tasks)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const setCompareTaskIds = useStore((s) => s.setCompareTaskIds)
+  const setCaptionBatchImageIds = useStore((s) => s.setCaptionBatchImageIds)
 
   const allVisibleSelected =
     selectedTaskIds.length === filteredTasks.length && filteredTasks.length > 0
@@ -114,6 +115,22 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
       return t?.status === 'done' && (t.outputImages?.length ?? 0) > 0
     })
 
+  // 批量反推:选中的 done 且有输出图的任务(各取首图);谓词镜像 canCompare 但不限 2~4。
+  // 去重:不同 task 可能共享同一首图 id(重试/复制),重复会让 modal 列表 key 撞 + 重复反推
+  const batchCaptionImageIds = [
+    ...new Set(
+      selectedTaskIds
+        .map((id) => tasks.find((t) => t.id === id))
+        .filter((t): t is TaskRecord => t?.status === 'done' && (t.outputImages?.length ?? 0) > 0)
+        .map((t) => t.outputImages[0]),
+    ),
+  ]
+  const canBatchCaption = batchCaptionImageIds.length >= 1
+  const handleBatchCaption = () => {
+    setCaptionBatchImageIds(batchCaptionImageIds)
+    clearSelection()
+  }
+
   return (
     <div className="flex justify-center mb-3">
       <div className="bg-gray-800/90 dark:bg-gray-800/90 backdrop-blur shadow-lg rounded-full flex items-center p-1 border border-white/10 pointer-events-auto">
@@ -188,6 +205,23 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
           <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
             <rect x="3" y="4" width="8" height="16" rx="2" />
             <rect x="13" y="4" width="8" height="16" rx="2" />
+          </svg>
+        </button>
+        <button
+          onClick={() => canBatchCaption && handleBatchCaption()}
+          disabled={!canBatchCaption}
+          className={`p-2 transition-colors ${
+            canBatchCaption
+              ? 'text-purple-400 hover:text-purple-300'
+              : 'text-gray-500 cursor-not-allowed'
+          }`}
+          title={canBatchCaption ? `批量反推(${batchCaptionImageIds.length} 张图)` : '选择已完成任务批量反推提示词'}
+          aria-label="批量反推"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+            <rect x="3" y="3" width="18" height="14" rx="2" />
+            <path d="M3 13l4-4 4 4 4-5 6 6" />
+            <path d="M8 21h8" />
           </svg>
         </button>
         {runningSelected.length > 0 && (

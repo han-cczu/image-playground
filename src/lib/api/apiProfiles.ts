@@ -38,6 +38,8 @@ export function clampBatchConcurrency(value: unknown): number {
 }
 
 export const DEFAULT_OPTIMIZER_MODEL = 'gpt-4o-mini'
+/** Gemini 反推/优化默认模型(支持 vision + systemInstruction) */
+export const DEFAULT_GEMINI_CHAT_MODEL = 'gemini-2.5-flash'
 export const DEFAULT_OPTIMIZER_TIMEOUT = 60
 export const DEFAULT_OPTIMIZER_PROFILE_ID = 'default-optimizer'
 export const DEFAULT_OPTIMIZER_SYSTEM_PROMPT = `You are an expert prompt engineer specializing in text-to-image generation.
@@ -96,6 +98,7 @@ export function normalizePromptOptimizer(input: unknown): PromptOptimizerConfig 
       typeof record.systemPrompt === 'string' && record.systemPrompt.trim()
         ? record.systemPrompt
         : defaults.systemPrompt,
+    provider: record.provider === 'gemini' ? 'gemini' : 'openai',
   }
 }
 
@@ -164,6 +167,7 @@ export function normalizeCaptioner(input: unknown): CaptionerConfig {
       typeof record.systemPrompt === 'string' && record.systemPrompt.trim()
         ? record.systemPrompt
         : defaults.systemPrompt,
+    provider: record.provider === 'gemini' ? 'gemini' : 'openai',
   }
 }
 
@@ -387,6 +391,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
       model: activeOptimizer.model,
       timeout: activeOptimizer.timeout,
       systemPrompt: activeOptimizer.systemPrompt,
+      provider: activeOptimizer.provider ?? 'openai',
     },
     optimizerProfiles,
     activeOptimizerProfileId,
@@ -396,6 +401,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
       model: activeCaptioner.model,
       timeout: activeCaptioner.timeout,
       systemPrompt: activeCaptioner.systemPrompt,
+      provider: activeCaptioner.provider ?? 'openai',
     },
     captionerProfiles,
     activeCaptionerProfileId,
