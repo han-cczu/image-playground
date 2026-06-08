@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { memo, useEffect, useState, useRef } from 'react'
 import type { DraggableAttributes } from '@dnd-kit/core'
 import type { SyntheticListenerMap } from '@dnd-kit/core/dist/hooks/utilities'
 import type { TaskRecord } from '../types'
@@ -33,7 +33,8 @@ interface Props {
   conversationTag?: ConversationTagProp
 }
 
-export default function TaskCard({
+// React.memo:大库框选 setSelectedTaskIds 触发 TaskGrid 重渲染时,props 未变的卡跳过 reconcile
+function TaskCard({
   task,
   onReuse,
   onEditOutputs,
@@ -588,3 +589,5 @@ export default function TaskCard({
     </div>
   )
 }
+
+export default memo(TaskCard)

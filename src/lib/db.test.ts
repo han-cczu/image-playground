@@ -7,14 +7,19 @@ import {
   __resetDbCacheForTests,
   dataUrlToImageBlob,
   deleteConversation,
+  forEachImageMeta,
   getAllConversations,
+  getAllImages,
   getAllTasks,
   persistConversationMigration,
+  pruneImagesViaCursor,
   putConversation,
+  putImage,
   putTask,
   storedImageToBytes,
   storedImageToDataUrl,
 } from './db'
+import type { StoredImage } from '../types'
 import { ARCHIVE_CONVERSATION_ID, createArchiveConversation } from './conversations'
 
 function createTask(id: string, conversationId?: string): TaskRecord {
@@ -172,5 +177,70 @@ describe('conversations object store', () => {
     await putConversation(conv)
     const list = await getAllConversations()
     expect(list.find((c) => c.id === 'conv-foo')).toMatchObject(conv)
+  })
+})
+
+describe('images cursor helpers (C1 游标统计)', () => {
+  beforeEach(() => {
+    globalThis.indexedDB = new IDBFactory()
+    __resetDbCacheForTests()
+  })
+  afterEach(() => {
+    globalThis.indexedDB = new IDBFactory()
+    __resetDbCacheForTests()
+  })
+
+  const img = (id: string, body: string, createdAt: number): StoredImage => ({
+    id,
+    blob: new Blob([body]),
+    source: 'generated',
+    createdAt,
+  })
+
+  it('forEachImageMeta visits every record then resolves on tx.oncomplete', async () => {
+    await putImage(img('a', '12', 1))
+    await putImage(img('b', '345', 2))
+    await putImage(img('c', '6', 3))
+
+    const seen: string[] = []
+    await forEachImageMeta((image) => seen.push(image.id))
+
+    expect(seen.sort()).toEqual(['a', 'b', 'c'])
+  })
+
+  it('forEachImageMeta resolves with no callback on an empty store', async () => {
+    const seen: string[] = []
+    await expect(forEachImageMeta((image) => seen.push(image.id))).resolves.toBeUndefined()
+    expect(seen).toEqual([])
+  })
+
+  it('pruneImagesViaCursor deletes only matched records in a single transaction', async () => {
+    await putImage(img('keep', '1', 1))
+    await putImage(img('drop1', '22', 1))
+    await putImage(img('drop2', '333', 1))
+
+    const deleted: string[] = []
+    await pruneImagesViaCursor(
+      (image) => image.id.startsWith('drop'),
+      (image) => deleted.push(image.id),
+    )
+
+    expect(deleted.sort()).toEqual(['drop1', 'drop2'])
+    const remaining = await getAllImages()
+    expect(remaining.map((i) => i.id)).toEqual(['keep'])
+  })
+
+  it('pruneImagesViaCursor with a never-match predicate keeps everything', async () => {
+    await putImage(img('x', '1', 1))
+    await putImage(img('y', '2', 1))
+
+    const deleted: string[] = []
+    await pruneImagesViaCursor(
+      () => false,
+      (image) => deleted.push(image.id),
+    )
+
+    expect(deleted).toEqual([])
+    expect((await getAllImages()).map((i) => i.id).sort()).toEqual(['x', 'y'])
   })
 })

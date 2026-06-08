@@ -4,7 +4,6 @@ import { useStore } from './store'
 import { normalizeSettings, switchApiProfileProvider } from './lib/api/apiProfiles'
 import { maybeStartTour } from './lib/tour/autoStart'
 import { readUrlBootstrap } from './lib/urlBootstrap'
-import { filterAndSortTasks } from './lib/taskFilters'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import AmbientGlow from './components/AmbientGlow'
@@ -39,20 +38,14 @@ export default function App() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
 
   /**
-   * 当前视图下的任务（含全部 status / favorite 等筛选）。
-   * - galleryView=true：跨对话全部 task
-   * - galleryView=false：仅当前 activeConversationId 下 task
-   * 只用来判断是否展示 EmptyState；TaskGrid 自己仍会再过滤一次。
+   * 当前视图下是否存在任务(存在性判定,非全量 filter+sort)。
+   * showEmptyState 只关心「有没有」,且仅在其余筛选全为默认时才可能为真——故这里只按对话存在性
+   * 判定即可,无需 filterAndSortTasks 的全量 [...tasks].sort + per-task JSON.stringify。
    */
-  const tasksInActiveConversation = useMemo(() => {
-    return filterAndSortTasks(tasks, {
-      searchQuery,
-      filterStatus,
-      filterFavorite,
-      filterFavoriteCategoryId,
-      filterConversationId: galleryView ? undefined : activeConversationId,
-    })
-  }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId, activeConversationId, galleryView])
+  const hasTasksInView = useMemo(() => {
+    const convId = galleryView ? null : activeConversationId
+    return tasks.some((t) => !convId || t.conversationId === convId)
+  }, [tasks, galleryView, activeConversationId])
 
   /**
    * 是否展示「真正的空状态」（emoji + 4 个 pill）：
@@ -61,7 +54,7 @@ export default function App() {
    * 否则交给 TaskGrid 自己的「没有匹配的记录」占位。
    */
   const showEmptyState =
-    tasksInActiveConversation.length === 0 &&
+    !hasTasksInView &&
     !searchQuery.trim() &&
     filterStatus === 'all' &&
     !filterFavorite &&

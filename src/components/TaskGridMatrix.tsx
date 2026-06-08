@@ -139,7 +139,7 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
   }
 
   return (
-    <div className="col-span-full rounded-2xl border border-gray-200/70 bg-gray-50/40 p-3 dark:border-white/[0.08] dark:bg-white/[0.02]">
+    <div className="col-span-full cv-auto-matrix rounded-2xl border border-gray-200/70 bg-gray-50/40 p-3 dark:border-white/[0.08] dark:bg-white/[0.02]">
       {/* 小标题栏 */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs text-gray-500 dark:text-gray-400">
