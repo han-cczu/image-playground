@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { StoredImage, TaskRecord } from '../types'
 
 vi.mock('./db', () => ({
-  getAllImages: vi.fn(),
-  deleteImage: vi.fn(),
+  forEachImageMeta: vi.fn(),
+  pruneImagesViaCursor: vi.fn(),
 }))
 vi.mock('./imageCache', () => ({
   deleteCachedImage: vi.fn(),
 }))
 
-import { deleteImage, getAllImages } from './db'
+import { forEachImageMeta, pruneImagesViaCursor } from './db'
 import { deleteCachedImage } from './imageCache'
 import {
   collectReferencedImageIds,
@@ -19,9 +19,23 @@ import {
   storedImageByteSize,
 } from './storageStats'
 
+/** forEachImageMeta 桩:对喂入数组逐条回调,模拟游标遍历 */
+function stubForEach(images: StoredImage[]) {
+  vi.mocked(forEachImageMeta).mockImplementation(async (onRecord) => {
+    for (const img of images) onRecord(img)
+  })
+}
+
+/** pruneImagesViaCursor 桩:逐条判定,命中则 onDeleted(模拟 cursor.delete 由真实游标做) */
+function stubPrune(images: StoredImage[]) {
+  vi.mocked(pruneImagesViaCursor).mockImplementation(async (shouldDelete, onDeleted) => {
+    for (const img of images) if (shouldDelete(img)) onDeleted(img)
+  })
+}
+
 beforeEach(() => {
-  vi.mocked(getAllImages).mockReset()
-  vi.mocked(deleteImage).mockReset().mockResolvedValue(undefined)
+  vi.mocked(forEachImageMeta).mockReset()
+  vi.mocked(pruneImagesViaCursor).mockReset()
   vi.mocked(deleteCachedImage).mockReset()
 })
 
@@ -58,7 +72,7 @@ describe('formatBytes', () => {
 
 describe('computeStorageStats', () => {
   it('aggregates total, per-source buckets and orphans (no time guard on orphan count)', async () => {
-    vi.mocked(getAllImages).mockResolvedValue([
+    stubForEach([
       { id: 'a', blob: new Blob(['12345']), source: 'upload', createdAt: 1 }, // 5, referenced
       { id: 'b', blob: new Blob(['123']), source: 'generated', createdAt: 1 }, // 3, orphan
       { id: 'c', blob: new Blob(['1']), createdAt: 1 }, // 1, no source -> unknown, orphan
@@ -80,7 +94,7 @@ describe('computeStorageStats', () => {
 
 describe('pruneOrphanImages', () => {
   it('deletes only unreferenced images older than cutoff', async () => {
-    vi.mocked(getAllImages).mockResolvedValue([
+    stubPrune([
       { id: 'ref', blob: new Blob(['12']), createdAt: 1 }, // referenced -> keep
       { id: 'old', blob: new Blob(['123']), createdAt: 1 }, // orphan + old -> delete
       { id: 'fresh', blob: new Blob(['1234']), createdAt: 9999 }, // orphan but >= cutoff -> keep
@@ -89,19 +103,21 @@ describe('pruneOrphanImages', () => {
     const res = await pruneOrphanImages(new Set(['ref']), 5000)
 
     expect(res).toEqual({ deletedCount: 1, deletedBytes: 3 })
-    expect(deleteImage).toHaveBeenCalledTimes(1)
-    expect(deleteImage).toHaveBeenCalledWith('old')
+    // 游标化后由 pruneImagesViaCursor 内部 cursor.delete 删 IDB(不再调 deleteImage);
+    // 校验传入的 shouldDelete 只命中 old,且内存缓存事务外删
+    expect(pruneImagesViaCursor).toHaveBeenCalledTimes(1)
+    expect(deleteCachedImage).toHaveBeenCalledTimes(1)
     expect(deleteCachedImage).toHaveBeenCalledWith('old')
   })
 
   it('treats missing createdAt as 0 (always deletable when unreferenced)', async () => {
-    vi.mocked(getAllImages).mockResolvedValue([
+    stubPrune([
       { id: 'no-date', blob: new Blob(['1']) }, // 无 createdAt -> 视为 0 < cutoff
     ] satisfies StoredImage[])
 
     const res = await pruneOrphanImages(new Set(), 5000)
 
     expect(res.deletedCount).toBe(1)
-    expect(deleteImage).toHaveBeenCalledWith('no-date')
+    expect(deleteCachedImage).toHaveBeenCalledWith('no-date')
   })
 })

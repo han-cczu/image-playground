@@ -266,6 +266,24 @@ input[type="number"] {
   animation: card-rise-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
+/* 大库性能(C1):视口外卡片/矩阵块跳过渲染/布局/绘制,DOM 节点仍在场——dnd useSortable
+   节点全注册、入场动画不随滚动 mount/unmount 重播,与现有交互不冲突。
+   注:被跳过元素受 size containment,getBoundingClientRect 返回 contain-intrinsic-size 占位框而非
+   真实高;框选不受影响是因为框选严格视口受限(只读 clientX/clientY、无 auto-scroll),够不到视口外
+   占位卡——而非"占位卡返回真实几何"。dnd 拖拽时若 over 目标在视口外,起始测量为占位框,但目标随指针
+   滚入视口即触发 ResizeObserver 重测自校正(且 dragDisabled 在筛选/搜索/含矩阵/超 cap 时已关拖拽,
+   暴露面窄);精确视觉/拖拽行为以 Playwright 实测为准。
+   contain-intrinsic-size 的 auto 让浏览器缓存实测高度(变高矩阵块自适应),数值是首次进视口前的
+   占位估高(估不准只影响滚动条初长)。不支持的旧浏览器忽略该属性,优雅降级为现状全量渲染。 */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
+.cv-auto-matrix {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .glow-blob-a,
   .glow-blob-b,

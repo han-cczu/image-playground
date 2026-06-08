@@ -219,6 +219,67 @@ export function clearImages(): Promise<undefined> {
   return dbTransaction(STORE_IMAGES, 'readwrite', (s) => s.clear())
 }
 
+/**
+ * 流式遍历全部图片(readonly 游标)。每条记录同步回调一次,任一时刻只持「当前 1 条 +
+ * 调用方累加器」——blob 引用随 cursor.continue() 即可 GC,峰值内存与库大小解耦(O(1)
+ * 而非 getAllImages 的 O(N) 全量物化)。
+ *
+ * resolve 挂 tx.oncomplete(对照 deleteConversation/dbTransaction 写路径同款挂法):readonly
+ * 事务遍历完游标后也会 fire oncomplete,作为遍历完成的统一信号,不在 cursor onsuccess 内 resolve。
+ */
+export function forEachImageMeta(onRecord: (image: StoredImage) => void): Promise<void> {
+  return openDB().then(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_IMAGES, 'readonly')
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error)
+        tx.onabort = () => reject(tx.error ?? new Error('遍历图片事务被中止'))
+        const cursorReq = tx.objectStore(STORE_IMAGES).openCursor()
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result
+          if (!cursor) return
+          onRecord(cursor.value as StoredImage)
+          cursor.continue()
+        }
+      }),
+  )
+}
+
+/**
+ * 流式遍历 + 原地删除孤儿图(readwrite 游标,单事务)。命中 shouldDelete 的记录先 onDeleted
+ * 回调(累加字节/计数,内存缓存删除留给调用方在事务外做)再 cursor.delete()。把删除从
+ * 「N 张孤儿 = N 个独立事务」(deleteImage 逐张)降到 1 个事务。
+ *
+ * resolve 挂 tx.oncomplete:写请求 onsuccess≠落盘,提交阶段 abort(配额/IO/冻结回滚)会静默
+ * 丢删——必须等 oncomplete。onabort → reject。
+ */
+export function pruneImagesViaCursor(
+  shouldDelete: (image: StoredImage) => boolean,
+  onDeleted: (image: StoredImage) => void,
+): Promise<void> {
+  return openDB().then(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_IMAGES, 'readwrite')
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error)
+        tx.onabort = () => reject(tx.error ?? new Error('清理图片事务被中止'))
+        const cursorReq = tx.objectStore(STORE_IMAGES).openCursor()
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result
+          if (!cursor) return
+          const value = cursor.value as StoredImage
+          if (shouldDelete(value)) {
+            onDeleted(value)
+            cursor.delete()
+          }
+          cursor.continue()
+        }
+      }),
+  )
+}
+
 // ===== Image hashing & dedup =====
 
 function createBytesFromBinary(binary: string): Uint8Array {

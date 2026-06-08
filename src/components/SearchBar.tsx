@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import Select from './Select'
 import FavoriteCategoryMenu from './FavoriteCategoryMenu'
@@ -5,6 +6,19 @@ import FavoriteCategoryMenu from './FavoriteCategoryMenu'
 export default function SearchBar() {
   const searchQuery = useStore((s) => s.searchQuery)
   const setSearchQuery = useStore((s) => s.setSearchQuery)
+
+  // 输入即时反馈走本地态,防抖 200ms 才写 store——store 写入触发 App + TaskGrid 双重全量
+  // filterAndSortTasks(每 task JSON.stringify),逐字键入大库会卡。
+  const [localQuery, setLocalQuery] = useState(searchQuery)
+  // 外部修改(清空/其他入口)时同步本地输入
+  useEffect(() => {
+    setLocalQuery(searchQuery)
+  }, [searchQuery])
+  useEffect(() => {
+    if (localQuery === searchQuery) return
+    const timer = setTimeout(() => setSearchQuery(localQuery), 200)
+    return () => clearTimeout(timer)
+  }, [localQuery, searchQuery, setSearchQuery])
   const filterStatus = useStore((s) => s.filterStatus)
   const setFilterStatus = useStore((s) => s.setFilterStatus)
   const filterFavorite = useStore((s) => s.filterFavorite)
@@ -89,8 +103,8 @@ export default function SearchBar() {
           />
         </svg>
         <input
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          value={localQuery}
+          onChange={(e) => setLocalQuery(e.target.value)}
           type="text"
           placeholder="搜索提示词、参数..."
           className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"

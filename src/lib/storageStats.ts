@@ -7,7 +7,7 @@
 
 import type { InputImage, StoredImage, TaskRecord } from '../types'
 import { getDataUrlDecodedByteSize } from './api/imageApiShared'
-import { deleteImage, getAllImages } from './db'
+import { forEachImageMeta, pruneImagesViaCursor } from './db'
 import { deleteCachedImage } from './imageCache'
 
 /**
@@ -95,15 +95,17 @@ async function readStorageQuota(): Promise<StorageStats['quota']> {
  * 真正删除(pruneOrphanImages)时施加。
  */
 export async function computeStorageStats(referencedIds: Set<string>): Promise<StorageStats> {
-  const images = await getAllImages()
   const bySource = emptyBySource()
   let totalBytes = 0
+  let imageCount = 0
   let orphanCount = 0
   let orphanBytes = 0
 
-  for (const img of images) {
+  // 游标流式累加:每条只取标量 size 后即放行 blob,峰值内存与库大小解耦
+  await forEachImageMeta((img) => {
     const size = storedImageByteSize(img)
     totalBytes += size
+    imageCount++
     const key = (img.source ?? 'unknown') as ImageSourceBucket
     const bucket = bySource[key] ?? bySource.unknown
     bucket.count++
@@ -112,11 +114,11 @@ export async function computeStorageStats(referencedIds: Set<string>): Promise<S
       orphanCount++
       orphanBytes += size
     }
-  }
+  })
 
   return {
     totalBytes,
-    imageCount: images.length,
+    imageCount,
     bySource,
     orphanCount,
     orphanBytes,
@@ -134,18 +136,21 @@ export async function pruneOrphanImages(
   referencedIds: Set<string>,
   cutoff: number,
 ): Promise<{ deletedCount: number; deletedBytes: number }> {
-  const images = await getAllImages()
   let deletedCount = 0
   let deletedBytes = 0
+  // 内存缓存删除留到事务外:deleteCachedImage 不碰 IDB,无事务约束,放事务里只会延长事务
+  const pendingCacheDeletes: string[] = []
 
-  for (const img of images) {
-    if (referencedIds.has(img.id)) continue
-    if ((img.createdAt ?? 0) >= cutoff) continue
-    deletedBytes += storedImageByteSize(img)
-    deletedCount++
-    await deleteImage(img.id)
-    deleteCachedImage(img.id)
-  }
+  // 单 readwrite 事务内游标原地删(cursor.delete),替代逐张 deleteImage 的 N 个独立事务
+  await pruneImagesViaCursor(
+    (img) => !referencedIds.has(img.id) && (img.createdAt ?? 0) < cutoff,
+    (img) => {
+      deletedBytes += storedImageByteSize(img)
+      deletedCount++
+      pendingCacheDeletes.push(img.id)
+    },
+  )
 
+  for (const id of pendingCacheDeletes) deleteCachedImage(id)
   return { deletedCount, deletedBytes }
 }

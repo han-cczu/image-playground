@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, useEffect } from 'react'
+import { memo, useCallback, useMemo, useRef, useState, useEffect } from 'react'
 import {
   DndContext,
   PointerSensor,
@@ -16,7 +16,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { Conversation, TaskRecord } from '../types'
+import type { TaskRecord } from '../types'
 import { useStore, reuseConfig, editOutputs, removeTask, reorderTask } from '../store'
 import { filterAndSortTasks } from '../lib/taskFilters'
 import { groupIntoGridBlocks } from '../lib/gridExperiment'
@@ -37,13 +37,25 @@ interface SortableTaskCardProps {
   isSelected: boolean
   dragDisabled: boolean
   conversationTag?: ConversationTag
-  onClick: (e: React.MouseEvent | React.TouchEvent) => void
-  onReuse: () => void
-  onEditOutputs: () => void
-  onDelete: () => void
+  /** 稳定回调(以 task 为参,在 TaskGrid 层 useCallback):避免每卡内联闭包打穿 React.memo */
+  onCardClick: (task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => void
+  onReuse: (task: TaskRecord) => void
+  onEditOutputs: (task: TaskRecord) => void
+  onDelete: (task: TaskRecord) => void
 }
 
-function SortableTaskCard({ task, index, isSelected, dragDisabled, conversationTag, ...handlers }: SortableTaskCardProps) {
+// React.memo:框选 setSelectedTaskIds 时只有 isSelected 实际翻转的卡重渲染,其余跳过 reconcile
+const SortableTaskCard = memo(function SortableTaskCard({
+  task,
+  index,
+  isSelected,
+  dragDisabled,
+  conversationTag,
+  onCardClick,
+  onReuse,
+  onEditOutputs,
+  onDelete,
+}: SortableTaskCardProps) {
   const {
     attributes,
     listeners,
@@ -61,11 +73,17 @@ function SortableTaskCard({ task, index, isSelected, dragDisabled, conversationT
     zIndex: isDragging ? 20 : undefined,
   }
 
+  // 内层闭包 useCallback 化:否则每次 SortableTaskCard 重渲染都新建,打穿内层 TaskCard 的 memo
+  const onClick = useCallback((e: React.MouseEvent | React.TouchEvent) => onCardClick(task, e), [onCardClick, task])
+  const onReuseCb = useCallback(() => onReuse(task), [onReuse, task])
+  const onEditCb = useCallback(() => onEditOutputs(task), [onEditOutputs, task])
+  const onDeleteCb = useCallback(() => onDelete(task), [onDelete, task])
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className="task-card-wrapper"
+      className="task-card-wrapper cv-auto"
       data-task-id={task.id}
     >
       <div className="card-enter" style={{ animationDelay: `${Math.min(index, 12) * 40}ms` }}>
@@ -79,12 +97,18 @@ function SortableTaskCard({ task, index, isSelected, dragDisabled, conversationT
             attributes,
             disabled: dragDisabled,
           }}
-          {...handlers}
+          onClick={onClick}
+          onReuse={onReuseCb}
+          onEditOutputs={onEditCb}
+          onDelete={onDeleteCb}
         />
       </div>
     </div>
   )
-}
+})
+
+/** 超此 task 数仅渲染前 N 条(按 task 计数,矩阵块按成员数累计)+ 提示。极端大库兜底,会强制关拖拽。 */
+const RENDER_CAP = 2000
 
 export default function TaskGrid() {
   const tasks = useStore((s) => s.tasks)
@@ -98,7 +122,6 @@ export default function TaskGrid() {
   const setActiveConversation = useStore((s) => s.setActiveConversation)
   const conversations = useStore((s) => s.conversations)
   const filterConversationId = galleryView ? null : activeConversationId
-  const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const selectedTaskIds = useStore((s) => s.selectedTaskIds)
   const setSelectedTaskIds = useStore((s) => s.setSelectedTaskIds)
@@ -125,20 +148,48 @@ export default function TaskGrid() {
     })
   }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId, filterConversationId])
 
-  /** 派生 conversationId → Conversation，给图库视图下 task 卡片渲染对话标签用。 */
-  const conversationById = useMemo(
-    () => new Map<string, Conversation>(conversations.map((c) => [c.id, c])),
-    [conversations],
-  )
-
   // 把扁平任务流分组成渲染项:同 batchId 的网格 task 聚合成矩阵块,其余为普通卡片。
   const renderItems = useMemo(() => groupIntoGridBlocks(filteredTasks), [filteredTasks])
-  const hasGridBlock = useMemo(() => renderItems.some((i) => i.type === 'grid'), [renderItems])
-  // 拖拽排序只在普通卡片间:矩阵成员不进 SortableContext。
+  // 极端大库兜底:按 task 计数(矩阵块计成员数)累计到 RENDER_CAP 截断——renderItems.length
+  // 会因网格块把整批算 1 项而严重低估真实 task 数,故用 task 数为准(与 spec 一致)
+  const isCapped = filteredTasks.length > RENDER_CAP
+  const visibleItems = useMemo(() => {
+    if (!isCapped) return renderItems
+    const out: typeof renderItems = []
+    let count = 0
+    for (const item of renderItems) {
+      const n = item.type === 'grid' ? item.tasks.length : 1
+      if (count + n > RENDER_CAP) break
+      out.push(item)
+      count += n
+    }
+    return out
+  }, [renderItems, isCapped])
+  const hasGridBlock = useMemo(() => visibleItems.some((i) => i.type === 'grid'), [visibleItems])
+  // 拖拽排序只在普通卡片间:矩阵成员不进 SortableContext;sortableIds 仅取已渲染项,
+  // 避免 cap 截断时 items 引用未渲染卡造成 dnd 不一致。
   const sortableIds = useMemo(
-    () => renderItems.flatMap((i) => (i.type === 'card' ? [i.task.id] : [])),
-    [renderItems],
+    () => visibleItems.flatMap((i) => (i.type === 'card' ? [i.task.id] : [])),
+    [visibleItems],
   )
+
+  /** 图库视图下 conversationId → 对话标签(含稳定 onClick);memo 使其引用稳定,不打穿卡片 memo */
+  const conversationTagById = useMemo(() => {
+    if (!galleryView) return null
+    const map = new Map<string, ConversationTag>()
+    for (const conv of conversations) {
+      map.set(conv.id, {
+        id: conv.id,
+        title: conv.title,
+        color: conv.color || pickFallbackColor(conv.id),
+        onClick: () => {
+          setGalleryView(false)
+          setActiveConversation(conv.id)
+        },
+      })
+    }
+    return map
+  }, [galleryView, conversations, setGalleryView, setActiveConversation])
 
   const dragDisabled =
     galleryView ||
@@ -147,7 +198,9 @@ export default function TaskGrid() {
     filterFavorite ||
     Boolean(filterFavoriteCategoryId) ||
     filteredTasks.length < 2 ||
-    hasGridBlock
+    hasGridBlock ||
+    // cap 截断时被隐藏卡不在 sortableIds 里,拖拽到截断区会落空——直接关拖拽(上万 task 手动排序本无意义)
+    isCapped
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -168,13 +221,36 @@ export default function TaskGrid() {
     reorderTask(String(active.id), prevId, nextId)
   }
 
-  const handleDelete = (task: typeof tasks[0]) => {
+  // 稳定回调(以 task 为参,deps 仅含稳定 setter):内联闭包会让每卡 props 每 render 变化,打穿 memo。
+  // 选择态从 useStore.getState() 现取而非闭包捕获,避免 selectedTaskIds 变化时回调失稳。
+  const handleDelete = useCallback((task: TaskRecord) => {
     setConfirmDialog({
       title: '删除记录',
       message: '确定要删除这条记录吗？关联的图片资源也会被清理（如果没有其他任务引用）。',
       action: () => removeTask(task),
     })
-  }
+  }, [setConfirmDialog])
+
+  const handleCardClick = useCallback((task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => {
+    if (Date.now() < suppressClickUntil.current) {
+      e.preventDefault()
+      return
+    }
+    suppressClickUntil.current = 0
+    const isCtrl = isMac ? (e as React.MouseEvent).metaKey : (e as React.MouseEvent).ctrlKey
+    const state = useStore.getState()
+    if (isCtrl) {
+      state.toggleTaskSelection(task.id)
+    } else if (state.selectedTaskIds.length > 0) {
+      state.clearSelection()
+      state.setDetailTaskId(task.id)
+    } else {
+      state.setDetailTaskId(task.id)
+    }
+  }, [isMac])
+
+  const handleReuse = useCallback((task: TaskRecord) => reuseConfig(task), [])
+  const handleEditOutputs = useCallback((task: TaskRecord) => editOutputs(task), [])
 
   const beginSelection = (target: HTMLElement, clientX: number, clientY: number, isCtrl: boolean) => {
     startedOnCard.current = Boolean(target.closest('.task-card-wrapper'))
@@ -314,7 +390,7 @@ export default function TaskGrid() {
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={sortableIds} strategy={rectSortingStrategy}>
           <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
-            {renderItems.map((item, index) => {
+            {visibleItems.map((item, index) => {
               if (item.type === 'grid') {
                 return (
                   <TaskGridMatrix
@@ -326,54 +402,33 @@ export default function TaskGrid() {
                 )
               }
               const task = item.task
-              let conversationTag: ConversationTag | undefined
-              if (galleryView && task.conversationId) {
-                const conv = conversationById.get(task.conversationId)
-                if (conv) {
-                  conversationTag = {
-                    id: conv.id,
-                    title: conv.title,
-                    color: conv.color || pickFallbackColor(conv.id),
-                    onClick: () => {
-                      setGalleryView(false)
-                      setActiveConversation(conv.id)
-                    },
-                  }
-                }
-              }
+              const conversationTag =
+                galleryView && task.conversationId
+                  ? conversationTagById?.get(task.conversationId)
+                  : undefined
               return (
-              <SortableTaskCard
-                key={task.id}
-                task={task}
-                index={index}
-                isSelected={selectedTaskIds.includes(task.id)}
-                dragDisabled={dragDisabled}
-                conversationTag={conversationTag}
-                onClick={(e) => {
-                  if (Date.now() < suppressClickUntil.current) {
-                    e.preventDefault()
-                    return
-                  }
-                  suppressClickUntil.current = 0
-                  const isCtrl = isMac ? (e as React.MouseEvent).metaKey : (e as React.MouseEvent).ctrlKey
-                  if (isCtrl) {
-                    useStore.getState().toggleTaskSelection(task.id)
-                  } else if (selectedTaskIds.length > 0) {
-                    clearSelection()
-                    setDetailTaskId(task.id)
-                  } else {
-                    setDetailTaskId(task.id)
-                  }
-                }}
-                onReuse={() => reuseConfig(task)}
-                onEditOutputs={() => editOutputs(task)}
-                onDelete={() => handleDelete(task)}
-              />
+                <SortableTaskCard
+                  key={task.id}
+                  task={task}
+                  index={index}
+                  isSelected={selectedTaskIds.includes(task.id)}
+                  dragDisabled={dragDisabled}
+                  conversationTag={conversationTag}
+                  onCardClick={handleCardClick}
+                  onReuse={handleReuse}
+                  onEditOutputs={handleEditOutputs}
+                  onDelete={handleDelete}
+                />
               )
             })}
           </div>
         </SortableContext>
       </DndContext>
+      {isCapped && (
+        <div className="py-6 text-center text-xs text-gray-400 dark:text-gray-500">
+          仅显示前 {RENDER_CAP} 条,共 {filteredTasks.length} 条记录。请用搜索 / 筛选缩小范围以查看其余。
+        </div>
+      )}
       {selectionBox && (
         <div
           className="fixed bg-blue-500/20 border border-blue-500/50 pointer-events-none z-[30]"
