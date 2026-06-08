@@ -29,7 +29,7 @@ export function isOpenAIProfile(p: ApiProfile): p is OpenAIProfile {
   return p.provider === 'openai'
 }
 
-/** 提示词优化 API 的独立配置（OpenAI 兼容 chat completions） */
+/** 提示词优化 API 的独立配置（OpenAI 兼容 chat completions，或 Gemini 原生 generateContent） */
 export interface PromptOptimizerConfig {
   baseUrl: string
   apiKey: string
@@ -38,6 +38,8 @@ export interface PromptOptimizerConfig {
   timeout: number
   /** 用户可自定义的优化系统提示词 */
   systemPrompt: string
+  /** API provider；缺省/旧数据视为 'openai' */
+  provider?: ApiProvider
 }
 
 /** 提示词优化器的命名配置（多配置切换用） */
@@ -46,7 +48,7 @@ export interface PromptOptimizerProfile extends PromptOptimizerConfig {
   name: string
 }
 
-/** 反推提示词 API 的独立配置（OpenAI 兼容 chat completions + vision） */
+/** 反推提示词 API 的独立配置（OpenAI 兼容 chat completions + vision，或 Gemini 原生 generateContent） */
 export interface CaptionerConfig {
   baseUrl: string
   apiKey: string
@@ -55,6 +57,8 @@ export interface CaptionerConfig {
   timeout: number
   /** 用户可自定义的反推系统提示词 */
   systemPrompt: string
+  /** API provider；缺省/旧数据视为 'openai' */
+  provider?: ApiProvider
 }
 
 /** 反推提示词的命名配置（多配置切换用） */

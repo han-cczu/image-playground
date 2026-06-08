@@ -5,6 +5,7 @@ import {
   parseSseLine,
   resolveChatTimeoutMs,
 } from './chatCompletionsShared'
+import { streamGeminiChat } from './geminiChatShared'
 import { DEFAULT_OPTIMIZER_TIMEOUT } from './apiProfiles'
 
 export interface OptimizePromptOptions {
@@ -30,6 +31,11 @@ export async function optimizePromptStream(
   }
   if (!userPrompt.trim()) {
     throw new Error('提示词为空')
+  }
+
+  // provider 分流(缺省/undefined 走 OpenAI,守住现有测试);optimizer 纯文本无 vision
+  if (config.provider === 'gemini') {
+    return streamGeminiChat(config, [{ text: userPrompt }], '优化结果为空', options)
   }
 
   const url = buildChatCompletionsUrl(config.baseUrl)

@@ -122,3 +122,42 @@ describe('optimizePromptStream', () => {
     expect(result).toBe('ok')
   })
 })
+
+describe('optimizePromptStream — Gemini provider', () => {
+  const geminiConfig: PromptOptimizerConfig = {
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    apiKey: 'gm-key',
+    model: 'gemini-2.5-flash',
+    timeout: 30,
+    systemPrompt: 'You are a prompt engineer.',
+    provider: 'gemini',
+  }
+  const fetchMock = vi.fn<typeof fetch>()
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('纯文本(无 inlineData)走 Gemini generateContent,systemInstruction 映射', async () => {
+    fetchMock.mockResolvedValue(
+      makeSseResponse([
+        'data: {"candidates":[{"content":{"parts":[{"text":"better "}]}}]}\n\n',
+        'data: {"candidates":[{"content":{"parts":[{"text":"prompt"}]}}]}\n\n',
+      ]),
+    )
+    const result = await optimizePromptStream(geminiConfig, 'draft')
+    expect(result).toBe('better prompt')
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toContain(':streamGenerateContent?alt=sse')
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.systemInstruction.parts[0].text).toBe(geminiConfig.systemPrompt)
+    const parts = body.contents[0].parts
+    expect(parts).toHaveLength(1) // 纯文本,无图 part
+    expect(parts[0].text).toBe('draft')
+  })
+})

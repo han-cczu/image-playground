@@ -1,7 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
 import { listModels } from '../../lib/api/listModels'
 import {
+  DEFAULT_CAPTIONER_MODEL,
   DEFAULT_CAPTIONER_SYSTEM_PROMPT,
+  DEFAULT_GEMINI_BASE_URL,
+  DEFAULT_GEMINI_CHAT_MODEL,
   DEFAULT_SETTINGS,
 } from '../../lib/api/apiProfiles'
 import type { CaptionerProfile, OpenAIProfile } from '../../types'
@@ -62,8 +65,46 @@ export function CaptionerSection({
     }
   }, [captioner.baseUrl, captioner.apiKey, captioner.model, captioner.timeout])
 
+  const provider = captioner.provider ?? 'openai'
+
+  // 切 provider 时连同重置 baseUrl/model 到目标 provider 默认(对齐图像 profile 的 switchApiProfileProvider)——
+  // 否则从已配置 OpenAI 切 Gemini 会残留 OpenAI baseUrl,致 x-goog-api-key 发往 OpenAI 主机(功能失败 + 凭据泄露)
+  const switchProvider = (p: 'openai' | 'gemini') => {
+    if (p === provider) return
+    if (p === 'gemini') {
+      onUpdate({ provider: 'gemini', baseUrl: DEFAULT_GEMINI_BASE_URL, model: DEFAULT_GEMINI_CHAT_MODEL })
+    } else {
+      onUpdate({ provider: 'openai', baseUrl: DEFAULT_SETTINGS.baseUrl, model: DEFAULT_CAPTIONER_MODEL })
+    }
+  }
+
   return (
     <div className="space-y-4">
+      <div className="block">
+        <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Provider</span>
+        <div className="inline-flex rounded-xl border border-gray-200/70 p-0.5 dark:border-white/[0.08]">
+          {(['openai', 'gemini'] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => switchProvider(p)}
+              className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
+                provider === p
+                  ? 'bg-blue-500 text-white'
+                  : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/[0.06]'
+              }`}
+            >
+              {p === 'openai' ? 'OpenAI 兼容' : 'Gemini 原生'}
+            </button>
+          ))}
+        </div>
+        <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+          {provider === 'gemini'
+            ? 'Gemini 原生 generateContent(vision)。模型需支持图像输入,如 gemini-2.5-flash。'
+            : 'OpenAI 兼容 chat completions(vision)。'}
+        </div>
+      </div>
+
       <label className="block">
         <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">配置名称</span>
         <input
@@ -80,11 +121,13 @@ export function CaptionerSection({
           value={captioner.baseUrl}
           onChange={(e) => onUpdate({ baseUrl: e.target.value })}
           type="text"
-          placeholder={DEFAULT_SETTINGS.baseUrl}
+          placeholder={provider === 'gemini' ? DEFAULT_GEMINI_BASE_URL : DEFAULT_SETTINGS.baseUrl}
           className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
         />
         <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-          独立配置，与图像生成 / 提示词优化解耦。需是 OpenAI 兼容、且模型支持图像输入（vision）的 chat completions 接口。
+          {provider === 'gemini'
+            ? '独立配置。Gemini 原生 generateContent 端点（如 generativelanguage.googleapis.com/v1beta）。'
+            : '独立配置，与图像生成 / 提示词优化解耦。需是 OpenAI 兼容、且模型支持图像输入（vision）的 chat completions 接口。'}
         </div>
       </label>
 
@@ -120,10 +163,13 @@ export function CaptionerSection({
           onOpenChange={setModelListOpen}
           modelList={modelList}
           error={modelListError}
-          placeholder="gpt-4o-mini"
+          placeholder={provider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o-mini'}
+          showFetchButton={provider !== 'gemini'}
         />
         <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-          需选择支持图像输入的模型（如 gpt-4o-mini / gpt-4o）。
+          {provider === 'gemini'
+            ? '需选择支持图像输入的 Gemini 模型（如 gemini-2.5-flash）。'
+            : '需选择支持图像输入的模型（如 gpt-4o-mini / gpt-4o）。'}
         </div>
       </label>
 
