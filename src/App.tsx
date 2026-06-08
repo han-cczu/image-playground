@@ -22,6 +22,7 @@ import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
 import CommandPalette from './components/CommandPalette'
 import CompareModal from './components/CompareModal'
+import LineageModal from './components/LineageModal'
 import ErrorBoundary from './components/ErrorBoundary'
 import InsecureContextBanner from './components/InsecureContextBanner'
 import TourOverlay from './components/TourOverlay'
@@ -217,6 +218,9 @@ export default function App() {
       </ErrorBoundary>
       <ErrorBoundary region="modal">
         <CompareModal />
+      </ErrorBoundary>
+      <ErrorBoundary region="modal">
+        <LineageModal />
       </ErrorBoundary>
       <ErrorBoundary region="modal">
         <TourOverlay />

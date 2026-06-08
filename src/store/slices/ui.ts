@@ -50,6 +50,9 @@ export interface UiSlice {
   /** A/B 并排对比：选中的 2~4 个 task id；null=关闭。瞬态不持久化 */
   compareTaskIds: string[] | null
   setCompareTaskIds: (ids: string[] | null) => void
+  /** 创作谱系树：锚定的中心 task id；null=关闭。瞬态不持久化 */
+  lineageTaskId: string | null
+  setLineageTaskId: (id: string | null) => void
   /** 反推源图（base64 data URL）；非 null 即打开反推 modal */
   captionSource: string | null
   setCaptionSource: (src: string | null) => void
@@ -126,6 +129,8 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   setShowCommandPalette: (showCommandPalette) => set({ showCommandPalette }),
   compareTaskIds: null,
   setCompareTaskIds: (compareTaskIds) => set({ compareTaskIds }),
+  lineageTaskId: null,
+  setLineageTaskId: (lineageTaskId) => set({ lineageTaskId }),
   captionSource: null,
   setCaptionSource: (captionSource) => set({ captionSource }),
 

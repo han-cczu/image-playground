@@ -14,6 +14,7 @@ export default function DetailModal() {
   const tasks = useStore((s) => s.tasks)
   const detailTaskId = useStore((s) => s.detailTaskId)
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
+  const setLineageTaskId = useStore((s) => s.setLineageTaskId)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const showToast = useStore((s) => s.showToast)
@@ -582,7 +583,7 @@ export default function DetailModal() {
               </div>
             )}
 
-            {/* 创作血缘 */}
+            {/* 创作血缘(单跳预览 + 完整谱系入口) */}
             {(parentLinks.length > 0 || childLinks.length > 0) && (
               <div className="mb-4 space-y-3">
                 {parentLinks.length > 0 && (
@@ -601,6 +602,24 @@ export default function DetailModal() {
                     <div className="flex flex-wrap gap-2">{childLinks.map(renderLineageLink)}</div>
                   </div>
                 )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    // 替换式打开谱系树:关 DetailModal,以当前 task 为中心
+                    const id = task.id
+                    setDetailTaskId(null)
+                    setLineageTaskId(id)
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-600 transition hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="5" r="2.5" />
+                    <circle cx="6" cy="19" r="2.5" />
+                    <circle cx="18" cy="19" r="2.5" />
+                    <path d="M12 7.5v3M12 10.5 6.8 16.6M12 10.5l5.2 6.1" />
+                  </svg>
+                  查看完整谱系
+                </button>
               </div>
             )}
 
