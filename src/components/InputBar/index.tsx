@@ -61,19 +61,24 @@ export default function InputBar() {
   const filterFavorite = useStore((s) => s.filterFavorite)
   const filterFavoriteCategoryId = useStore((s) => s.filterFavoriteCategoryId)
   const searchQuery = useStore((s) => s.searchQuery)
+  const galleryView = useStore((s) => s.galleryView)
+  const activeConversationId = useStore((s) => s.activeConversationId)
   const maskDraft = useStore((s) => s.maskDraft)
   const setMaskEditorImageId = useStore((s) => s.setMaskEditorImageId)
   const moveInputImage = useStore((s) => s.moveInputImage)
   const sidebarCollapsed = useStore((s) => s.sidebarCollapsed)
 
+  // 「当前可见」口径必须与 TaskGrid 完全一致(含对话过滤):漏传 filterConversationId 时,
+  // 对话视图下「全选当前可见」会圈进其它对话里不可见的任务,批量删除会误删用户从未看到的记录。
   const filteredTasks = useMemo(() => {
     return filterAndSortTasks(tasks, {
       searchQuery,
       filterStatus,
       filterFavorite,
       filterFavoriteCategoryId,
+      filterConversationId: galleryView ? null : activeConversationId,
     })
-  }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId])
+  }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId, galleryView, activeConversationId])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const captionFileInputRef = useRef<HTMLInputElement>(null)

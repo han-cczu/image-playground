@@ -33,6 +33,7 @@ import {
   putConversation,
   putTask,
 } from '../../lib/db'
+import { rollbackStoredImages, terminateRunningTaskRuntimes } from '../../lib/taskRuntime'
 import type { AppState } from '../index'
 
 export function orderImagesWithMaskFirst(images: InputImage[], maskTargetImageId: string | null | undefined) {
@@ -428,8 +429,12 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
       action: () => {
         void (async () => {
           try {
-            await dbDeleteConversation(id, true)
+            // terminate + 同步更新 store 必须在任何 await 之前(契约见 terminateRunningTaskRuntimes,
+            // 与 removeTask/removeMultipleTasks 的「先 setTasks 再 await db」安全模式一致):
+            // 否则在途任务的 abort 异常会赶在级联删除事务后把幽灵 error 记录写回 tasks 表
             const latest = get()
+            const deletedTasks = latest.tasks.filter((task) => task.conversationId === id)
+            terminateRunningTaskRuntimes(deletedTasks)
             const remainingConversations = latest.conversations.filter((c) => c.id !== id)
             const remainingTasks = latest.tasks.filter((task) => task.conversationId !== id)
             const nextActive =
@@ -441,7 +446,22 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
               tasks: remainingTasks,
               activeConversationId: nextActive,
             })
+            await dbDeleteConversation(id, true)
             latest.showToast('对话已删除', 'success')
+            // 即时回收被删任务的孤儿图片(与 removeTask/removeMultipleTasks 行为对齐,
+            // 不再留给下次启动的 initStore GC):rollbackStoredImages 只删当前无引用的,不误删共享图。
+            // GC 失败是良性的(initStore 下次兜底),单独吞掉,不把已成功的删除误报成失败。
+            try {
+              const deletedImageIds = new Set<string>()
+              for (const task of deletedTasks) {
+                for (const imgId of task.inputImageIds || []) deletedImageIds.add(imgId)
+                if (task.maskImageId) deletedImageIds.add(task.maskImageId)
+                for (const imgId of task.outputImages || []) deletedImageIds.add(imgId)
+              }
+              await rollbackStoredImages([...deletedImageIds])
+            } catch {
+              /* 孤儿图留待 initStore GC 兜底 */
+            }
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err)
             get().showToast(`删除对话失败：${message}`, 'error')
@@ -450,5 +470,12 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
       },
     })
   },
-  setActiveConversation: (id) => set({ activeConversationId: id }),
+  // 切换对话时清空多选:选中集合不随视图过滤收窄,残留的跨对话选择会让后续批量操作
+  // 作用到当前视图看不到的任务上(与 InputBar「全选当前可见」的口径修复同属一个问题域)。
+  setActiveConversation: (id) =>
+    set((state) =>
+      state.activeConversationId === id
+        ? { activeConversationId: id }
+        : { activeConversationId: id, selectedTaskIds: [] },
+    ),
 })

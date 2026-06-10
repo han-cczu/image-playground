@@ -26,6 +26,7 @@ import {
 } from './conversations'
 import { reseedConversationsFromFavoriteCategories } from './conversationMigration'
 import { normalizeTasks } from './tasks'
+import { SYNC_HTTP_INTERRUPTED_ERROR, terminateRunningTaskRuntimes } from './taskRuntime'
 
 export type ImportMode = 'merge' | 'replace'
 
@@ -117,10 +118,6 @@ function sanitizeImportedTasksForFavoriteCategories(
 
 /** 清空所有数据（含配置重置） */
 export async function clearAllData() {
-  await dbClearTasks()
-  await clearImages()
-  await dbClearConversations()
-  clearImageCache()
   const {
     setTasks,
     clearInputImages,
@@ -132,7 +129,17 @@ export async function clearAllData() {
     setActiveConversation,
     showToast,
   } = useStore.getState()
+  // 清库前先中止全部在途请求并回收 watchdog/controller:不终止则请求继续白烧 API 配额;
+  // 不能用 cancelTask(其 fire-and-forget 写库可能在清库后落盘,把幽灵记录写回空表)。
+  // terminate 与 setTasks([]) 必须在同一同步段、先于任何 await:abort 异常到达 executeTask
+  // catch 时 store 里必须已无该任务,守卫才会早退而不是把幽灵 error 写回刚清空的表(见
+  // terminateRunningTaskRuntimes 的调用契约);排队成员同理被入口守卫拦下。
+  terminateRunningTaskRuntimes(useStore.getState().tasks)
   setTasks([])
+  await dbClearTasks()
+  await clearImages()
+  await dbClearConversations()
+  clearImageCache()
   setFavoriteCategories([createDefaultFavoriteCategory()])
   useStore.getState().setSnippets([])
   useStore.setState({ batchNotes: {} })
@@ -213,7 +220,21 @@ export async function exportData() {
     a.download = `image-playground-${Date.now()}.zip`
     a.click()
     URL.revokeObjectURL(url)
-    useStore.getState().showToast('数据已导出', 'success')
+    // 导出与导入的上限必须对称:超过导入上限的备份「导出成功却永远无法恢复」,
+    // 且 PNG/WebP 已压缩、zip 几乎不再缩小,用户没有产品内自救路径——必须在导出时就告知。
+    // 用信息弹窗而非 toast:这条关键警告约 60 字,3 秒自动消失的 toast 来不及读完。
+    if (zipped.byteLength > MAX_IMPORT_FILE_BYTES) {
+      useStore.getState().setConfirmDialog({
+        title: '备份超过导入上限',
+        message: `备份已导出,但大小 ${Math.round(zipped.byteLength / 1024 / 1024)}MB 超过导入上限 ${Math.round(MAX_IMPORT_FILE_BYTES / 1024 / 1024)}MB,这份备份将无法直接导入恢复。\n\n建议清理无用记录或孤儿图片后重新备份。`,
+        confirmText: '知道了',
+        icon: 'info',
+        showCancel: false,
+        action: () => {},
+      })
+    } else {
+      useStore.getState().showToast('数据已导出', 'success')
+    }
   } catch (e) {
     useStore
       .getState()
@@ -249,7 +270,13 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
       : []
     const importedCategoryIds = new Set(importedCategories.map((category) => category.id))
     // 对不可信 task 做字段级白名单归一化(防缺字段 / 类型错误 / __proto__ 污染直入 IndexedDB)
-    const normalizedImportedTasks = normalizeTasks(data.tasks)
+    // 备份里 status:'running' 的任务在导入端没有执行体,会成为无请求、无 watchdog 的幽灵 running
+    // 卡片,统一落「请求中断」错误态(与 initStore 启动恢复同口径)。耗时未知,不按导入时刻伪造。
+    const normalizedImportedTasks = normalizeTasks(data.tasks).map((task) =>
+      task.status === 'running'
+        ? { ...task, status: 'error' as const, error: SYNC_HTTP_INTERRUPTED_ERROR, finishedAt: task.createdAt, elapsed: null }
+        : task,
+    )
     const importedTasks = sanitizeImportedTasksForFavoriteCategories(normalizedImportedTasks, importedCategoryIds)
 
     // 先把全部待写图片解码 + 校验到内存(路径穿越 / id 错配 / 字节缺失在此 continue 跳过),全部就绪后才清空,
@@ -269,16 +296,20 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
 
     // 全部待写记录就绪后才清空旧库(replace 模式),最大限度缩小数据丢失窗口。
     if (isReplaceMode) {
-      await dbClearTasks()
-      await clearImages()
-      await dbClearConversations()
-      clearImageCache()
+      // 同 clearAllData:terminate + 同步清 store 必须先于任何 await(契约见
+      // terminateRunningTaskRuntimes),否则 abort 异常会把幽灵 error 记录写回刚清空的表,
+      // 且本函数末尾的 getAllTasks() 重读会当场把幽灵带回 UI。
       const state = useStore.getState()
+      terminateRunningTaskRuntimes(state.tasks)
       state.setTasks([])
       state.setConversations([])
       state.setActiveConversation(null)
       state.clearInputImages()
       state.clearMaskDraft()
+      clearImageCache()
+      await dbClearTasks()
+      await clearImages()
+      await dbClearConversations()
     }
 
     // 纯写回(已无解码 / 校验,清空后失败概率最低)

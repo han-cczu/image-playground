@@ -1,8 +1,9 @@
 import { useStore } from '../store'
 
 /**
- * 仅在非 secure context（即 HTTP + IP 部署）下渲染的一行 sticky banner，
+ * 仅在非 secure context（即 HTTP + IP 部署）下渲染的一行 banner，
  * 提醒用户当前丢失了 PWA / 离线 / kill-switch 等能力。
+ * sticky 定位由 App 中与 InitErrorBanner 共享的容器提供（各自 sticky 会在滚动后互相覆盖）。
  *
  * 渲染条件：
  *   - 浏览器环境（typeof window !== 'undefined'）
@@ -25,7 +26,7 @@ export default function InsecureContextBanner() {
     <div
       role="status"
       aria-live="polite"
-      className="sticky top-0 z-30 flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100 sm:text-sm"
+      className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100 sm:text-sm"
     >
       <span aria-hidden="true" className="flex-shrink-0">⚠️</span>
       <span className="min-w-0 flex-1 leading-5">

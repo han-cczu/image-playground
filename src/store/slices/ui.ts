@@ -111,8 +111,13 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   setMobileInputCollapsed: (mobileInputCollapsed) => set({ mobileInputCollapsed }),
 
   // Gallery view
+  // 切换视图同时清空多选(与 setActiveConversation 同口径):图库→对话视图时可见域收窄,
+  // 图库里跨对话选中的任务会变成「看不见但仍被批量操作命中」的残留选择。
   galleryView: false,
-  setGalleryView: (galleryView) => set({ galleryView }),
+  setGalleryView: (galleryView) =>
+    set((state) =>
+      state.galleryView === galleryView ? { galleryView } : { galleryView, selectedTaskIds: [] },
+    ),
 
   // UI
   detailTaskId: null,

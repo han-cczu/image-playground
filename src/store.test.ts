@@ -31,6 +31,11 @@ vi.mock('./lib/db', async (importOriginal) => {
     storeImage: vi.fn(actual.storeImage),
     putConversation: vi.fn(async () => 'conv-id'),
     deleteConversation: vi.fn(async () => undefined),
+    // clearAllData 路径(M3 测试)触达的清库原语:node 环境无 indexedDB,真实现会炸
+    clearTasks: vi.fn(async () => undefined),
+    clearImages: vi.fn(async () => undefined),
+    clearConversations: vi.fn(async () => undefined),
+    persistConversationMigration: vi.fn(async () => undefined),
   }
 })
 
@@ -54,7 +59,8 @@ vi.mock('./lib/concurrency', async (importOriginal) => {
 import { deleteConversation, putConversation, putTask, storeImage } from './lib/db'
 import { callImageApi } from './lib/api'
 import { ARCHIVE_CONVERSATION_ID } from './lib/conversations'
-import { resetTaskRuntimeForTest, scheduleSyncHttpWatchdog } from './lib/taskRuntime'
+import { resetTaskRuntimeForTest, resolveExecutionProfile, scheduleSyncHttpWatchdog } from './lib/taskRuntime'
+import { clearAllData } from './lib/exportImport'
 import { mapWithConcurrency } from './lib/concurrency'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
@@ -387,6 +393,94 @@ describe('task runtime reliability', () => {
     expect(useStore.getState().tasks[0].error).toContain('超时')
   })
 
+  it('queued batch members execute on the profile pinned at enqueue, not the active profile at dequeue', async () => {
+    // M1(2026-06-10 审查修复):批量排队窗口内切 active profile,剩余成员曾静默换供应商执行,
+    // 而任务记录的 apiProvider/apiModel 仍是入队旧值——对照实验样本被污染且事后不可检测。
+    const geminiProfile = {
+      id: 'pg',
+      name: 'Gemini 实验',
+      provider: 'gemini' as const,
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      apiKey: 'gk',
+      model: 'gemini-2.5-flash-image',
+      timeout: 600,
+    }
+    useStore.setState({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        timeout: 1,
+        profiles: [...DEFAULT_SETTINGS.profiles, geminiProfile],
+        batchConcurrency: 1,
+      },
+      prompt: '{x|y}',
+      showToast: vi.fn(),
+    })
+
+    const seenProfiles: Array<{ name?: string; provider?: string } | undefined> = []
+    let releaseFirst: (() => void) | undefined
+    vi.mocked(callImageApi).mockImplementation((_opts, profileOverride) => {
+      seenProfiles.push(profileOverride)
+      return new Promise((resolve) => {
+        const finish = () => resolve({ images: ['data:image/png;base64,AQID'], actualParams: {} })
+        if (seenProfiles.length === 1) releaseFirst = finish
+        else finish()
+      })
+    })
+
+    await submitTask()
+    await vi.waitFor(() => expect(seenProfiles).toHaveLength(1))
+    const enqueuedProfileName = useStore.getState().tasks[0]?.apiProfileName
+    expect(enqueuedProfileName).toBeTruthy()
+
+    // 第一条在途、第二条还在并发闸(batchConcurrency=1)里排队时,切走 active profile
+    useStore.setState((s) => ({ settings: { ...s.settings, activeProfileId: 'pg' } }))
+    releaseFirst?.()
+
+    await vi.waitFor(() => expect(seenProfiles).toHaveLength(2))
+    // 排队成员仍以入队时的 openai profile 执行,而不是切换后的 gemini
+    expect(seenProfiles[1]?.provider).toBe('openai')
+    expect(seenProfiles[1]?.name).toBe(enqueuedProfileName)
+  })
+
+  it('clearAllData terminates in-flight tasks without writing ghost error records back (M3)', async () => {
+    // 在途请求在 abort 时 reject;若 store 清空晚于 terminate 的同一同步段,
+    // executeTask 的 catch 守卫会看到任务仍 running,把幽灵 error 记录 putTask 回刚清空的表
+    vi.mocked(callImageApi).mockImplementation(
+      (opts) =>
+        new Promise((_, reject) => {
+          opts.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+        }),
+    )
+    await submitTask()
+    await vi.waitFor(() => expect(vi.mocked(callImageApi)).toHaveBeenCalledOnce())
+    vi.mocked(putTask).mockClear()
+
+    await clearAllData()
+    // 给 abort rejection 的微任务链一个宏任务窗口走完 executeTask 的 catch 路径
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(useStore.getState().tasks).toEqual([])
+    expect(putTask).not.toHaveBeenCalled()
+  })
+
+  it('watchdog is disarmed once the response resolves: slow image persistence must not flip success to timeout', async () => {
+    // M2(2026-06-10 审查修复):watchdog 计时窗口曾覆盖响应返回后的写图阶段,
+    // deadline 落在 storeImage 循环内时,已成功的生成被翻成「请求超时」且刚存的图被回滚删除。
+    vi.useFakeTimers()
+    vi.mocked(callImageApi).mockResolvedValue({ images: ['data:image/png;base64,AQID'], actualParams: {} })
+    // 写图比 watchdog timeout(1s)慢
+    vi.mocked(storeImage).mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve('slow-image-id'), 5_000)),
+    )
+
+    await submitTask()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await vi.waitFor(() => expect(useStore.getState().tasks[0]?.status).toBe('done'))
+
+    expect(useStore.getState().tasks[0]).toMatchObject({ status: 'done', outputImages: ['slow-image-id'] })
+  })
+
   it('submitGridTask generates one task per axis value, sharing batchId with gridAxes/gridCoord', async () => {
     vi.mocked(callImageApi).mockImplementation(() => new Promise(() => undefined))
     useStore.setState({ prompt: 'a cat', params: { ...DEFAULT_PARAMS }, showToast: vi.fn() })
@@ -567,6 +661,73 @@ describe('favorite category store actions', () => {
   })
 })
 
+describe('resolveExecutionProfile (M1 执行 profile 固定)', () => {
+  const openaiA = {
+    id: 'pa', name: '新配置', provider: 'openai' as const, apiMode: 'images' as const,
+    baseUrl: 'https://a.example/v1', apiKey: 'ka', model: 'gpt-image-2', timeout: 600,
+  }
+  const openaiB = {
+    id: 'pb', name: '新配置', provider: 'openai' as const, apiMode: 'images' as const,
+    baseUrl: 'https://b.example/v1', apiKey: 'kb', model: 'gpt-image-2', timeout: 600,
+  }
+  const gemini = {
+    id: 'pg', name: 'Gemini 配置', provider: 'gemini' as const,
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta', apiKey: 'kg',
+    model: 'gemini-2.5-flash-image', timeout: 600,
+  }
+  const makeSettings = (activeProfileId: string) =>
+    normalizeSettings({ ...DEFAULT_SETTINGS, profiles: [openaiA, openaiB, gemini], activeProfileId })
+
+  it('按 apiProfileId 精确解析:重名 profile 下不会投错端点', () => {
+    const resolved = resolveExecutionProfile(
+      makeSettings('pa'),
+      task({ apiProfileId: 'pb', apiProfileName: '新配置', apiProvider: 'openai', apiModel: 'gpt-image-2', status: 'running' }),
+    )
+    expect(resolved).not.toBeNull()
+    expect(resolved!.profile.id).toBe('pb')
+    expect(resolved!.profile.baseUrl).toBe('https://b.example/v1')
+    expect(resolved!.isActive).toBe(false)
+  })
+
+  it('旧记录仅有 apiProfileName 且重名多命中 → 返回 null(不猜目标)', () => {
+    const resolved = resolveExecutionProfile(
+      makeSettings('pa'),
+      task({ apiProfileName: '新配置', apiProvider: 'openai', status: 'running' }),
+    )
+    expect(resolved).toBeNull()
+  })
+
+  it('旧记录按唯一 name 解析成功;profile 被删 / provider 已变 → null', () => {
+    const byName = resolveExecutionProfile(
+      makeSettings('pa'),
+      task({ apiProfileName: 'Gemini 配置', apiProvider: 'gemini', status: 'running' }),
+    )
+    expect(byName!.profile.id).toBe('pg')
+
+    expect(
+      resolveExecutionProfile(makeSettings('pa'), task({ apiProfileId: 'deleted-id', status: 'running' })),
+    ).toBeNull()
+    expect(
+      resolveExecutionProfile(
+        makeSettings('pa'),
+        task({ apiProfileId: 'pg', apiProvider: 'openai', status: 'running' }),
+      ),
+    ).toBeNull()
+  })
+
+  it('模型固定为 task.apiModel(同 profile 内改模型也属漂移);无元数据的旧记录回落 active', () => {
+    const pinnedModel = resolveExecutionProfile(
+      makeSettings('pa'),
+      task({ apiProfileId: 'pg', apiProvider: 'gemini', apiModel: 'gemini-legacy-model', status: 'running' }),
+    )
+    expect(pinnedModel!.profile.model).toBe('gemini-legacy-model')
+
+    const legacy = resolveExecutionProfile(makeSettings('pg'), task({ status: 'running' }))
+    expect(legacy!.profile.id).toBe('pg')
+    expect(legacy!.isActive).toBe(true)
+  })
+})
+
 describe('conversation store actions', () => {
   beforeEach(() => {
     vi.mocked(putConversation).mockReset()
@@ -585,6 +746,18 @@ describe('conversation store actions', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('setActiveConversation clears selectedTaskIds when switching to a different conversation', () => {
+    // H2 配套(2026-06-10 审查修复):多选集合不随视图过滤收窄,跨对话残留选择会被批量操作误伤
+    useStore.setState({ activeConversationId: 'conv-a', selectedTaskIds: ['t1', 't2'] })
+    useStore.getState().setActiveConversation('conv-b')
+    expect(useStore.getState().selectedTaskIds).toEqual([])
+
+    // 重复设置同一对话不清空(避免无谓的选择丢失)
+    useStore.setState({ selectedTaskIds: ['t3'] })
+    useStore.getState().setActiveConversation('conv-b')
+    expect(useStore.getState().selectedTaskIds).toEqual(['t3'])
   })
 
   it('createConversation auto-activates the new conversation', () => {

@@ -210,6 +210,32 @@ describe('export/import reliability', () => {
     expect(dbCalls).toEqual(['persistConversationMigration'])
   })
 
+  it('marks imported running tasks as interrupted (no executor exists on the importing side)', async () => {
+    // L2(2026-06-10 审查修复):备份里 status:'running' 的任务导入后曾成为无请求、无 watchdog 的
+    // 幽灵 running 卡片;统一落「请求中断」错误态,耗时未知不伪造。
+    const running = { ...createTask('ghost-running'), status: 'running' as const, error: null, finishedAt: null, elapsed: null, createdAt: 1234 }
+    const file = createImportFile({
+      version: 4,
+      exportedAt: new Date(0).toISOString(),
+      settings: DEFAULT_SETTINGS,
+      tasks: [running],
+      imageFiles: {},
+    })
+
+    const ok = await importData(file, { mode: 'merge' })
+
+    expect(ok).toBe(true)
+    expect(putTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'ghost-running',
+        status: 'error',
+        error: '请求中断',
+        finishedAt: 1234,
+        elapsed: null,
+      }),
+    )
+  })
+
   it('imports favorite category metadata and task assignments', async () => {
     const task = createTask('categorized-task')
     task.isFavorite = true

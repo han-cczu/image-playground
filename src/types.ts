@@ -187,6 +187,8 @@ export interface TaskRecord {
   params: TaskParams
   /** 生成时使用的 Provider 类型 */
   apiProvider?: ApiProvider
+  /** 生成时使用的 Profile id(执行期固定 profile 的解析键;显示名可重复,id 不会) */
+  apiProfileId?: string
   /** 生成时使用的 Provider 名称 */
   apiProfileName?: string
   /** 生成时使用的模型 ID */
