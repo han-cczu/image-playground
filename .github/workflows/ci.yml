@@ -1,0 +1,35 @@
+# CI 门禁:此前 441+ 个测试不在任何合并/部署门禁上,npm run deploy 直通线上。
+# build 步骤同时覆盖 tsc -b、CSP 内联脚本 hash 校验(verify-csp-hash)与 SW build id 注入,
+# 把「强制 CSP 后白屏」「测试红着上线」前移为 CI 硬失败。
+# 注意:本 workflow 需在分支保护里设为 required status check 才真正闭环;
+# 本地 npm run deploy 仍不经此门禁(后续可改为仅从 CI 发布)。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # eslint 仅 error 失败(warning 基线 91 条,清零是独立的代码健康轮)
+      - run: npm run lint
+      - run: npm test
+      # tsc -b + vite build + inject-sw-build-id + verify-csp-hash
+      - run: npm run build

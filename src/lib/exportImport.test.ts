@@ -210,6 +210,28 @@ describe('export/import reliability', () => {
     expect(dbCalls).toEqual(['persistConversationMigration'])
   })
 
+  it('export/import jobs are mutually exclusive: export during in-flight import is rejected with a toast (M13)', async () => {
+    let releaseBuffer!: (b: ArrayBuffer) => void
+    const hangingFile = {
+      size: 10,
+      arrayBuffer: () => new Promise<ArrayBuffer>((resolve) => { releaseBuffer = resolve }),
+    } as unknown as File
+    const importPromise = importData(hangingFile)
+
+    const showToast = vi.fn()
+    useStore.setState({ showToast })
+    await exportData()
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('正在进行中'), 'error')
+
+    // 释放挂起的导入(非法 zip → 失败收场),互斥位应随 finally 归还
+    releaseBuffer(new ArrayBuffer(2))
+    await importPromise
+    const showToast2 = vi.fn()
+    useStore.setState({ showToast: showToast2 })
+    await importData({ size: 10, arrayBuffer: async () => new ArrayBuffer(2) } as unknown as File)
+    expect(showToast2).toHaveBeenCalledWith(expect.stringContaining('导入失败'), 'error')
+  })
+
   it('marks imported running tasks as interrupted (no executor exists on the importing side)', async () => {
     // L2(2026-06-10 审查修复):备份里 status:'running' 的任务导入后曾成为无请求、无 watchdog 的
     // 幽灵 running 卡片;统一落「请求中断」错误态,耗时未知不伪造。

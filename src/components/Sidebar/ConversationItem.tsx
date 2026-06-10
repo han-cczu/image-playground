@@ -196,7 +196,16 @@ export default function ConversationItem({
               e.stopPropagation()
               setMenuOpen((v) => !v)
             }}
-            className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-200 hover:text-gray-600 group-hover:flex dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
+            className={`${
+              // 菜单打开时强制可见:hover 设备上鼠标移出对话行后菜单仍开着,
+              // 触发按钮若回到 display:none,aria-expanded=true 的按钮会从渲染树消失,
+              // 包裹 div 塌缩还会让标题回流、已开菜单锚点上跳
+              // any-pointer:coarse 兜住混合设备(hover:hover 的触屏本,hover:none 不匹配);
+              // group-focus-within 兜住键盘通道(display:none 不进 Tab 序)
+              menuOpen
+                ? 'flex'
+                : 'hidden group-hover:flex group-focus-within:flex [@media(hover:none)]:flex [@media(any-pointer:coarse)]:flex'
+            } h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-white/[0.08] dark:hover:text-gray-200`}
             title="更多操作"
             aria-label={`对话操作菜单：${conversation.title}`}
             aria-haspopup="menu"

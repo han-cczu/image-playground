@@ -2,9 +2,10 @@ import { memo, useEffect, useState, useRef } from 'react'
 import type { DraggableAttributes } from '@dnd-kit/core'
 import type { SyntheticListenerMap } from '@dnd-kit/core/dist/hooks/utilities'
 import type { TaskRecord } from '../types'
-import { useStore, getCachedImage, ensureImageCached, setTaskFavoriteCategory, clearTaskFavorite, retryTask, cancelTask } from '../store'
+import { useStore, setTaskFavoriteCategory, clearTaskFavorite, retryTask, cancelTask } from '../store'
 import { formatImageRatio } from '../lib/image/size'
 import { ParamValue } from '../lib/paramDisplay'
+import { useLazyCoverImage } from '../hooks/useLazyCoverImage'
 import FavoriteCategoryMenu from './FavoriteCategoryMenu'
 
 interface DragHandle {
@@ -44,7 +45,8 @@ function TaskCard({
   dragHandle,
   conversationTag,
 }: Props) {
-  const [thumbSrc, setThumbSrc] = useState<string>('')
+  // 封面懒加载:进视口附近才读 IDB;走 objectURL 而非 dataUrl,全尺寸 base64 不再常驻 JS 堆
+  const { src: thumbSrc, attachRef: attachCoverRef } = useLazyCoverImage(task.outputImages?.[0])
   const [coverRatio, setCoverRatio] = useState<string>('')
   const [coverSize, setCoverSize] = useState<string>('')
   const [now, setNow] = useState(Date.now())
@@ -133,24 +135,10 @@ function TaskCard({
     return () => clearInterval(id)
   }, [task.status])
 
-  // 加载缩略图
+  // 输出图变化时复位封面元信息(thumbSrc 本身由 useLazyCoverImage 跟随 outputImages[0] 复位)
   useEffect(() => {
     setCoverRatio('')
     setCoverSize('')
-
-    if (task.outputImages?.[0]) {
-      const cached = getCachedImage(task.outputImages[0])
-      if (cached) {
-        setThumbSrc(cached)
-      } else {
-        ensureImageCached(task.outputImages[0]).then((url) => {
-          if (url) setThumbSrc(url)
-        })
-      }
-    } else {
-      // 输出被清空时复位,避免残留上一次的封面
-      setThumbSrc('')
-    }
   }, [task.outputImages])
 
   useEffect(() => {
@@ -204,7 +192,7 @@ function TaskCard({
     : 'bg-gray-200 dark:bg-gray-700'
 
   return (
-    <div className="relative rounded-xl">
+    <div ref={attachCoverRef} className="relative rounded-xl">
       {/* 侧滑底图 */}
       <div
         className={`absolute inset-0 rounded-xl flex items-center transition-opacity duration-200 pointer-events-none ${
@@ -348,6 +336,8 @@ function TaskCard({
             <>
               <img
                 src={thumbSrc}
+                // 供 ImageContextMenu 按 id 重取:blob: src 在菜单打开期间可能因卡片卸载被 revoke
+                data-image-id={task.outputImages?.[0]}
                 className="saveable-image w-full h-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.06]"
                 loading="lazy"
                 alt=""
