@@ -1,6 +1,6 @@
-import type { ApiProvider, AppSettings, GridAxis, InputImage, TaskParams, TaskRecord } from '../types'
+import type { ApiProfile, ApiProvider, AppSettings, GridAxis, InputImage, TaskParams, TaskRecord } from '../types'
 import { useStore } from '../store'
-import { getActiveApiProfile, validateApiProfile } from './api/apiProfiles'
+import { getActiveApiProfile, normalizeSettings, validateApiProfile } from './api/apiProfiles'
 import {
   getAllTasks,
   putTask,
@@ -56,7 +56,7 @@ export function resetTaskRuntimeForTest(): void {
   syncHttpWatchdogTimers.clear()
   taskAbortControllers.clear()
 }
-const SYNC_HTTP_INTERRUPTED_ERROR = '请求中断'
+export const SYNC_HTTP_INTERRUPTED_ERROR = '请求中断'
 const TASK_CANCELLED_ERROR = '已取消生成'
 
 function createSyncHttpTimeoutError(timeoutSeconds: number) {
@@ -121,6 +121,23 @@ function terminateTaskRuntime(taskId: string) {
   abortTaskRequest(taskId)
   clearSyncHttpWatchdogTimer(taskId)
   clearTaskAbortController(taskId)
+}
+
+/**
+ * 批量回收一组 running 任务的运行期资源,**不落任务状态、不写库**——供「记录本身即将被
+ * 整体删除」的路径(删除对话级联 / 清空全部数据 / replace 导入)使用:此时 cancelTask 的
+ * fire-and-forget 写库可能在清库之后才落盘,把幽灵记录写回刚清空的表。
+ *
+ * 调用契约(与 removeTask/removeMultipleTasks 的安全模式一致):调用方必须在**同一同步段内**
+ * 把这些任务从 store 移除,然后才能 await 任何 IDB 操作。否则 abort 异常以微任务到达
+ * executeTask 的 catch 时任务在 store 里仍是 running,守卫不会早退,updateTaskInStoreSilently
+ * 的 putTask 事务会晚于清库事务执行,把幽灵 error 记录写回刚清空的表;并发闸也会在该窗口内
+ * 取出排队成员发出真实请求(入口守卫读到的还是 running)。
+ */
+export function terminateRunningTaskRuntimes(tasks: TaskRecord[]): void {
+  for (const task of tasks) {
+    if (task.status === 'running') terminateTaskRuntime(task.id)
+  }
 }
 
 /**
@@ -391,6 +408,29 @@ export async function initStore() {
   if (restoredInputImages.length !== persistedInputImages.length || restoredInputImages.some((img, index) => img.dataUrl !== persistedInputImages[index]?.dataUrl)) {
     useStore.getState().setInputImages(restoredInputImages)
   }
+
+  // 请求持久化存储授权:未授权时整个源的 IndexedDB/localStorage 处于浏览器 best-effort 驱逐域,
+  // Chromium/Firefox 磁盘压力下按 LRU 整源清空——对「数据全在本地」的应用这是地基级保护。
+  // Chromium 不弹 UI(按互动启发式静默裁决)、Safari 自动裁决;唯独 Firefox 会弹授权框,
+  // 启动时无用户手势就弹、且未授权前每次启动都弹——该场景跳过自动申请,留给存储面板的
+  // 「申请持久化」按钮(用户手势内弹框是合理交互)。对 Safari ITP 的 7 天清除无效(仅添加
+  // 主屏幕豁免)。fire-and-forget:失败不影响启动,授权状态由存储面板展示(storageStats.persisted)。
+  void (async () => {
+    try {
+      if (typeof navigator === 'undefined' || !navigator.storage?.persist) return
+      const isFirefox = /firefox/i.test(navigator.userAgent)
+      if (isFirefox) {
+        const status = await navigator.permissions
+          ?.query?.({ name: 'persistent-storage' as PermissionName })
+          .catch(() => null)
+        // 已授权时 persist() 只是确认不弹框;'prompt' 状态会弹 → 跳过
+        if (!status || status.state !== 'granted') return
+      }
+      await navigator.storage.persist()
+    } catch {
+      /* 授权失败/不支持不影响启动 */
+    }
+  })()
 }
 
 async function maybeUpdateConversationOnFirstTask(conversationId: string, newTask: TaskRecord) {
@@ -432,6 +472,7 @@ interface EnqueueTaskSpec {
   /** 已归一化的参数 */
   params: TaskParams
   apiProvider: ApiProvider
+  apiProfileId: string
   apiProfileName: string
   apiModel: string
   /** 已持久化的输入图 id */
@@ -458,6 +499,7 @@ async function enqueueTask(spec: EnqueueTaskSpec): Promise<string | null> {
     prompt: spec.prompt,
     params: spec.params,
     apiProvider: spec.apiProvider,
+    apiProfileId: spec.apiProfileId,
     apiProfileName: spec.apiProfileName,
     apiModel: spec.apiModel,
     inputImageIds: spec.inputImageIds,
@@ -644,6 +686,7 @@ export async function submitTask(options: { allowFullMask?: boolean; allowLargeB
       prompt: expandedPrompt,
       params: normalizedParams,
       apiProvider: activeProfile.provider,
+      apiProfileId: activeProfile.id,
       apiProfileName: activeProfile.name,
       apiModel: activeProfile.model,
       inputImageIds,
@@ -747,6 +790,7 @@ export async function submitGridTask(
       prompt: cell.prompt,
       params: cell.params,
       apiProvider: activeProfile.provider,
+      apiProfileId: activeProfile.id,
       apiProfileName: activeProfile.name,
       apiModel: activeProfile.model,
       inputImageIds,
@@ -795,6 +839,7 @@ async function enqueueGridCell(
     prompt: cell.prompt,
     params: cell.params,
     apiProvider: activeProfile.provider,
+    apiProfileId: activeProfile.id,
     apiProfileName: activeProfile.name,
     apiModel: activeProfile.model,
     inputImageIds: [...sample.inputImageIds],
@@ -844,6 +889,43 @@ export function retryGridMissing(batchId: string, scope: 'all' | { row: string }
   })()
 }
 
+/**
+ * 执行时把请求绑定回任务入队时固化的 profile / 模型,而不是「被并发闸取出那一刻的 active profile」。
+ * 批量/网格任务可在队列里排数分钟,期间切 profile / 改模型会让剩余成员静默换供应商执行,
+ * 而卡片/对比视图/对照导出展示的仍是入队元数据——对照实验样本被污染且事后不可检测。
+ * 解析规则(导出仅为单测):
+ * - 旧记录无 apiProfileId 也无 apiProfileName → 沿用 active profile(原行为);
+ * - 有 apiProfileId → 按 id 精确解析(显示名可重复——新建默认恒为「新配置」且无唯一性约束,
+ *   按名匹配会在重名场景把任务静默投到另一个同名 profile 的 baseUrl/apiKey 上);
+ * - 仅有 apiProfileName 的旧记录 → 按名解析,命中多个同名时返回 null(无法确定入队目标,不猜);
+ * - 查不到 / provider 已变 → 返回 null,调用方落 error(宁可失败也不静默换供应商)。
+ * 解析回 active profile 本身时沿用 getActiveApiProfile 结果(保留顶层镜像字段语义)。
+ * 模型固定为 task.apiModel(同一 profile 内改模型同样构成漂移)。
+ */
+export function resolveExecutionProfile(
+  settings: AppSettings,
+  task: TaskRecord,
+): { profile: ApiProfile; isActive: boolean } | null {
+  const active = getActiveApiProfile(settings)
+  if (!task.apiProfileId && !task.apiProfileName) return { profile: active, isActive: true }
+
+  const profiles = normalizeSettings(settings).profiles
+  let base: ApiProfile | null
+  if (task.apiProfileId) {
+    base = profiles.find((p) => p.id === task.apiProfileId) ?? null
+  } else {
+    const matches = profiles.filter((p) => p.name === task.apiProfileName)
+    base = matches.length === 1 ? matches[0] : null
+  }
+  if (!base) return null
+  if (task.apiProvider && base.provider !== task.apiProvider) return null
+
+  const isActive = base.id === active.id
+  const resolved = isActive ? active : base
+  const model = task.apiModel?.trim() ? task.apiModel : resolved.model
+  return { profile: model === resolved.model ? resolved : { ...resolved, model }, isActive }
+}
+
 async function executeTask(taskId: string) {
   const { settings } = useStore.getState()
   const task = useStore.getState().tasks.find((t) => t.id === taskId)
@@ -852,12 +934,24 @@ async function executeTask(taskId: string) {
   // 取出时在建 controller / 起 watchdog / 发请求之前直接早退,不空打配额。
   // 安全性:enqueueTask 恒写 'running',所有新建/补跑路径取出执行瞬间必是 running,不误伤。
   if (task.status !== 'running') return
-  const activeProfile = getActiveApiProfile(settings)
-  const taskProvider = task.apiProvider ?? activeProfile.provider
+  const resolved = resolveExecutionProfile(settings, task)
+  if (!resolved) {
+    updateTaskInStoreSilently(taskId, {
+      status: 'error',
+      error: `提交时使用的 API Profile「${task.apiProfileName ?? ''}」已被删除、无法唯一定位或已切换 Provider，请基于当前配置重新提交`,
+      finishedAt: Date.now(),
+      elapsed: Math.max(0, Date.now() - task.createdAt),
+    })
+    return
+  }
+  const { profile: executionProfile, isActive: executingOnActiveProfile } = resolved
+  const taskProvider = task.apiProvider ?? executionProfile.provider
 
   if (taskProvider === 'openai' || taskProvider === 'gemini') {
     taskAbortControllers.set(taskId, new AbortController())
-    scheduleSyncHttpWatchdog(taskId, activeProfile.timeout)
+    // 先以完整预算守住输入图加载阶段(IDB 读挂起时任务不会永久卡 running);
+    // 请求发起前会再重置一次,网络阶段同样拿到完整预算。
+    scheduleSyncHttpWatchdog(taskId, executionProfile.timeout)
   }
   // 取消/删除在途任务会 abort 控制器并把它移出 map(terminateTaskRuntime)。先把 signal 取到局部:
   // 即便随后控制器被移出 map,这个 detached signal 仍能让下游 fetch 观察到 aborted=true 而真正中止;
@@ -881,14 +975,26 @@ async function executeTask(taskId: string) {
     // 风格预设：把英文修饰词作为前缀拼到 prompt，task.prompt 本身保持用户原始输入不变
     const finalPrompt = buildFinalPrompt(task.prompt, task.params.stylePreset)
 
-    const result = await callImageApi({
-      settings,
-      prompt: finalPrompt,
-      params: task.params,
-      inputImageDataUrls: inputDataUrls,
-      maskDataUrl,
-      signal: requestSignal,
-    })
+    // 请求真正发起前重置 watchdog:输入图加载耗时不再蚕食网络阶段预算(批量大图场景)。
+    if (taskProvider === 'openai' || taskProvider === 'gemini') {
+      scheduleSyncHttpWatchdog(taskId, executionProfile.timeout)
+    }
+
+    const result = await callImageApi(
+      {
+        settings,
+        prompt: finalPrompt,
+        params: task.params,
+        inputImageDataUrls: inputDataUrls,
+        maskDataUrl,
+        signal: requestSignal,
+      },
+      executionProfile,
+    )
+
+    // 响应已返回,立即解除 watchdog:后续 SHA-256/IDB 写图窗口不再可能把已成功的生成
+    // 误翻「请求超时」并触发 rollbackStoredImages 删掉刚存的输出图(配额已消耗、结果却被销毁)。
+    clearSyncHttpWatchdogTimer(taskId)
 
     const latestBeforeSuccess = useStore.getState().tasks.find((t) => t.id === taskId)
     if (!latestBeforeSuccess || latestBeforeSuccess.status !== 'running') return
@@ -914,7 +1020,13 @@ async function executeTask(taskId: string) {
       (revisedPrompt) => revisedPrompt?.trim() && revisedPrompt.trim() !== finalPrompt.trim(),
     )
     const hasRevisedPromptValue = result.revisedPrompts?.some((revisedPrompt) => revisedPrompt?.trim())
-    if (taskProvider === 'openai' && activeProfile.provider === 'openai' && !activeProfile.codexCli) {
+    // codexCli 提示引导的是 active profile 的设置,执行 profile 与 active 不一致(排队期间切走)时不提示
+    if (
+      executingOnActiveProfile &&
+      taskProvider === 'openai' &&
+      executionProfile.provider === 'openai' &&
+      !executionProfile.codexCli
+    ) {
       if (promptWasRevised) {
         showCodexCliPrompt()
       } else if (!hasRevisedPromptValue) {
@@ -929,7 +1041,6 @@ async function executeTask(taskId: string) {
       await rollbackStoredImages(outputIds)
       return
     }
-    clearSyncHttpWatchdogTimer(taskId)
     await updateTaskInStore(taskId, {
       outputImages: outputIds,
       actualParams: { ...result.actualParams, n: outputIds.length },
@@ -1095,6 +1206,7 @@ export async function retryTask(task: TaskRecord) {
     prompt: task.prompt,
     params: normalizeParamsForSettings(task.params, settings),
     apiProvider: activeProfile.provider,
+    apiProfileId: activeProfile.id,
     apiProfileName: activeProfile.name,
     apiModel: activeProfile.model,
     inputImageIds: [...task.inputImageIds],

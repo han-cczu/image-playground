@@ -62,6 +62,8 @@ export interface StorageStats {
   orphanBytes: number
   /** navigator.storage.estimate() 结果;不支持/报错时为 null */
   quota: { usage: number; quota: number } | null
+  /** navigator.storage.persisted() 结果:false=数据处于浏览器 best-effort 驱逐域;不支持/报错时为 null */
+  persisted: boolean | null
 }
 
 function emptyBySource(): StorageStats['bySource'] {
@@ -82,6 +84,16 @@ async function readStorageQuota(): Promise<StorageStats['quota']> {
       return { usage: est.usage, quota: est.quota }
     }
     return null
+  } catch {
+    return null
+  }
+}
+
+async function readStoragePersisted(): Promise<StorageStats['persisted']> {
+  try {
+    const storage = typeof navigator !== 'undefined' ? navigator.storage : undefined
+    if (!storage?.persisted) return null
+    return await storage.persisted()
   } catch {
     return null
   }
@@ -123,6 +135,7 @@ export async function computeStorageStats(referencedIds: Set<string>): Promise<S
     orphanCount,
     orphanBytes,
     quota: await readStorageQuota(),
+    persisted: await readStoragePersisted(),
   }
 }
 

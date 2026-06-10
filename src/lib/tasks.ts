@@ -1,4 +1,4 @@
-import type { ApiProvider, TaskParams, TaskRecord } from '../types'
+import type { ApiProvider, GridAxis, GridAxisKey, TaskParams, TaskRecord } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 
 /**
@@ -61,17 +61,78 @@ function normalizeProvider(value: unknown): ApiProvider | undefined {
   return value === 'gemini' ? 'gemini' : value === 'openai' ? 'openai' : undefined
 }
 
+const GRID_AXIS_KEYS = new Set<GridAxisKey>(['stylePreset', 'quality', 'size', 'output_format', 'n', 'prompt'])
+
+/** 单条轴定义:kind 必须在白名单内,values 至少一项且每项 key/label 均为 string。 */
+function sanitizeGridAxis(input: unknown): GridAxis | undefined {
+  if (!input || typeof input !== 'object') return undefined
+  const r = input as Record<string, unknown>
+  if (typeof r.kind !== 'string' || !GRID_AXIS_KEYS.has(r.kind as GridAxisKey)) return undefined
+  if (!Array.isArray(r.values)) return undefined
+  const values = r.values.flatMap((v) => {
+    if (!v || typeof v !== 'object') return []
+    const item = v as Record<string, unknown>
+    return typeof item.key === 'string' && typeof item.label === 'string'
+      ? [{ key: item.key, label: item.label }]
+      : []
+  })
+  return values.length ? { kind: r.kind as GridAxisKey, values } : undefined
+}
+
+/** gridAxes:x 轴非法则整体丢弃(矩阵骨架失效),y 轴非法时仅降级为单轴。 */
+function sanitizeGridAxes(input: unknown): TaskRecord['gridAxes'] {
+  if (!input || typeof input !== 'object') return undefined
+  const r = input as Record<string, unknown>
+  const x = sanitizeGridAxis(r.x)
+  if (!x) return undefined
+  const y = sanitizeGridAxis(r.y)
+  return y ? { x, y } : { x }
+}
+
+/** gridCoord:x 必为 string,y 可选 string。 */
+function sanitizeGridCoord(input: unknown): TaskRecord['gridCoord'] {
+  if (!input || typeof input !== 'object') return undefined
+  const r = input as Record<string, unknown>
+  if (typeof r.x !== 'string') return undefined
+  return typeof r.y === 'string' ? { x: r.x, y: r.y } : { x: r.x }
+}
+
+/**
+ * 网格字段的成对不变量:gridAxes 与 gridCoord 必须同存同维,否则矩阵重建会拿到
+ * 「有轴无坐标 / 坐标维度对不上轴」的不一致数据(格子全空、补跑误判全缺失而重复生成)。
+ * 任一缺失 → 双弃(降级为普通卡片,batchId 不受影响);y 维度只在两边同时存在时保留。
+ */
+function reconcileGridFields(
+  gridAxes: TaskRecord['gridAxes'],
+  gridCoord: TaskRecord['gridCoord'],
+): { gridAxes: TaskRecord['gridAxes']; gridCoord: TaskRecord['gridCoord'] } {
+  if (!gridAxes || !gridCoord) return { gridAxes: undefined, gridCoord: undefined }
+  if (gridAxes.y && gridCoord.y === undefined) {
+    return { gridAxes: { x: gridAxes.x }, gridCoord }
+  }
+  if (!gridAxes.y && gridCoord.y !== undefined) {
+    return { gridAxes, gridCoord: { x: gridCoord.x } }
+  }
+  return { gridAxes, gridCoord }
+}
+
 /** 归一化单条不可信 task;id 非法时返回 null(整条丢弃)。保留 TaskRecord 全部字段以保证往返导入不掉字段。 */
 export function normalizeTask(input: unknown, now = Date.now()): TaskRecord | null {
   if (!input || typeof input !== 'object') return null
   const item = input as Record<string, unknown>
   if (typeof item.id !== 'string' || !item.id.trim()) return null
 
+  const { gridAxes, gridCoord } = reconcileGridFields(
+    sanitizeGridAxes(item.gridAxes),
+    sanitizeGridCoord(item.gridCoord),
+  )
+
   return {
     id: item.id,
     prompt: typeof item.prompt === 'string' ? item.prompt : '',
     params: normalizeTaskParams(item.params),
     apiProvider: normalizeProvider(item.apiProvider),
+    apiProfileId: typeof item.apiProfileId === 'string' ? item.apiProfileId : undefined,
     apiProfileName: typeof item.apiProfileName === 'string' ? item.apiProfileName : undefined,
     apiModel: typeof item.apiModel === 'string' ? item.apiModel : undefined,
     actualParams: sanitizePartialParams(item.actualParams),
@@ -96,6 +157,9 @@ export function normalizeTask(input: unknown, now = Date.now()): TaskRecord | nu
     favoriteCategoryId: typeof item.favoriteCategoryId === 'string' ? item.favoriteCategoryId : null,
     sortOrder: typeof item.sortOrder === 'number' && Number.isFinite(item.sortOrder) ? item.sortOrder : undefined,
     conversationId: typeof item.conversationId === 'string' ? item.conversationId : undefined,
+    batchId: typeof item.batchId === 'string' ? item.batchId : undefined,
+    gridAxes,
+    gridCoord,
   }
 }
 

@@ -32,6 +32,23 @@ export function DataManagementSection({
 }: DataManagementSectionProps) {
   const importInputRef = useRef<HTMLInputElement>(null)
   const [pendingImportMode, setPendingImportMode] = useState<ImportMode>('merge')
+  // 本地覆盖:点「申请」后即时反映授权结果,不等下一次 storageStats 重算
+  const [persistOverride, setPersistOverride] = useState<boolean | null>(null)
+  // 申请被浏览器拒绝(resolve false)时按钮状态不变,必须给显式反馈,否则按钮看起来像坏了
+  const [persistDenied, setPersistDenied] = useState(false)
+  const persisted = persistOverride ?? storageStats?.persisted ?? null
+
+  const requestPersist = async () => {
+    try {
+      const granted = await navigator.storage?.persist?.()
+      if (typeof granted === 'boolean') {
+        setPersistOverride(granted)
+        setPersistDenied(!granted)
+      }
+    } catch {
+      /* 旧浏览器无此 API,徽标本就不显示 */
+    }
+  }
 
   const selectImportFile = (mode: ImportMode) => {
     setPendingImportMode(mode)
@@ -74,6 +91,30 @@ export function DataManagementSection({
                 <div className="text-[11px] text-gray-400 dark:text-gray-500">
                   浏览器已用 {formatBytes(storageStats.quota.usage)} / {formatBytes(storageStats.quota.quota)}
                 </div>
+              </div>
+            )}
+
+            {persisted !== null && (
+              <div className="flex items-center justify-between gap-2">
+                {persisted ? (
+                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                    ✓ 已获持久化授权,不会因磁盘空间紧张被自动清理
+                  </span>
+                ) : (
+                  <>
+                    <span className="min-w-0 text-[11px] text-amber-600 dark:text-amber-400">
+                      {persistDenied
+                        ? '浏览器未授予持久化(可在浏览器的站点设置中手动允许)'
+                        : '未持久化:磁盘紧张时浏览器可能自动清空本地数据'}
+                    </span>
+                    <button
+                      onClick={requestPersist}
+                      className="flex-shrink-0 whitespace-nowrap rounded-lg bg-amber-50 px-2.5 py-1 text-xs text-amber-600 transition hover:bg-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:hover:bg-amber-500/20"
+                    >
+                      {persistDenied ? '重试' : '申请持久化'}
+                    </button>
+                  </>
+                )}
               </div>
             )}
 

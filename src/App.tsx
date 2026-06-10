@@ -26,6 +26,7 @@ import LineageModal from './components/LineageModal'
 import BatchCaptionModal from './components/BatchCaptionModal'
 import ErrorBoundary from './components/ErrorBoundary'
 import InsecureContextBanner from './components/InsecureContextBanner'
+import InitErrorBanner from './components/InitErrorBanner'
 import TourOverlay from './components/TourOverlay'
 
 export default function App() {
@@ -38,6 +39,7 @@ export default function App() {
   const filterFavorite = useStore((s) => s.filterFavorite)
   const filterFavoriteCategoryId = useStore((s) => s.filterFavoriteCategoryId)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [initError, setInitError] = useState<string | null>(null)
 
   /**
    * 当前视图下是否存在任务(存在性判定,非全量 filter+sort)。
@@ -99,9 +101,16 @@ export default function App() {
     if (bootstrap.changed) window.history.replaceState(null, '', bootstrap.cleanUrl)
 
     // 新手引导自动触发挂在 initStore 之后:老用户判定需要 tasks(IDB 异步)就位。
-    // finally:即使 IDB 初始化失败引导也照常评估(profiles key 判定仍兜底),
-    // 且不吞 initStore 的 rejection(与原 fire-and-forget 错误语义一致)
-    void initStore().finally(() => maybeStartTour())
+    // catch:initStore 失败(IDB 打开失败/升级被阻塞/记录损坏)时界面会呈现「全新空库」,
+    // 必须用常驻 banner 与真空库区分,否则用户误以为数据丢失而做破坏性操作。
+    // finally:即使 IDB 初始化失败引导也照常评估(profiles key 判定仍兜底)。
+    void initStore()
+      .catch((err) => {
+        // 保留完整堆栈/cause 供排查(banner 只展示 message 文本)
+        console.error('initStore failed:', err)
+        setInitError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => maybeStartTour())
   }, [setSettings])
 
   useEffect(() => {
@@ -156,7 +165,11 @@ export default function App() {
   return (
     <>
       <AmbientGlow />
-      <InsecureContextBanner />
+      {/* 两条 banner 共用一个 sticky 容器:各自 sticky top-0 时滚动后会在同一位置互相覆盖 */}
+      <div className="sticky top-0 z-30">
+        <InsecureContextBanner />
+        <InitErrorBanner error={initError} />
+      </div>
       <div className="flex min-h-screen md:h-screen md:overflow-hidden">
         <ErrorBoundary region="sidebar">
           <Sidebar

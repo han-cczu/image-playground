@@ -162,6 +162,19 @@ async function callGeminiSingle(opts: CallApiOptions, profile: GeminiProfile): P
 
     const imageResults = parseGeminiImages(payload)
     if (!imageResults.length) {
+      // 安全拦截等场景常见 HTTP 200 + finishReason(如 IMAGE_SAFETY/PROHIBITED_CONTENT)且无
+      // inline_data,不能泛化成「未返回图片数据」——错误保真口径与流式路径 extractGeminiStreamError 对齐;
+      // candidate 里残留的 text part 一并带出作补充说明。
+      const abnormalFinish = (payload.candidates ?? [])
+        .map((candidate) => candidate.finishReason)
+        .find((reason) => reason && reason !== 'STOP' && reason !== 'MAX_TOKENS')
+      if (abnormalFinish) {
+        const detail = (payload.candidates ?? [])
+          .flatMap((candidate) => candidate.content?.parts ?? [])
+          .map((part) => part.text?.trim())
+          .find(Boolean)
+        throw new Error(`生成中断：${abnormalFinish}${detail ? `（${detail}）` : ''}`)
+      }
       throw new Error('Gemini 未返回图片数据')
     }
 
