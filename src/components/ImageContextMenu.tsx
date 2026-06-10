@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { useStore, addImageFromUrl } from '../store'
+import { useStore, addImageFromUrl, ensureImageCached } from '../store'
 import { copyBlobToClipboard, getClipboardFailureMessage } from '../lib/image/clipboard'
 
 export default function ImageContextMenu() {
-  const [menuInfo, setMenuInfo] = useState<{ src: string; x: number; y: number } | null>(null)
+  const [menuInfo, setMenuInfo] = useState<{ src: string; imageId?: string; x: number; y: number } | null>(null)
   const showToast = useStore((s) => s.showToast)
   const inputImages = useStore((s) => s.inputImages)
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
@@ -31,6 +31,9 @@ export default function ImageContextMenu() {
         e.preventDefault()
         setMenuInfo({
           src: imgTarget.src,
+          // 封面已 objectURL 化(H3):blob URL 在菜单打开期间可能因卡片卸载被 revoke,
+          // 携带 data-image-id 的图后续动作优先按 id 重取,自包含不受 revoke 影响
+          imageId: imgTarget.dataset.imageId || undefined,
           x: e.clientX,
           y: e.clientY,
         })
@@ -84,11 +87,20 @@ export default function ImageContextMenu() {
 
   if (!menuInfo) return null
 
+  /** 取菜单目标图的可 fetch URL:带 imageId 时按 id 重取(blob: src 可能已被 revoke),否则原样用 src */
+  const resolveMenuImageUrl = async (): Promise<string> => {
+    if (menuInfo.imageId) {
+      const dataUrl = await ensureImageCached(menuInfo.imageId)
+      if (dataUrl) return dataUrl
+    }
+    return menuInfo.src
+  }
+
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation()
     setMenuInfo(null)
     try {
-      const res = await fetch(menuInfo.src)
+      const res = await fetch(await resolveMenuImageUrl())
       const blob = await res.blob()
       await copyBlobToClipboard(blob)
       showToast('图片已复制', 'success')
@@ -102,7 +114,7 @@ export default function ImageContextMenu() {
     e.stopPropagation()
     setMenuInfo(null)
     try {
-      const res = await fetch(menuInfo.src)
+      const res = await fetch(await resolveMenuImageUrl())
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -129,7 +141,7 @@ export default function ImageContextMenu() {
     }
 
     try {
-      await addImageFromUrl(menuInfo.src)
+      await addImageFromUrl(await resolveMenuImageUrl())
       setDetailTaskId(null)
       setLightboxImageId(null)
       setMaskEditorImageId(null)
@@ -148,7 +160,7 @@ export default function ImageContextMenu() {
       return
     }
     try {
-      const res = await fetch(menuInfo.src)
+      const res = await fetch(await resolveMenuImageUrl())
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
       if (!blob.type.startsWith('image/')) throw new Error('不是有效的图片文件')

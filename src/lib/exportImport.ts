@@ -1,4 +1,4 @@
-import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
+import { zip, unzip, strToU8, strFromU8, type Zippable, type Unzipped } from 'fflate'
 import type { AppSettings, Conversation, ExportData, StoredImage, TaskRecord } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { useStore } from '../store'
@@ -34,8 +34,82 @@ interface ImportDataOptions {
   mode?: ImportMode
 }
 
-/** 导入 ZIP 文件总大小上限:unzipSync 会把全部条目一次性解压进内存,无上限时 zip bomb / 超大备份可 OOM。 */
+/** 导入 ZIP 文件总大小上限:解压会把全部条目一次性放进内存,无上限时 zip bomb / 超大备份可 OOM。 */
 const MAX_IMPORT_FILE_BYTES = 400 * 1024 * 1024
+
+/**
+ * fflate 异步 zip/unzip 的 Promise 封装。准确口径(审查修正):
+ * - fflate 没有 worker「池」——每个 ≥160KB 的 level>0 条目各 spawn 一个独立 Worker 且无并发上限,
+ *   还会把 buffer postMessage 克隆一份。因此图片条目必须 per-file level 0(见 exportData):
+ *   PNG/JPEG/WebP 已压缩,level 6 再压收益≈0,level 0 走同步直存,不建 worker、不复制、导入侧解压
+ *   也退化为纯内存 slice——大库导出的 worker 风暴与 3-4 倍内存峰值由此消除,主线程重活只剩 CRC32。
+ * - 仅 manifest.json(level 6,可能 ≥160KB)会进 worker;worker 从 blob URL 创建,
+ *   CSP 需 worker-src blob:(各部署配置已同步放行)。
+ * - worker 本体加载失败(如部署漏配 CSP)时 fflate 的回调永不触发,必须配 watchdog:
+ *   超时 terminate 并 reject,否则防重入锁与忙碌态会永久卡死且无任何提示。
+ */
+const WORKER_WATCHDOG_MS = 120_000
+
+function zipAsync(files: Zippable): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let settled = false
+    const finish = (cb: () => void) => {
+      settled = true
+      if (timer !== undefined) clearTimeout(timer)
+      cb()
+    }
+    const terminator = zip(files, { level: 6 }, (err, data) =>
+      err ? finish(() => reject(err)) : finish(() => resolve(data)),
+    )
+    if (!settled) {
+      timer = setTimeout(() => {
+        terminator()
+        reject(new Error('压缩超时:worker 可能创建失败,请检查部署的 CSP 是否放行 worker-src blob:'))
+      }, WORKER_WATCHDOG_MS)
+    }
+  })
+}
+
+function unzipAsync(data: Uint8Array): Promise<Unzipped> {
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let settled = false
+    const finish = (cb: () => void) => {
+      settled = true
+      if (timer !== undefined) clearTimeout(timer)
+      cb()
+    }
+    const terminator = unzip(data, (err, out) =>
+      err ? finish(() => reject(err)) : finish(() => resolve(out)),
+    )
+    if (!settled) {
+      timer = setTimeout(() => {
+        terminator()
+        reject(new Error('解压超时:worker 可能创建失败,请检查部署的 CSP 是否放行 worker-src blob:'))
+      }, WORKER_WATCHDOG_MS)
+    }
+  })
+}
+
+/**
+ * 防重入 + 互斥:导出/导入/清空都是触碰整库的长任务,任意两个并发(设置面板 busy 只挡本面板,
+ * 命令面板仍可触发导出)会与清库/写回交错,产出「任务有、图片缺」的撕裂备份还提示成功。
+ * 单一互斥位:任一进行中,其余一律拒绝。
+ */
+type DataJob = 'export' | 'import' | 'clear'
+const DATA_JOB_LABEL: Record<DataJob, string> = { export: '导出', import: '导入', clear: '清空' }
+let dataJobInProgress: DataJob | null = null
+
+/** 申请互斥位:成功返回 true;已有任务进行中则 toast 并返回 false。 */
+function acquireDataJob(job: DataJob): boolean {
+  if (dataJobInProgress) {
+    useStore.getState().showToast(`数据${DATA_JOB_LABEL[dataJobInProgress]}正在进行中,请稍后再试`, 'error')
+    return false
+  }
+  dataJobInProgress = job
+  return true
+}
 
 function getImageExt(mime: string): string {
   const ext = mime.split('/')[1]?.toLowerCase()
@@ -118,6 +192,15 @@ function sanitizeImportedTasksForFavoriteCategories(
 
 /** 清空所有数据（含配置重置） */
 export async function clearAllData() {
+  if (!acquireDataJob('clear')) return
+  try {
+    await clearAllDataInner()
+  } finally {
+    dataJobInProgress = null
+  }
+}
+
+async function clearAllDataInner() {
   const {
     setTasks,
     clearInputImages,
@@ -157,6 +240,7 @@ export async function clearAllData() {
 
 /** 导出数据为 ZIP */
 export async function exportData() {
+  if (!acquireDataJob('export')) return
   try {
     const tasks = await getAllTasks()
     const images = await getAllImages()
@@ -185,7 +269,7 @@ export async function exportData() {
     }
 
     const imageFiles: ExportData['imageFiles'] = {}
-    const zipFiles: Record<string, Uint8Array | [Uint8Array, { mtime: Date }]> = {}
+    const zipFiles: Zippable = {}
 
     for (const img of images) {
       const imageBytes = await storedImageToBytes(img)
@@ -195,7 +279,11 @@ export async function exportData() {
       const path = `images/${img.id}.${ext}`
       const createdAt = img.createdAt ?? imageCreatedAtFallback.get(img.id) ?? exportedAt
       imageFiles[img.id] = { path, createdAt, source: img.source }
-      zipFiles[path] = [bytes, { mtime: new Date(createdAt) }]
+      // level 0(仅存储不压缩):图片本就是压缩格式,level 6 收益≈0 还会让 fflate 给每个
+      // ≥160KB 条目各 spawn 一个 worker(无并发上限)+ postMessage 克隆 buffer——几百张图
+      // 同时几百个 worker、内存 3-4 倍峰值,移动端直接 OOM。level 0 同步直存,导入侧解压
+      // 这些条目也退化为纯内存 slice(不再有主线程 inflate 冻结)。
+      zipFiles[path] = [bytes, { mtime: new Date(createdAt), level: 0 }]
     }
 
     const manifest: ExportData = {
@@ -212,7 +300,7 @@ export async function exportData() {
 
     zipFiles['manifest.json'] = [strToU8(JSON.stringify(manifest, null, 2)), { mtime: new Date(exportedAt) }]
 
-    const zipped = zipSync(zipFiles, { level: 6 })
+    const zipped = await zipAsync(zipFiles)
     const blob = new Blob([zipped.buffer as ArrayBuffer], { type: 'application/zip' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -242,17 +330,20 @@ export async function exportData() {
         `导出失败：${e instanceof Error ? e.message : String(e)}`,
         'error',
       )
+  } finally {
+    dataJobInProgress = null
   }
 }
 
 /** 导入 ZIP 数据 */
 export async function importData(file: File, options: ImportDataOptions = {}): Promise<boolean> {
+  if (!acquireDataJob('import')) return false
   try {
     if (file.size > MAX_IMPORT_FILE_BYTES) {
       throw new Error(`导入文件过大:超过 ${Math.round(MAX_IMPORT_FILE_BYTES / 1024 / 1024)}MB 上限`)
     }
     const buffer = await file.arrayBuffer()
-    const unzipped = unzipSync(new Uint8Array(buffer))
+    const unzipped = await unzipAsync(new Uint8Array(buffer))
 
     const manifestBytes = unzipped['manifest.json']
     if (!manifestBytes) throw new Error('ZIP 中缺少 manifest.json')
@@ -427,5 +518,7 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
         'error',
       )
     return false
+  } finally {
+    dataJobInProgress = null
   }
 }

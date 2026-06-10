@@ -6,7 +6,7 @@ export interface DataManagementSectionProps {
   storageStats: StorageStats | null
   storageLoading: boolean
   onPruneOrphans: () => void
-  onExport: () => void
+  onExport: () => void | Promise<void>
   onImport: (file: File, mode: ImportMode) => Promise<void>
   onClearAll: () => void
   onConfirmReplaceImport: (proceed: () => void) => void
@@ -32,6 +32,8 @@ export function DataManagementSection({
 }: DataManagementSectionProps) {
   const importInputRef = useRef<HTMLInputElement>(null)
   const [pendingImportMode, setPendingImportMode] = useState<ImportMode>('merge')
+  // 导出/导入是长任务(大库可达数秒以上),按钮需要忙碌态 + 防重复点击
+  const [busy, setBusy] = useState<'export' | 'import' | null>(null)
   // 本地覆盖:点「申请」后即时反映授权结果,不等下一次 storageStats 重算
   const [persistOverride, setPersistOverride] = useState<boolean | null>(null)
   // 申请被浏览器拒绝(resolve false)时按钮状态不变,必须给显式反馈,否则按钮看起来像坏了
@@ -51,14 +53,30 @@ export function DataManagementSection({
   }
 
   const selectImportFile = (mode: ImportMode) => {
+    if (busy) return
     setPendingImportMode(mode)
     importInputRef.current?.click()
+  }
+
+  const handleExport = async () => {
+    if (busy) return
+    setBusy('export')
+    try {
+      await onExport()
+    } finally {
+      setBusy(null)
+    }
   }
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      await onImport(file, pendingImportMode)
+      setBusy('import')
+      try {
+        await onImport(file, pendingImportMode)
+      } finally {
+        setBusy(null)
+      }
     }
     e.target.value = ''
     setPendingImportMode('merge')
@@ -156,28 +174,31 @@ export function DataManagementSection({
 
       <div className="flex gap-2">
         <button
-          onClick={onExport}
-          className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
+          onClick={handleExport}
+          disabled={busy !== null}
+          className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
-          导出
+          {busy === 'export' ? '导出中…' : '导出'}
         </button>
         <button
           onClick={() => selectImportFile('merge')}
-          className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
+          disabled={busy !== null}
+          className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
           </svg>
-          合并导入
+          {busy === 'import' ? '导入中…' : '合并导入'}
         </button>
         <button
           onClick={() =>
             onConfirmReplaceImport(() => selectImportFile('replace'))
           }
-          className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
+          disabled={busy !== null}
+          className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 006.34 4.34L4 6.68M4 15a8 8 0 0013.66 4.66L20 17.32" />

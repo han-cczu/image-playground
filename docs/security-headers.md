@@ -20,7 +20,7 @@ Cross-Origin-Opener-Policy: same-origin
 当前以 **`Content-Security-Policy-Report-Only`** 形式下发,只上报不拦截,确保不破坏线上功能。策略字符串:
 
 ```
-default-src 'self'; script-src 'self' 'sha256-ceZQVieuEu3wrVZesSAxmbWRpR45TuEEt523Sm1QRJs='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; worker-src 'self'; manifest-src 'self'
+default-src 'self'; script-src 'self' 'sha256-ceZQVieuEu3wrVZesSAxmbWRpR45TuEEt523Sm1QRJs='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; worker-src 'self' blob:; manifest-src 'self'
 ```
 
 ### 关键设计(经核实的必要妥协,非疏漏)
@@ -29,6 +29,7 @@ default-src 'self'; script-src 'self' 'sha256-ceZQVieuEu3wrVZesSAxmbWRpR45TuEEt5
 - **`img-src ... data: blob: https:`**:Lightbox / TaskCard 用 `data:` / `blob:` 显示图片。
 - **`style-src 'self' 'unsafe-inline'`**:dnd-kit 拖拽用内联 `transform` style,Tailwind 注入样式,需要 `unsafe-inline`。
 - **`script-src 'self' 'sha256-...'`**:纯静态 SPA 无 nonce 注入能力;`index.html` 有一段稳定的内联主题引导脚本,用其 SHA-256 hash 放行,而非 `'unsafe-inline'`。
+- **`worker-src 'self' blob:`**:导出/导入走 fflate 异步 API(`exportImport.ts` 的 `zipAsync`/`unzipAsync`),其 worker 从 blob URL 创建——不放行 `blob:` 则强制 CSP 后大库导出导入直接失败。仅放宽 worker,`script-src` 不含 `blob:`,blob 脚本仍不能在主上下文执行。
 
 ### ⚠️ 内联脚本 hash 维护与上线流程
 

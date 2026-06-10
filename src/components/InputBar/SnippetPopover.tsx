@@ -196,7 +196,9 @@ export default function SnippetPopover({ anchorRef, onClose, onInsert }: Props) 
                       title={`插入：${snippet.content.slice(0, 200)}`}
                       className="flex w-full flex-col items-start gap-0.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-gray-100 dark:hover:bg-white/[0.06]"
                     >
-                      <span className="flex w-full items-center gap-1.5">
+                      {/* 触屏下编辑/删除图标恒显(占右侧约 52px),名称行需让出右内边距,
+                          否则长名称/×N 徽标会永久叠在透明背景的图标下;内容行已有 pr-12+px-2=56px 足够 */}
+                      <span className="flex w-full items-center gap-1.5 [@media(hover:none)]:pr-14 [@media(any-pointer:coarse)]:pr-14">
                         <span className="truncate text-sm font-medium text-gray-700 dark:text-gray-200">
                           {snippet.name}
                         </span>
@@ -213,8 +215,9 @@ export default function SnippetPopover({ anchorRef, onClose, onInsert }: Props) 
                         {snippet.content}
                       </span>
                     </button>
-                    {/* hover 操作：编辑 / 删除 */}
-                    <span className="absolute right-1.5 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 group-hover:flex">
+                    {/* hover 操作：编辑 / 删除。hover:none 兜触屏、any-pointer:coarse 兜混合设备
+                        (hover:hover 触屏本)、group-focus-within 兜键盘(display:none 不进 Tab 序) */}
+                    <span className="absolute right-1.5 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 group-hover:flex group-focus-within:flex [@media(hover:none)]:flex [@media(any-pointer:coarse)]:flex">
                       <button
                         type="button"
                         onClick={() => setEdit({ id: snippet.id, name: snippet.name, content: snippet.content })}

@@ -12,4 +12,4 @@ add_header Cross-Origin-Opener-Policy "same-origin" always;
 
 # CSP 先以 Report-Only 上线(只上报、不拦截);确认 dist/index.html 实际 sha256 与下方一致、
 # 且控制台无违规后,再把 -Report-Only 去掉改为强制。详见 docs/security-headers.md。
-add_header Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'sha256-ceZQVieuEu3wrVZesSAxmbWRpR45TuEEt523Sm1QRJs='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; worker-src 'self'; manifest-src 'self'" always;
+add_header Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'sha256-ceZQVieuEu3wrVZesSAxmbWRpR45TuEEt523Sm1QRJs='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; worker-src 'self' blob:; manifest-src 'self'" always;
