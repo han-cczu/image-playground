@@ -63,6 +63,7 @@ export interface UiSlice {
   // Toast
   toast: { id: number; message: string; type: 'info' | 'success' | 'error' } | null
   showToast: (message: string, type?: 'info' | 'success' | 'error') => void
+  dismissToast: () => void
 
   // Confirm dialog
   confirmDialog: {
@@ -149,10 +150,12 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   showToast: (message, type = 'info') => {
     const id = ++toastSeq
     set({ toast: { id, message, type } })
+    // 错误停留更久:错误文案常含需要读完/复制的关键信息,3 秒来不及
     setTimeout(() => {
       if (get().toast?.id === id) set({ toast: null })
-    }, 3000)
+    }, type === 'error' ? 6000 : 3000)
   },
+  dismissToast: () => set({ toast: null }),
 
   // Confirm
   confirmDialog: null,

@@ -11,6 +11,9 @@ function globalKeyDown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
   // IME 组字过程中把 ESC 留给输入法处理,不拦截、不关闭弹窗
   if (e.isComposing || e.keyCode === 229) return
+  // 局部控件已消费的 Esc(如重命名/新建分类输入框 preventDefault 后取消编辑)不再触发栈顶,
+  // 否则同一击会把输入框所在的抽屉/弹窗也一并关掉
+  if (e.defaultPrevented) return
   if (escStack.length === 0) return
   e.preventDefault()
   // 调用栈顶（最后注册的）handler

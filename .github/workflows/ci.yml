@@ -33,3 +33,6 @@ jobs:
       - run: npm test
       # tsc -b + vite build + inject-sw-build-id + verify-csp-hash
       - run: npm run build
+      # SW 占位符残留兜底:__PRECACHE_MANIFEST__ 残留时 sw.js 优雅退化为部分缓存,不会自爆,
+      # 必须在产物层显式校验(与 Dockerfile 同款)
+      - run: "! grep -qE '__CACHE_NAME__|__PRECACHE_MANIFEST__' dist/sw.js"

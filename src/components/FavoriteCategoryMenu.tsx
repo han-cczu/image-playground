@@ -282,6 +282,8 @@ export default function FavoriteCategoryMenu({
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
               onKeyDown={(e) => {
+                // IME 守卫:中文组字确认的 Enter/Esc 是输入法操作,不是提交/取消(与片段库输入框同款)
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return
                 if (e.key === 'Enter') {
                   e.preventDefault()
                   createCategory()

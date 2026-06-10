@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useStore, addImageFromUrl, ensureImageCached } from '../store'
 import { copyBlobToClipboard, getClipboardFailureMessage } from '../lib/image/clipboard'
+import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 
 export default function ImageContextMenu() {
   const [menuInfo, setMenuInfo] = useState<{ src: string; imageId?: string; x: number; y: number } | null>(null)
@@ -59,25 +60,23 @@ export default function ImageContextMenu() {
       }
       setMenuInfo(null)
     }
-    // ESC 关闭(该组件不入全局 useCloseOnEscape 栈,本地监听即可)。
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuInfo(null)
-    }
     window.addEventListener('mousedown', close, { capture: true })
     window.addEventListener('touchstart', close, { capture: true })
     window.addEventListener('wheel', close, { capture: true })
     window.addEventListener('scroll', close, { capture: true })
     window.addEventListener('resize', close)
-    window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('mousedown', close, { capture: true })
       window.removeEventListener('touchstart', close, { capture: true })
       window.removeEventListener('wheel', close, { capture: true })
       window.removeEventListener('scroll', close, { capture: true })
       window.removeEventListener('resize', close)
-      window.removeEventListener('keydown', onKeyDown)
     }
   }, [menuInfo])
+
+  // ESC 走全局 escStack:此前自建监听绕过栈,在 Lightbox 上右键开菜单后按一次 Esc 会把菜单
+  // 和 Lightbox 一起关掉(栈语义:Esc 只关最顶层;菜单后开,注册在栈顶,先于 Lightbox 响应)
+  useCloseOnEscape(Boolean(menuInfo), () => setMenuInfo(null))
 
   // 打开时把焦点移入菜单首项,便于键盘用户操作(置于早退之前以保证 hook 顺序稳定)。
   useEffect(() => {

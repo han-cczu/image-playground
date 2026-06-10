@@ -95,9 +95,12 @@ export async function captionImageStream(
   }
 
   if (!response.ok) {
+    // 先读错误体、后解除超时/取消接线:顺序反了的话,错误体悬挂时 text() 永久挂起且无法取消
+    const text = await response.text().catch(() => '')
     clearTimeout(timeoutTimer)
     externalSignal?.removeEventListener('abort', onExternalAbort)
-    const text = await response.text().catch(() => '')
+    // 读错误体期间用户点了取消:与本函数其余路径同口径归一化为「已取消」,不转写成 HTTP 错误
+    if (externalSignal?.aborted) throw new Error('已取消')
     throw new Error(`HTTP ${response.status}${text ? ` - ${text.slice(0, 300)}` : ''}`)
   }
 

@@ -4,6 +4,7 @@ import { canvasToBlob } from '../../lib/image/canvasImage'
 import { storeImage } from '../../lib/db'
 import { replaceMaskTargetImage } from '../../lib/image/maskPreprocess'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
+import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { useLockBodyScroll } from '../../hooks/useLockBodyScroll'
 import { type Point } from '../../lib/image/viewportTransform'
 import { useMaskHistory } from './hooks/useMaskHistory'
@@ -145,6 +146,10 @@ export default function MaskEditorModal() {
   }
   useCloseOnEscape(Boolean(imageId), close)
   useLockBodyScroll(Boolean(imageId))
+  // 焦点陷阱:此前是全部弹层中唯一缺陷阱的——Tab 会逃逸到被全屏遮挡的背景控件,关闭后焦点不还原。
+  // 画笔尺寸面板 portal 到 body(modalRoot 之外),作为附属容器一并纳入环,否则滑杆键盘不可达
+  const modalRootRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(Boolean(imageId), modalRootRef, { extraContainerRefs: [brushSizePanelRef] })
 
   const handleRemoveMask = () => {
     setConfirmDialog({
@@ -297,7 +302,7 @@ export default function MaskEditorModal() {
 
   return (
     <>
-      <div data-no-drag-select className="fixed inset-0 z-[80] flex flex-col bg-gray-50 dark:bg-gray-900 animate-modal-in">
+      <div ref={modalRootRef} tabIndex={-1} data-no-drag-select className="fixed inset-0 z-[80] flex flex-col bg-gray-50 dark:bg-gray-900 animate-modal-in">
       {/* Header */}
       <div className="flex-none flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950 z-20">
         <div className="flex items-center gap-3">

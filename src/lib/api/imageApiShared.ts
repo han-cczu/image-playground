@@ -8,6 +8,12 @@ export const MIME_MAP: Record<string, string> = {
 
 export const MAX_MASK_EDIT_FILE_BYTES = 50 * 1024 * 1024
 export const MAX_IMAGE_INPUT_PAYLOAD_BYTES = 512 * 1024 * 1024
+/**
+ * 单张远程图下载上限:512MiB 是「输入有效负载总量」上限,不适合当单图护栏——
+ * base64 转换(arrayBuffer + 二进制串 + btoa)有约 3 倍内存放大,单图过大可冲数 GB 峰值。
+ * 与入站单图上限(MAX_INPUT_IMAGE_BYTES = 50MB)同量级,留少量余量。
+ */
+export const MAX_REMOTE_IMAGE_BYTES = 64 * 1024 * 1024
 
 export interface CallApiOptions {
   settings: AppSettings
@@ -159,9 +165,9 @@ export async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, 
   }
 
   const blob = await response.blob()
-  // 上游(可能是用户可配/被注入的半信任主机)返回的图片 URL:套用与入站一致的体积上限,并校验确为图片,
+  // 上游(可能是用户可配/被注入的半信任主机)返回的图片 URL:按单图上限设防并校验确为图片,
   // 避免把任意/超大响应体整块读入内存(arrayBuffer + binary 串 + btoa 三重放大)导致内存暴涨 / 页面卡死。
-  assertImageInputPayloadSize(blob.size)
+  assertMaxBytes('图片 URL 响应', blob.size, MAX_REMOTE_IMAGE_BYTES)
   const contentType = blob.type || fallbackMime
   if (!contentType.startsWith('image/')) {
     throw new Error(`图片 URL 返回的不是图片内容(Content-Type: ${contentType || '未知'})`)

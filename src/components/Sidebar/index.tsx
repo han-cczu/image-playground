@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useStore } from '../../store'
 import { findReusableEmptyConversation, normalizeConversations } from '../../lib/conversations'
+import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
 import ConversationItem from './ConversationItem'
 
 interface SidebarProps {
@@ -114,15 +115,8 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
     return map
   }, [tasks])
 
-  /** ESC 关闭移动端抽屉。 */
-  useEffect(() => {
-    if (!mobileOpen) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onMobileClose()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [mobileOpen, onMobileClose])
+  /** ESC 关闭移动端抽屉(走全局 escStack:自建监听会让一次 Esc 把抽屉与其上层确认弹窗一起关掉)。 */
+  useCloseOnEscape(mobileOpen, onMobileClose)
 
   /** 抽屉打开时阻止背景滚动（仅 < md 生效，桌面端 sidebar 常驻不需要）。 */
   useEffect(() => {

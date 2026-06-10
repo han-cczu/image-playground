@@ -28,6 +28,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # CACHE_NAME 注入 commit hash(构建上下文无 .git):
+        # GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
+        # 不传则退化为 nogit-<timestamp>(缓存轮换仍正常,仅失去版本对应)
+        GIT_COMMIT: ${GIT_COMMIT:-}
     image: image-playground:latest
     container_name: image-playground-app
     restart: unless-stopped

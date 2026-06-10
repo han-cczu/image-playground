@@ -4,6 +4,9 @@
 # 因此本片段需在 server{} 与每个含自身 add_header 的 location{} 内分别 `include`。
 # 该文件由 Dockerfile COPY 到 /etc/nginx/conf.d/security-headers.inc(.inc 后缀避免被当独立 server 自动加载)。
 
+# HSTS 属于 TLS 终止层:nginx 在 Caddy/CDN 之后时由边缘下发(见 Caddyfile/_headers),此处加会重复;
+# 仅当 nginx 自身直接终止 TLS 时取消注释。HTTP 下浏览器会忽略该头,但保持单一下发点更清晰。
+# add_header Strict-Transport-Security "max-age=31536000" always;
 add_header X-Content-Type-Options "nosniff" always;
 add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 add_header X-Frame-Options "SAMEORIGIN" always;

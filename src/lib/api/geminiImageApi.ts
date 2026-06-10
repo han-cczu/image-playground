@@ -96,7 +96,9 @@ function buildGeminiUrl(baseUrl: string, model: string): string {
   // 注意:不复用 normalizeBaseUrl——它会给非 /v1 结尾的 path 补 /v1,把 .../v1beta 误改成 .../v1beta/v1。
   if (trimmed && !isHttpUrl(trimmed)) throw new Error('未配置 API URL')
   const cleanBase = trimmed || 'https://generativelanguage.googleapis.com/v1beta'
-  const cleanModel = model.trim().replace(/^\/+/, '').replace(/\/+$/, '')
+  // 剥离官方全限定名的 models/ 前缀:用户从文档/列表接口粘贴 "models/gemini-..." 时,
+  // 不剥会拼出 /models/models/... 路径 404
+  const cleanModel = model.trim().replace(/^\/+/, '').replace(/\/+$/, '').replace(/^models\//, '')
   return `${cleanBase}/models/${cleanModel}:generateContent`
 }
 

@@ -42,7 +42,9 @@ export function buildGeminiStreamUrl(baseUrl: string, model: string): string {
   // 非空但非 http(s) 的裸串会被当同源相对路径 → 带 x-goog-api-key 的请求发往应用源致 key 外泄
   if (trimmed && !isHttpUrl(trimmed)) throw new Error('未配置 API URL')
   const cleanBase = trimmed || DEFAULT_GEMINI_BASE_URL
-  const cleanModel = model.trim().replace(/^\/+/, '').replace(/\/+$/, '')
+  // 剥离官方全限定名的 models/ 前缀(与 geminiImageApi.buildGeminiUrl 同款清洗,两处需保持同步):
+  // 用户从文档/列表接口粘贴 "models/gemini-..." 时,不剥会拼出 /models/models/... 404
+  const cleanModel = model.trim().replace(/^\/+/, '').replace(/\/+$/, '').replace(/^models\//, '')
   return `${cleanBase}/models/${cleanModel}:streamGenerateContent?alt=sse`
 }
 
@@ -132,9 +134,12 @@ export async function streamGeminiChat(
   }
 
   if (!response.ok) {
+    // 先读错误体、后解除超时/取消接线:顺序反了的话,错误体悬挂时 text() 永久挂起且无法取消
+    const text = await response.text().catch(() => '')
     clearTimeout(timeoutTimer)
     externalSignal?.removeEventListener('abort', onExternalAbort)
-    const text = await response.text().catch(() => '')
+    // 读错误体期间用户点了取消:与本函数其余路径同口径归一化为「已取消」,不转写成 HTTP 错误
+    if (externalSignal?.aborted) throw new Error('已取消')
     throw new Error(`HTTP ${response.status}${text ? ` - ${text.slice(0, 300)}` : ''}`)
   }
 
