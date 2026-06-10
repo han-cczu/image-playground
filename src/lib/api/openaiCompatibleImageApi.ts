@@ -309,7 +309,13 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: OpenAIProfil
     return callResponsesImageApiSingle(opts, profile)
   }
 
-  const promises = Array.from({ length: n }).map(() => callResponsesImageApiSingle(opts, profile))
+  // n 路 fan-out 的请求体完全相同(同 prompt/参数/参考图):预序列化一次共享,
+  // 否则每路各自 JSON.stringify 会把含全部参考图 base64 的多 MB 大串同时复制 n 份(内存 n 倍放大)。
+  // 体积断言必须先于序列化:守卫的目的正是阻止超限载荷进 stringify(Chromium 下超过 V8 字符串
+  // 上限会直接抛 RangeError,友好报错被替换成晦涩异常)
+  assertResponsesPayloadSize(opts)
+  const sharedBody = buildResponsesRequestBody(opts, profile)
+  const promises = Array.from({ length: n }).map(() => callResponsesImageApiSingle(opts, profile, sharedBody))
   const results = await Promise.allSettled(promises)
   const { successfulResults, partialFailureCount, partialFailureMessage } = summarizeConcurrentFailures(results)
 
@@ -334,8 +340,34 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: OpenAIProfil
   return { images, actualParams, actualParamsList, revisedPrompts, partialFailureCount, partialFailureMessage }
 }
 
-async function callResponsesImageApiSingle(opts: CallApiOptions, profile: OpenAIProfile): Promise<CallApiResult> {
-  const { prompt, params, inputImageDataUrls } = opts
+/** Responses 输入体积断言(单点):mask 体积 + 参考图总载荷,必须在任何 JSON.stringify 之前执行。 */
+function assertResponsesPayloadSize(opts: CallApiOptions) {
+  if (opts.maskDataUrl) {
+    assertMaskEditFileSize('遮罩主图文件', getDataUrlDecodedByteSize(opts.inputImageDataUrls[0] ?? ''))
+    assertMaskEditFileSize('遮罩文件', getDataUrlDecodedByteSize(opts.maskDataUrl))
+  }
+  assertImageInputPayloadSize(
+    opts.inputImageDataUrls.reduce((sum, dataUrl) => sum + getDataUrlDecodedByteSize(dataUrl), 0) +
+      (opts.maskDataUrl ? getDataUrlDecodedByteSize(opts.maskDataUrl) : 0),
+  )
+}
+
+/** Responses 请求体序列化(单点):含全部参考图 base64,fan-out 时由调用方构建一次共享。 */
+function buildResponsesRequestBody(opts: CallApiOptions, profile: OpenAIProfile): string {
+  return JSON.stringify({
+    model: profile.model,
+    input: createResponsesInput(opts.prompt, opts.inputImageDataUrls),
+    tools: [createResponsesImageTool(opts.params, opts.inputImageDataUrls.length > 0, profile, opts.maskDataUrl)],
+    tool_choice: 'required',
+  })
+}
+
+async function callResponsesImageApiSingle(
+  opts: CallApiOptions,
+  profile: OpenAIProfile,
+  prebuiltBody?: string,
+): Promise<CallApiResult> {
+  const { params } = opts
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
   const useApiProxy = profile.apiProxy && isApiProxyAvailable(proxyConfig)
@@ -345,21 +377,7 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: OpenAI
   const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
 
   try {
-    if (opts.maskDataUrl) {
-      assertMaskEditFileSize('遮罩主图文件', getDataUrlDecodedByteSize(inputImageDataUrls[0] ?? ''))
-      assertMaskEditFileSize('遮罩文件', getDataUrlDecodedByteSize(opts.maskDataUrl))
-    }
-    assertImageInputPayloadSize(
-      inputImageDataUrls.reduce((sum, dataUrl) => sum + getDataUrlDecodedByteSize(dataUrl), 0) +
-        (opts.maskDataUrl ? getDataUrlDecodedByteSize(opts.maskDataUrl) : 0),
-    )
-
-    const body = {
-      model: profile.model,
-      input: createResponsesInput(prompt, inputImageDataUrls),
-      tools: [createResponsesImageTool(params, inputImageDataUrls.length > 0, profile, opts.maskDataUrl)],
-      tool_choice: 'required',
-    }
+    assertResponsesPayloadSize(opts)
 
     const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
       method: 'POST',
@@ -368,7 +386,7 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: OpenAI
         'Content-Type': 'application/json',
       },
       cache: 'no-store',
-      body: JSON.stringify(body),
+      body: prebuiltBody ?? buildResponsesRequestBody(opts, profile),
       signal: requestSignal,
     })
 

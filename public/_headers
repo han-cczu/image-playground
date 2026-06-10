@@ -3,7 +3,9 @@
 #
 # Cloudflare 会合并多个匹配规则,更具体的路径覆盖冲突项,因此 /sw.js 等会同时拿到 /* 的安全头 + 自身 Cache-Control。
 
+# HSTS:Workers 恒为 HTTPS;不加 includeSubDomains/preload(影响面与可回退性考虑)
 /*
+  Strict-Transport-Security: max-age=31536000
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: SAMEORIGIN

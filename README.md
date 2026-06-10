@@ -94,8 +94,9 @@ docker run -d --name image-playground -p 8080:80 image-playground
 <summary>🔒 隐私与本地优先</summary>
 
 - 任务记录、生成图片、API 配置全部存浏览器（IndexedDB Blob 存储 + localStorage），**不经过任何第三方服务器**。
+- ⚠️ **数据在你的浏览器里,也只在你的浏览器里**：浏览器存储并非永久保障——磁盘空间紧张时浏览器可能自动清空站点数据（应用启动时会自动申请持久化授权以降低风险，可在设置 → 数据管理中查看授权状态）；Safari 在 7 天未访问后也可能清除（添加到主屏幕可豁免）。**请定期用「导出」做备份**——导出 ZIP 是唯一的恢复手段，不只是迁移工具。
 - 图片按 SHA-256 哈希去重，多任务引用同一张图只占一份空间。
-- 支持作为 PWA 安装到桌面 / 主屏，离线可打开应用外壳。
+- 支持作为 PWA 安装到桌面 / 主屏，离线可完整使用（Service Worker 在安装期预缓存全部静态资源）。
 - **稳定性保障**：区域级 React Error Boundary 包裹 sidebar / Header / 主区域 / InputBar / 各 Modal，单点渲染异常不再拖垮整页；Service Worker 自动注入 commit hash 作 CACHE_NAME，每次部署旧缓存自然失效；翻车时只需改 KILL_SWITCH 常量部署一次就能远程救回所有用户，无需让用户清缓存。
 
 </details>

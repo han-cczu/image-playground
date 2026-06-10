@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import type { Conversation } from '../../types'
 import { isArchiveConversation, pickFallbackColor } from '../../lib/conversations'
+import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
 import { formatRelativeTime } from './relativeTime'
 
 interface ConversationItemProps {
@@ -60,16 +61,14 @@ export default function ConversationItem({
       if (menuButtonRef.current?.contains(target)) return
       setMenuOpen(false)
     }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false)
-    }
     document.addEventListener('mousedown', onPointer)
-    document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('mousedown', onPointer)
-      document.removeEventListener('keydown', onKey)
     }
   }, [menuOpen])
+
+  // Esc 走全局栈:自建 document 监听会绕过 escStack,一次 Esc 把本菜单与其上层弹窗一起关掉
+  useCloseOnEscape(menuOpen, () => setMenuOpen(false))
 
   // Enter 提交后 input 卸载会再触发 onBlur→commitRename;用一次性标志防止重复 renameConversation 写入
   const committingRef = useRef(false)
@@ -150,6 +149,8 @@ export default function ConversationItem({
             onChange={(e) => setDraftTitle(e.target.value)}
             onBlur={commitRename}
             onKeyDown={(e) => {
+              // IME 守卫:中文组字确认的 Enter/Esc 是输入法操作,不是提交/取消(与片段库输入框同款)
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return
               if (e.key === 'Enter') {
                 e.preventDefault()
                 commitRename()

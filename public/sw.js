@@ -4,6 +4,12 @@
 // 校验：构建结束时若 dist/sw.js 中仍存在该占位符字面量，构建脚本会 exit 1。
 const CACHE_NAME = '__CACHE_NAME__'
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon.svg']
+// 构建后由 inject-sw-build-id.mjs 替换为 dist/assets/ 全部 hashed 文件的 JSON 数组字符串。
+// 此前 install 只预缓存 APP_SHELL,hashed JS/CSS 全靠 fetch 期 runtime-cache——离线保障是
+// 「部分缓存」:刚部署完(activate 删旧缓存)就离线的用户拿到 index.html 却拿不到它引用的
+// assets,白屏。开发态占位符未替换 → 解析为空数组,行为与替换前一致。
+const PRECACHE_MANIFEST = '__PRECACHE_MANIFEST__'
+const PRECACHE_ASSETS = PRECACHE_MANIFEST.startsWith('[') ? JSON.parse(PRECACHE_MANIFEST) : []
 
 // kill-switch 是单向逃生通道：部署翻车（旧 SW 把用户锁死）时把下方常量改成 true 部署一次，
 // 已注册旧 SW 的浏览器在下次访问时会自动 unregister 并强制刷新所有 tab，从而回到无 SW 拦截的正常网络。
@@ -34,8 +40,10 @@ if (KILL_SWITCH) {
   })
 } else {
   self.addEventListener('install', (event) => {
+    // 任一资源 404 则 install 失败、旧 SW 继续服务(addAll 的原子语义,符合预期:
+    // 宁可不切换也不要半套缓存)。新缓存在 install 期写满,activate 删旧缓存才是安全的。
     event.waitUntil(
-      caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)),
+      caches.open(CACHE_NAME).then((cache) => cache.addAll([...APP_SHELL, ...PRECACHE_ASSETS])),
     )
     self.skipWaiting()
   })

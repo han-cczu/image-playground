@@ -30,6 +30,7 @@ default-src 'self'; script-src 'self' 'sha256-ceZQVieuEu3wrVZesSAxmbWRpR45TuEEt5
 - **`style-src 'self' 'unsafe-inline'`**:dnd-kit 拖拽用内联 `transform` style,Tailwind 注入样式,需要 `unsafe-inline`。
 - **`script-src 'self' 'sha256-...'`**:纯静态 SPA 无 nonce 注入能力;`index.html` 有一段稳定的内联主题引导脚本,用其 SHA-256 hash 放行,而非 `'unsafe-inline'`。
 - **`worker-src 'self' blob:`**:导出/导入走 fflate 异步 API(`exportImport.ts` 的 `zipAsync`/`unzipAsync`),其 worker 从 blob URL 创建——不放行 `blob:` 则强制 CSP 后大库导出导入直接失败。仅放宽 worker,`script-src` 不含 `blob:`,blob 脚本仍不能在主上下文执行。
+- **HSTS(`Strict-Transport-Security: max-age=31536000`)**:由 TLS 终止层下发——Caddyfile 主站与 Workers `_headers` 已显式声明(旧 Caddyfile 注释「Caddy 已默认开启 HSTS」**有误**,Caddy 不会自动下发);nginx inc 仅留注释模板,在 nginx 直接终止 TLS 时启用(在 Caddy/CDN 之后启用会重复下发);Caddyfile.lan 有意不加,避免 LAN 实验环境被一年期锁定。不加 includeSubDomains/preload。
 
 ### ⚠️ 内联脚本 hash 维护与上线流程
 

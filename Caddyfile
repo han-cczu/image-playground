@@ -14,8 +14,11 @@
 your-domain.com {
     encode gzip zstd
 
-    # 强制 HTTPS 安全响应头（Caddy 已默认开启 HSTS，不再重复添加）
+    # 强制 HTTPS 安全响应头。
+    # 注意:Caddy 自动签发证书但**不会**自动下发 HSTS(旧注释有误)——需显式声明。
+    # max-age 一年;不加 includeSubDomains(根域可能挂其它 HTTP 服务)、不加 preload(不可轻易回退)。
     header {
+        Strict-Transport-Security "max-age=31536000"
         # 防止被 iframe 嵌入（按需放开）
         X-Frame-Options "SAMEORIGIN"
         X-Content-Type-Options "nosniff"

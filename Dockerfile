@@ -15,11 +15,18 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# 再拷源码并构建
+# 再拷源码并构建。
+# GIT_COMMIT:构建上下文排除了 .git(.dockerignore),容器内 git 命令必失败,CACHE_NAME 会退化为
+# nogit-<timestamp>(时间戳仍保证每次构建唯一,SW 缓存轮换不受影响,只是失去与代码版本的对应)。
+# 构建时传入即可恢复:docker build --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) ...
+ARG GIT_COMMIT=
+ENV GIT_COMMIT=${GIT_COMMIT}
 COPY . .
+# 双占位符残留校验:__PRECACHE_MANIFEST__ 在 sw.js 里是优雅退化设计(残留则解析为空数组,
+# 离线静默降级为部分缓存),不像 __CACHE_NAME__ 会自爆——必须在产物层兜底
 RUN npm run build \
     && test -f dist/sw.js \
-    && ! grep -q '__CACHE_NAME__' dist/sw.js
+    && ! grep -qE '__CACHE_NAME__|__PRECACHE_MANIFEST__' dist/sw.js
 
 # ---------- Stage 2: serve ----------
 FROM nginx:alpine AS runtime

@@ -225,6 +225,13 @@ function TaskCard({
           // 横向滑动选择交给手势、纵向仍可滚动;用 CSS 抑制方向冲突(passive 监听下 preventDefault 无效)
           touchAction: 'pan-y',
         }}
+        // 打开详情是卡片的核心交互,裸 div onClick 键盘完全不可达:补 tabIndex/键盘激活。
+        // 不用 role="button":卡片内嵌着收藏/重试/拖拽手柄等真实 button,button 角色按 ARIA 规范
+        // 不允许交互式后代(children-presentational),屏幕阅读器会把整卡读成单个按钮吞掉内部操作;
+        // role="group" + aria-label 保留可聚焦与可命名,内部按钮语义完整
+        role="group"
+        tabIndex={0}
+        aria-label={`任务：${task.prompt.slice(0, 50) || '未命名'}，按 Enter 查看详情`}
         onClick={(e) => {
           if (Date.now() < suppressClickUntilRef.current) {
             e.preventDefault()
@@ -232,6 +239,14 @@ function TaskCard({
             return
           }
           onClick(e)
+        }}
+        onKeyDown={(e) => {
+          // 只响应卡片自身的按键,不劫持内部按钮(收藏/重试/手柄)的 Enter/Space
+          if (e.target !== e.currentTarget) return
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onClick(e as unknown as React.MouseEvent)
+          }
         }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
