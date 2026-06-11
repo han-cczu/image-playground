@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, getCachedImage, ensureImageCached } from '../store'
-import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
-import { useFocusTrap } from '../hooks/useFocusTrap'
+import Modal, { ModalCloseButton, ModalHeaderBar, ModalTitle } from './Modal'
 import { mapWithConcurrency } from '../lib/concurrency'
 import { captionImageStream } from '../lib/api/captionImageApi'
 
@@ -18,7 +16,7 @@ interface BatchItem {
  * 批量反推:对选中的多张图并发反推(复用 settings.batchConcurrency + mapWithConcurrency),
  * 每图独立 AbortController,逐图卡片展示结果,可单条复制 / 一键全部存为片段库。
  * 不复用 runEnqueuedTasks(反推不产 TaskRecord);批量路径不订阅 onDelta(只取全文,降 N 路渲染)。
- * 照搬 CompareModal 骨架:外层开关 + 内层 key 重置 + 三件套 hooks。
+ * 照搬 CompareModal 骨架:外层开关 + 内层 key 重置 + Modal 原语。
  */
 export default function BatchCaptionModal() {
   const captionBatchImageIds = useStore((s) => s.captionBatchImageIds)
@@ -39,7 +37,6 @@ function BatchCaptionPanel({ imageIds, close }: { imageIds: string[]; close: () 
   const batchConcurrency = useStore((s) => s.settings.batchConcurrency)
   const createSnippet = useStore((s) => s.createSnippet)
   const showToast = useStore((s) => s.showToast)
-  const panelRef = useRef<HTMLDivElement>(null)
 
   const [items, setItems] = useState<BatchItem[]>(() =>
     imageIds.map((imageId) => ({ imageId, status: 'pending', text: '', error: '' })),
@@ -105,10 +102,6 @@ function BatchCaptionPanel({ imageIds, close }: { imageIds: string[]; close: () 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageIds])
 
-  useCloseOnEscape(true, close)
-  useLockBodyScroll(true)
-  useFocusTrap(true, panelRef)
-
   const cancelAll = () => {
     for (const c of controllersRef.current) if (!c.signal.aborted) c.abort()
     // 把尚未完成的(pending/running)标为已取消,否则被取消的待处理图永远停在"排队中…"
@@ -155,20 +148,18 @@ function BatchCaptionPanel({ imageIds, close }: { imageIds: string[]; close: () 
   const errorCount = items.filter((it) => it.status === 'error').length
 
   return (
-    <div data-no-drag-select className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" onClick={close} />
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="relative z-10 flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 backdrop-blur-xl animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
-      >
-        <div className="flex items-center justify-between gap-4 border-b border-gray-100 px-5 py-3 dark:border-white/[0.08]">
-          <h3 className="flex items-center gap-2 text-base font-semibold text-gray-800 dark:text-gray-100">
+    <Modal
+      onClose={close}
+      ariaLabel="批量反推"
+      panelClassName="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden"
+    >
+        <ModalHeaderBar>
+          <ModalTitle>
             批量反推
             <span className="text-xs font-normal text-gray-400 dark:text-gray-500">
               {doneCount}/{items.length} 完成{errorCount > 0 ? ` · ${errorCount} 失败` : ''}
             </span>
-          </h3>
+          </ModalTitle>
           <div className="flex items-center gap-2">
             {running && (
               <button
@@ -188,17 +179,9 @@ function BatchCaptionPanel({ imageIds, close }: { imageIds: string[]; close: () 
                 全部存为片段
               </button>
             )}
-            <button
-              onClick={close}
-              className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-              aria-label="关闭批量反推"
-            >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <ModalCloseButton onClick={close} label="关闭批量反推" />
           </div>
-        </div>
+        </ModalHeaderBar>
 
         <div className="flex-1 space-y-3 overflow-y-auto p-5 custom-scrollbar">
           {apiKeyMissing && (
@@ -241,7 +224,6 @@ function BatchCaptionPanel({ imageIds, close }: { imageIds: string[]; close: () 
             </div>
           ))}
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

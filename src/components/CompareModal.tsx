@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useStore, getCachedImage, ensureImageCached } from '../store'
-import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
-import { useFocusTrap } from '../hooks/useFocusTrap'
+import Modal, { ModalCloseButton, ModalHeaderBar, ModalTitle } from './Modal'
 import { buildCompareRows } from '../lib/compareTasks'
 import type { TaskRecord } from '../types'
 
@@ -61,7 +59,6 @@ export default function CompareModal() {
 
 function ComparePanel({ compareTasks, close }: { compareTasks: TaskRecord[]; close: () => void }) {
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
-  const panelRef = useRef<HTMLDivElement>(null)
 
   /** 每列独立的当前图下标（按 task.id 记，列被删不串位）；挂载即全新 */
   const [imageIndexById, setImageIndexById] = useState<Record<string, number>>({})
@@ -98,48 +95,27 @@ function ComparePanel({ compareTasks, close }: { compareTasks: TaskRecord[]; clo
 
   const rows = useMemo(() => buildCompareRows(compareTasks), [compareTasks])
 
-  useCloseOnEscape(true, close)
-  useLockBodyScroll(true)
-  useFocusTrap(true, panelRef)
-
   const columnCount = compareTasks.length
   // grid-cols 动态类需在 Tailwind 可静态分析的集合内
   const gridColsClass =
     columnCount === 2 ? 'lg:grid-cols-2' : columnCount === 3 ? 'lg:grid-cols-3' : 'lg:grid-cols-4'
 
   return (
-    <div
-      data-no-drag-select
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    <Modal
+      onClose={close}
+      ariaLabel="并排对比"
+      panelClassName="flex max-h-[92vh] w-full max-w-[95vw] flex-col overflow-hidden"
     >
-      <div
-        className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in"
-        onClick={close}
-      />
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="relative z-10 flex max-h-[92vh] w-full max-w-[95vw] flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 backdrop-blur-xl animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
-      >
-        {/* 标题栏 */}
-        <div className="flex items-center justify-between gap-4 border-b border-gray-100 px-5 py-3 dark:border-white/[0.08]">
-          <h3 className="flex items-center gap-2 text-base font-semibold text-gray-800 dark:text-gray-100">
+        <ModalHeaderBar>
+          <ModalTitle>
             <svg className="h-5 w-5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="3" y="4" width="8" height="16" rx="2" />
               <rect x="13" y="4" width="8" height="16" rx="2" />
             </svg>
             并排对比（{columnCount} 列）
-          </h3>
-          <button
-            onClick={close}
-            className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-            aria-label="关闭对比"
-          >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+          </ModalTitle>
+          <ModalCloseButton onClick={close} label="关闭对比" />
+        </ModalHeaderBar>
 
         <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
           {/* 图片列区 */}
@@ -251,7 +227,6 @@ function ComparePanel({ compareTasks, close }: { compareTasks: TaskRecord[]; clo
             </table>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
-import { useFocusTrap } from '../hooks/useFocusTrap'
+import Modal from './Modal'
 import {
   buildCommands,
   COMMAND_GROUP_LABELS,
@@ -99,7 +97,6 @@ function CommandPalettePanel({ close }: { close: () => void }) {
 
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
-  const panelRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
   const commands = useMemo(
@@ -172,11 +169,7 @@ function CommandPalettePanel({ close }: { close: () => void }) {
       ?.scrollIntoView({ block: 'nearest' })
   }, [clampedIndex])
 
-  useCloseOnEscape(true, close)
-  useLockBodyScroll(true)
-  useFocusTrap(true, panelRef)
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
       if (flat.length === 0) return
@@ -201,20 +194,13 @@ function CommandPalettePanel({ close }: { close: () => void }) {
   let flatIndex = -1
 
   return (
-    <div
-      data-no-drag-select
-      className="fixed inset-0 z-[105] flex items-start justify-center p-4 pt-[12vh] md:pt-[18vh]"
+    <Modal
+      onClose={close}
+      ariaLabel="命令面板"
+      containerClassName="z-[105] items-start pt-[12vh] md:pt-[18vh]"
+      panelClassName="flex w-full max-w-xl flex-col overflow-hidden"
+      onPanelKeyDown={handleKeyDown}
     >
-      <div
-        className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in"
-        onClick={close}
-      />
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        onKeyDown={handleKeyDown}
-        className="relative z-10 flex w-full max-w-xl flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 backdrop-blur-xl animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
-      >
         <div className="flex items-center gap-3 border-b border-gray-200/70 px-4 py-3 dark:border-white/[0.08]">
           <svg
             className="h-5 w-5 shrink-0 text-gray-400"
@@ -302,7 +288,6 @@ function CommandPalettePanel({ close }: { close: () => void }) {
         <div className="border-t border-gray-200/70 px-4 py-2 text-[11px] text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
           ↑↓ 选择 · Enter 执行 · Esc 关闭
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

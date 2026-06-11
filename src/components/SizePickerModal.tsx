@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { calculateImageSize, normalizeImageSize, parseRatio, type SizeTier } from '../lib/image/size'
 import ViewportTooltip from './ViewportTooltip'
-import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
-import { useFocusTrap } from '../hooks/useFocusTrap'
+import Modal, { ModalCloseButton } from './Modal'
 
 const TIERS: SizeTier[] = ['1K', '2K', '4K']
 const SIZE_LIMIT_TEXT = '由于模型限制，最终输出会自动规整到合法尺寸：宽高均为 16 的倍数，最大边长 3840px，宽高比不超过 3:1，总像素限制为 655360-8294400。'
@@ -46,11 +44,7 @@ function findPresetForSize(size: string) {
 }
 
 export default function SizePickerModal({ currentSize, onSelect, onClose, allowAuto = true }: Props) {
-  // 该组件由父级条件挂载,挂载即「打开」:接入 ESC 关闭、body 滚动锁、焦点陷阱,与其它弹窗一致
-  const panelRef = useRef<HTMLDivElement>(null)
-  useCloseOnEscape(true, onClose)
-  useLockBodyScroll(true)
-  useFocusTrap(true, panelRef)
+  // 该组件由父级条件挂载,挂载即「打开」:ESC/滚动锁/焦点陷阱由 Modal 原语接管
   const currentPreset = findPresetForSize(currentSize)
   const currentParsedSize = parseSize(currentSize)
   const [mode, setMode] = useState<Mode>(() => {
@@ -149,28 +143,18 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
   }
 
   return (
-    <div data-no-drag-select className="fixed inset-0 z-[70] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" />
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="relative z-10 w-full max-w-md rounded-3xl border border-white/50 bg-white/95 p-5 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal
+      onClose={onClose}
+      ariaLabel="设置图像尺寸"
+      containerClassName="z-[70] items-center"
+      panelClassName="w-full max-w-md p-5"
+    >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100">设置图像尺寸</h3>
             <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">当前：{currentSize || 'auto'}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-            aria-label="关闭"
-          >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <ModalCloseButton onClick={onClose} />
         </div>
 
         <div className="space-y-6">
@@ -344,7 +328,6 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
             确定
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

@@ -24,9 +24,7 @@ import {
   normalizeSettings,
 } from '../../lib/api/apiProfiles'
 import type { ApiProfile, AppSettings, CaptionerProfile, PromptOptimizerProfile } from '../../types'
-import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
-import { useLockBodyScroll } from '../../hooks/useLockBodyScroll'
-import { useFocusTrap } from '../../hooks/useFocusTrap'
+import Modal, { ModalCloseButton, ModalTitle } from '../Modal'
 import { ProfileSelector } from './ProfileSelector'
 import { NamedProfileSelector } from './NamedProfileSelector'
 import { ApiProfileSection } from './ApiProfileSection'
@@ -309,11 +307,6 @@ export default function SettingsModal() {
     }
   }, [activeProfile.id, activeProfile.timeout, timeoutInput])
 
-  const panelRef = useRef<HTMLDivElement>(null)
-  useCloseOnEscape(showSettings, handleClose)
-  useLockBodyScroll(showSettings)
-  useFocusTrap(showSettings, panelRef)
-
   const updateActiveOptimizerProfile = (patch: Partial<PromptOptimizerProfile>) => {
     setDraft((prev) => ({
       ...prev,
@@ -470,35 +463,23 @@ export default function SettingsModal() {
   }
 
   return (
-    <div data-no-drag-select className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in"
-        onClick={handleClose}
-      />
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="relative z-10 w-full max-w-md sm:max-w-lg md:max-w-2xl rounded-3xl border border-white/50 bg-white/95 p-5 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 overflow-y-auto max-h-[85vh] custom-scrollbar"
-      >
+    <Modal
+      onClose={handleClose}
+      ariaLabel="设置"
+      containerClassName="z-[70] items-center"
+      panelClassName="w-full max-w-md sm:max-w-lg md:max-w-2xl p-5 overflow-y-auto max-h-[85vh] custom-scrollbar"
+    >
         <div className="mb-5 flex items-center justify-between gap-4">
-          <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+          <ModalTitle>
             <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
             设置
-          </h3>
+          </ModalTitle>
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-400 dark:text-gray-500 font-mono select-none">v{__APP_VERSION__}</span>
-            <button
-              onClick={handleClose}
-              className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-              aria-label="关闭"
-            >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <ModalCloseButton onClick={handleClose} />
           </div>
         </div>
 
@@ -706,7 +687,6 @@ export default function SettingsModal() {
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

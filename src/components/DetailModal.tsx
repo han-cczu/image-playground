@@ -1,8 +1,6 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useStore, getCachedImage, ensureImageCached, reuseConfig, editOutputs, removeTask, updateTaskInStore, showCodexCliPrompt, getCodexCliPromptKey, retryTask, setTaskFavoriteCategory, clearTaskFavorite, cancelTask } from '../store'
-import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
-import { useFocusTrap } from '../hooks/useFocusTrap'
+import Modal, { ModalCloseButton } from './Modal'
 import { formatImageRatio } from '../lib/image/size'
 import { ActualValueBadge, DetailParamValue } from '../lib/paramDisplay'
 import { copyBlobToClipboard, copyTextToClipboard, getClipboardFailureMessage } from '../lib/image/clipboard'
@@ -30,7 +28,6 @@ export default function DetailModal() {
   const [now, setNow] = useState(Date.now())
   const imagePanelRef = useRef<HTMLDivElement>(null)
   const mainImageRef = useRef<HTMLImageElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
   const [imageLabelLeft, setImageLabelLeft] = useState(8)
 
   const task = useMemo(
@@ -41,10 +38,6 @@ export default function DetailModal() {
   // 创作血缘:读时按内容寻址 id 求交推断父/子任务（零持久化字段）。
   const parentLinks = useMemo(() => (task ? findParentTasks(task, tasks) : []), [task, tasks])
   const childLinks = useMemo(() => (task ? findChildTasks(task, tasks) : []), [task, tasks])
-
-  useCloseOnEscape(Boolean(task), () => setDetailTaskId(null))
-  useLockBodyScroll(Boolean(task))
-  useFocusTrap(Boolean(task), panelRef)
 
   // Reset index when task changes
   useEffect(() => {
@@ -314,30 +307,17 @@ export default function DetailModal() {
   }
 
   return (
-    <div
-      data-no-drag-select
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      onClick={() => setDetailTaskId(null)}
+    <Modal
+      onClose={() => setDetailTaskId(null)}
+      ariaLabel="记录详情"
+      tone="deep"
+      panelClassName="w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row"
     >
-      <div className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-md animate-overlay-in" />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        tabIndex={-1}
-        className="relative bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] rounded-3xl shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col md:flex-row z-10 ring-1 ring-black/5 dark:ring-white/10 animate-modal-in"
-        onClick={(e) => e.stopPropagation()}
-      >
         <div className="flex h-14 items-center justify-end px-4 md:hidden">
-          <button
+          <ModalCloseButton
             onClick={() => setDetailTaskId(null)}
-            className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-white/[0.06] transition text-gray-400"
-            aria-label="关闭"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+            iconClassName="w-6 h-6"
+          />
         </div>
 
         {/* 左侧：图片 */}
@@ -795,7 +775,6 @@ export default function DetailModal() {
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
