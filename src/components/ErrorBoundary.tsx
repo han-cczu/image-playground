@@ -119,9 +119,134 @@ function getErrorBrief(error: Error): { message: string; hash: string } {
   return { message, hash }
 }
 
+/** 按钮种类；实际渲染顺序固定为 重试 → 刷新页面 → 清空数据，与原实现一致。 */
+type ActionButtonKind = 'retry' | 'reload' | 'clear'
+
+/** 按钮组形态，对应四种 fallback；header 形态只有「重试」一个按钮。 */
+type ActionVariant = 'main' | 'compact' | 'header' | 'modal'
+
+/**
+ * 各形态下按钮的 className，逐字保留自原四个 fallback ——
+ * 包括 main/compact 带 transition-colors 而 modal 不带、compact/modal 的
+ * 刷新/清空按钮无 font-medium 等差异，刻意不做视觉归一（本次重构要求渲染结果完全不变）。
+ */
+const ACTION_BUTTON_CLASS: Record<ActionVariant, Partial<Record<ActionButtonKind, string>>> = {
+  main: {
+    retry: 'inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-4 py-1.5 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20',
+    reload: 'inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-4 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08]',
+    clear: 'inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-4 py-1.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20',
+  },
+  compact: {
+    retry: 'rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20',
+    reload: 'rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08]',
+    clear: 'rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20',
+  },
+  header: {
+    retry: 'rounded-full border border-red-300 px-2.5 py-0.5 text-[11px] font-medium hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/50 dark:hover:bg-red-500/20',
+  },
+  modal: {
+    retry: 'rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20',
+    reload: 'rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08]',
+    clear: 'rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20',
+  },
+}
+
+interface ErrorActionButtonsProps {
+  variant: ActionVariant
+  /** 要渲染的按钮集合（compact 形态顶行只有重试，详情区才有刷新/清空，故拆开传）。 */
+  buttons: readonly ActionButtonKind[]
+  onRetry: () => void
+  onReload: () => void
+  onClearAndReload: () => void
+  retryDisabled: boolean
+}
+
+/**
+ * 操作按钮组：四个 fallback 共用。
+ * disabled 逻辑保持原样 —— 只有「重试」受 retryDisabled 限流，刷新/清空始终可点。
+ */
+function ErrorActionButtons(props: ErrorActionButtonsProps) {
+  const { variant, buttons, onRetry, onReload, onClearAndReload, retryDisabled } = props
+  const cls = ACTION_BUTTON_CLASS[variant]
+  return (
+    <>
+      {buttons.includes('retry') && (
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={retryDisabled}
+          aria-label="重试"
+          className={cls.retry}
+        >
+          重试
+        </button>
+      )}
+      {buttons.includes('reload') && (
+        <button
+          type="button"
+          onClick={onReload}
+          aria-label="刷新页面"
+          className={cls.reload}
+        >
+          刷新页面
+        </button>
+      )}
+      {/* main 形态用全称文案，其余形态用短文案；aria-label 统一全称（与原实现一致） */}
+      {buttons.includes('clear') && (
+        <button
+          type="button"
+          onClick={onClearAndReload}
+          aria-label="清空本地数据并重载"
+          className={cls.clear}
+        >
+          {variant === 'main' ? '清空本地数据并重载' : '清空数据并重载'}
+        </button>
+      )}
+    </>
+  )
+}
+
+/** 错误 ID 徽标的 code 样式：modal 段落是 text-sm，需显式 text-xs 缩小；main 段落本身已是 text-xs。 */
+const ERROR_ID_CODE_CLASS = {
+  base: 'rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]',
+  xs: 'rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-white/[0.06]',
+} as const
+
+/** 「错误 ID：xxxxxx」徽标：prod 下用户可反馈的 hash id（main / modal 共用）。 */
+function ErrorIdBadge({ hash, size }: { hash: string; size: keyof typeof ERROR_ID_CODE_CLASS }) {
+  return (
+    <>
+      错误 ID：<code className={ERROR_ID_CODE_CLASS[size]}>{hash}</code>
+    </>
+  )
+}
+
+/** DEV 堆栈预览的容器样式（main 宽幅大字号；compact / modal 紧凑小字号）。 */
+const DEV_STACK_CLASS = {
+  main: 'mt-6 max-h-64 w-full max-w-3xl overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3 text-left font-mono text-xs leading-relaxed text-gray-700 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300',
+  compact: 'max-h-40 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 text-left font-mono text-[11px] leading-snug text-gray-700 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300',
+  modal: 'mt-4 max-h-48 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 text-left font-mono text-[11px] leading-snug text-gray-700 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300',
+} as const
+
+interface DevStackProps {
+  variant: keyof typeof DEV_STACK_CLASS
+  error: Error
+  componentStack: string | null
+}
+
+/** DEV 模式下的 <pre> 堆栈预览；prod 渲染 null（与原先各 fallback 内 isDev && <pre> 等价）。 */
+function DevStack({ variant, error, componentStack }: DevStackProps) {
+  if (!import.meta.env.DEV) return null
+  return (
+    <pre className={DEV_STACK_CLASS[variant]}>
+{error.stack || error.message}
+{componentStack ? `\n\n--- componentStack ---${componentStack}` : ''}
+    </pre>
+  )
+}
+
 function FallbackMain(props: FallbackActions) {
-  const { onRetry, onReload, onClearAndReload, retryDisabled, error, componentStack, region } = props
-  const isDev = import.meta.env.DEV
+  const { retryDisabled, error, componentStack, region } = props
   const brief = getErrorBrief(error)
 
   return (
@@ -137,54 +262,24 @@ function FallbackMain(props: FallbackActions) {
         {REGION_LABEL[region]} 渲染失败，可以尝试重试或刷新页面。
       </p>
       <p className="mt-2 max-w-md text-xs text-gray-400 dark:text-gray-500">
-        错误 ID：<code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{brief.hash}</code>
+        <ErrorIdBadge hash={brief.hash} size="base" />
         <span className="ml-2">{brief.message}</span>
       </p>
       <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-        <button
-          type="button"
-          onClick={onRetry}
-          disabled={retryDisabled}
-          aria-label="重试"
-          className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-4 py-1.5 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
-        >
-          重试
-        </button>
-        <button
-          type="button"
-          onClick={onReload}
-          aria-label="刷新页面"
-          className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-4 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08]"
-        >
-          刷新页面
-        </button>
-        <button
-          type="button"
-          onClick={onClearAndReload}
-          aria-label="清空本地数据并重载"
-          className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-4 py-1.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20"
-        >
-          清空本地数据并重载
-        </button>
+        <ErrorActionButtons variant="main" buttons={['retry', 'reload', 'clear']} {...props} />
       </div>
       {retryDisabled && (
         <p className="mt-3 text-xs text-red-500 dark:text-red-400">
           已连续重试 {MAX_RETRY_FAILED} 次失败，请尝试刷新页面或清空数据。
         </p>
       )}
-      {isDev && (
-        <pre className="mt-6 max-h-64 w-full max-w-3xl overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3 text-left font-mono text-xs leading-relaxed text-gray-700 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
-{error.stack || error.message}
-{componentStack ? `\n\n--- componentStack ---${componentStack}` : ''}
-        </pre>
-      )}
+      <DevStack variant="main" error={error} componentStack={componentStack} />
     </div>
   )
 }
 
 function FallbackCompact(props: FallbackActions) {
-  const { onRetry, onReload, retryDisabled, error, componentStack, region, detailOpen, toggleDetail } = props
-  const isDev = import.meta.env.DEV
+  const { error, componentStack, region, detailOpen, toggleDetail } = props
   const brief = getErrorBrief(error)
 
   const isInputBar = region === 'inputbar'
@@ -199,15 +294,7 @@ function FallbackCompact(props: FallbackActions) {
         <span className="flex-1 truncate text-gray-700 dark:text-gray-200">
           {REGION_LABEL[region]}出错（{brief.hash}）
         </span>
-        <button
-          type="button"
-          onClick={onRetry}
-          disabled={retryDisabled}
-          aria-label="重试"
-          className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
-        >
-          重试
-        </button>
+        <ErrorActionButtons variant="compact" buttons={['retry']} {...props} />
         <button
           type="button"
           onClick={toggleDetail}
@@ -224,29 +311,9 @@ function FallbackCompact(props: FallbackActions) {
             {brief.message}
           </p>
           <div className="flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              onClick={onReload}
-              aria-label="刷新页面"
-              className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08]"
-            >
-              刷新页面
-            </button>
-            <button
-              type="button"
-              onClick={props.onClearAndReload}
-              aria-label="清空本地数据并重载"
-              className="rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20"
-            >
-              清空数据并重载
-            </button>
+            <ErrorActionButtons variant="compact" buttons={['reload', 'clear']} {...props} />
           </div>
-          {isDev && (
-            <pre className="max-h-40 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 text-left font-mono text-[11px] leading-snug text-gray-700 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
-{error.stack || error.message}
-{componentStack ? `\n\n--- componentStack ---${componentStack}` : ''}
-            </pre>
-          )}
+          <DevStack variant="compact" error={error} componentStack={componentStack} />
         </div>
       )}
     </div>
@@ -254,7 +321,7 @@ function FallbackCompact(props: FallbackActions) {
 }
 
 function FallbackHeader(props: FallbackActions) {
-  const { onRetry, retryDisabled, error, region } = props
+  const { error, region } = props
   const brief = getErrorBrief(error)
   return (
     <div
@@ -265,22 +332,13 @@ function FallbackHeader(props: FallbackActions) {
       <span className="flex-1 truncate">
         {REGION_LABEL[region]}出错（{brief.hash}）：{brief.message}
       </span>
-      <button
-        type="button"
-        onClick={onRetry}
-        disabled={retryDisabled}
-        aria-label="重试"
-        className="rounded-full border border-red-300 px-2.5 py-0.5 text-[11px] font-medium hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/50 dark:hover:bg-red-500/20"
-      >
-        重试
-      </button>
+      <ErrorActionButtons variant="header" buttons={['retry']} {...props} />
     </div>
   )
 }
 
 function FallbackModal(props: FallbackActions) {
-  const { onRetry, onReload, onClearAndReload, retryDisabled, error, componentStack, region } = props
-  const isDev = import.meta.env.DEV
+  const { error, componentStack, region } = props
   const brief = getErrorBrief(error)
 
   return (
@@ -295,46 +353,26 @@ function FallbackModal(props: FallbackActions) {
             {REGION_LABEL[region]}加载失败
           </h3>
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-            错误 ID：<code className="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-white/[0.06]">{brief.hash}</code>
+            <ErrorIdBadge hash={brief.hash} size="xs" />
           </p>
           <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{brief.message}</p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={onRetry}
-              disabled={retryDisabled}
-              aria-label="重试"
-              className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
-            >
-              重试
-            </button>
-            <button
-              type="button"
-              onClick={onReload}
-              aria-label="刷新页面"
-              className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08]"
-            >
-              刷新页面
-            </button>
-            <button
-              type="button"
-              onClick={onClearAndReload}
-              aria-label="清空本地数据并重载"
-              className="rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20"
-            >
-              清空数据并重载
-            </button>
+            <ErrorActionButtons variant="modal" buttons={['retry', 'reload', 'clear']} {...props} />
           </div>
-          {isDev && (
-            <pre className="mt-4 max-h-48 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 text-left font-mono text-[11px] leading-snug text-gray-700 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
-{error.stack || error.message}
-{componentStack ? `\n\n--- componentStack ---${componentStack}` : ''}
-            </pre>
-          )}
+          <DevStack variant="modal" error={error} componentStack={componentStack} />
         </div>
       </div>
     </div>
   )
+}
+
+/** region → fallback 组件映射；sidebar & inputbar 走紧凑形态。 */
+const FALLBACK_BY_REGION: Record<ErrorBoundaryRegion, (props: FallbackActions) => ReactNode> = {
+  main: FallbackMain,
+  sidebar: FallbackCompact,
+  inputbar: FallbackCompact,
+  header: FallbackHeader,
+  modal: FallbackModal,
 }
 
 export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
@@ -455,10 +493,7 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
       toggleDetail: this.toggleDetail,
     }
 
-    if (region === 'main') return <FallbackMain {...actions} />
-    if (region === 'header') return <FallbackHeader {...actions} />
-    if (region === 'modal') return <FallbackModal {...actions} />
-    // sidebar & inputbar 走紧凑形态
-    return <FallbackCompact {...actions} />
+    const Fallback = FALLBACK_BY_REGION[region]
+    return <Fallback {...actions} />
   }
 }

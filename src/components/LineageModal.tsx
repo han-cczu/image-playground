@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useStore, getCachedImage, ensureImageCached } from '../store'
-import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
-import { useFocusTrap } from '../hooks/useFocusTrap'
+import Modal, { ModalCloseButton, ModalHeaderBar, ModalTitle } from './Modal'
 import {
   buildLineageGraph,
   buildLineageIndex,
@@ -48,7 +46,6 @@ function LineagePanel({ centerId, close }: { centerId: string; close: () => void
   const tasks = useStore((s) => s.tasks)
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const setLineageTaskId = useStore((s) => s.setLineageTaskId)
-  const panelRef = useRef<HTMLDivElement>(null)
 
   // 倒排索引 + 双向 BFS 谱系图。deps=[tasks]:生成期 tasks 变化会重算(后代随 outputs 落地"长出"),
   // 单遍 O(N) 在数千 task 下约几 ms,可接受;若实测卡顿改 keyed on 粗信号
@@ -86,10 +83,6 @@ function LineagePanel({ centerId, close }: { centerId: string; close: () => void
       cancelled = true
     }
   }, [thumbIds])
-
-  useCloseOnEscape(true, close)
-  useLockBodyScroll(true)
-  useFocusTrap(true, panelRef)
 
   const openDetail = (taskId: string) => {
     setLineageTaskId(null) // 替换式:关谱系回 DetailModal
@@ -129,16 +122,13 @@ function LineagePanel({ centerId, close }: { centerId: string; close: () => void
   }
 
   return (
-    <div data-no-drag-select className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" onClick={close} />
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="relative z-10 flex max-h-[92vh] w-full max-w-[95vw] flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 backdrop-blur-xl animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
-      >
-        {/* 标题栏 */}
-        <div className="flex items-center justify-between gap-4 border-b border-gray-100 px-5 py-3 dark:border-white/[0.08]">
-          <h3 className="flex items-center gap-2 text-base font-semibold text-gray-800 dark:text-gray-100">
+    <Modal
+      onClose={close}
+      ariaLabel="创作谱系"
+      panelClassName="flex max-h-[92vh] w-full max-w-[95vw] flex-col overflow-hidden"
+    >
+        <ModalHeaderBar>
+          <ModalTitle>
             <svg className="h-5 w-5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <circle cx="12" cy="5" r="2.5" />
               <circle cx="6" cy="19" r="2.5" />
@@ -151,17 +141,9 @@ function LineagePanel({ centerId, close }: { centerId: string; close: () => void
                 · 谱系过大,仅展示中心邻近的 {graph.nodes.length} 个节点
               </span>
             )}
-          </h3>
-          <button
-            onClick={close}
-            className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-            aria-label="关闭谱系"
-          >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+          </ModalTitle>
+          <ModalCloseButton onClick={close} label="关闭谱系" />
+        </ModalHeaderBar>
 
         {/* 画布:大谱系靠容器滚动(不缩放) */}
         <div className="flex-1 overflow-auto p-6 custom-scrollbar">
@@ -193,7 +175,6 @@ function LineagePanel({ centerId, close }: { centerId: string; close: () => void
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

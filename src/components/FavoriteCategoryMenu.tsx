@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { FavoriteCategory } from '../types'
 import { useStore } from '../store'
+import { usePopoverPlacement } from '../hooks/usePopoverPlacement'
 import {
   DEFAULT_FAVORITE_CATEGORY_ID,
   FAVORITE_CATEGORY_COLORS,
@@ -54,7 +55,6 @@ export default function FavoriteCategoryMenu({
   const createFavoriteCategory = useStore((s) => s.createFavoriteCategory)
   const ensureDefaultFavoriteCategory = useStore((s) => s.ensureDefaultFavoriteCategory)
   const [isOpen, setIsOpen] = useState(false)
-  const [openUp, setOpenUp] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
   const [draftName, setDraftName] = useState('')
   const pickNextDefaultColor = useCallback(
@@ -66,7 +66,6 @@ export default function FavoriteCategoryMenu({
   const triggerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
-  const [menuPosition, setMenuPosition] = useState<CSSProperties>({})
 
   const categories = useMemo(() => {
     const hasDefault = favoriteCategories.some((category) => category.id === DEFAULT_FAVORITE_CATEGORY_ID)
@@ -95,33 +94,13 @@ export default function FavoriteCategoryMenu({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const updateMenuPosition = useCallback(() => {
-    if (!triggerRef.current) return
-    const rect = triggerRef.current.getBoundingClientRect()
-    const spaceAbove = rect.top
-    const spaceBelow = window.innerHeight - rect.bottom
-    const estimatedMenuHeight = Math.min((categories.length + 3) * 36 + 48, 280)
-    const nextOpenUp = spaceAbove > spaceBelow && spaceBelow < estimatedMenuHeight
-    setOpenUp(nextOpenUp)
-    setMenuPosition({
-      left: align === 'right' ? rect.right : rect.left,
-      top: nextOpenUp ? undefined : rect.bottom + 6,
-      bottom: nextOpenUp ? window.innerHeight - rect.top + 6 : undefined,
-      width: matchTriggerWidth ? rect.width : undefined,
-      transform: align === 'right' ? 'translateX(-100%)' : undefined,
-    })
-  }, [align, categories.length, matchTriggerWidth])
-
-  useEffect(() => {
-    if (!isOpen) return
-    updateMenuPosition()
-    window.addEventListener('resize', updateMenuPosition)
-    window.addEventListener('scroll', updateMenuPosition, true)
-    return () => {
-      window.removeEventListener('resize', updateMenuPosition)
-      window.removeEventListener('scroll', updateMenuPosition, true)
-    }
-  }, [isOpen, updateMenuPosition])
+  const { openUp, menuStyle, update: updateMenuPosition } = usePopoverPlacement(triggerRef, {
+    open: isOpen,
+    estimatedHeight: Math.min((categories.length + 3) * 36 + 48, 280),
+    fixed: true,
+    align,
+    matchTriggerWidth,
+  })
 
   useEffect(() => {
     if (!isOpen) {
@@ -179,7 +158,7 @@ export default function FavoriteCategoryMenu({
       className={`fixed z-[90] ${menuClassName} max-h-72 overflow-y-auto rounded-xl border border-gray-200/60 bg-white/95 py-1 shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] dark:ring-white/10 ${
         openUp ? 'animate-dropdown-up' : 'animate-dropdown-down'
       }`}
-      style={menuPosition}
+      style={menuStyle}
       onClick={(e) => e.stopPropagation()}
     >
       {includeClearFavorite && onClearFavorite && (

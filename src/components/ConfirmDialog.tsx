@@ -1,8 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
-import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
-import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
-import { useFocusTrap } from '../hooks/useFocusTrap'
+import Modal from './Modal'
 
 function renderMessage(message: string) {
   return message.split(/(`[^`]+`)/g).map((part, index) => {
@@ -22,7 +20,6 @@ export default function ConfirmDialog() {
   const confirmDialog = useStore((s) => s.confirmDialog)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const [canConfirm, setCanConfirm] = useState(true)
-  const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const delay = confirmDialog?.minConfirmDelayMs ?? 0
@@ -46,12 +43,6 @@ export default function ConfirmDialog() {
     handleClose()
   }
 
-  useCloseOnEscape(Boolean(confirmDialog) && canConfirm, handleClose)
-  useLockBodyScroll(Boolean(confirmDialog))
-  // 焦点陷阱:对话框可见即困住焦点(不依赖 canConfirm——延迟确认期对话框已可见,焦点应被困;
-  // 确认按钮 disabled 时 getFocusable 会自动跳过它落到取消按钮)。
-  useFocusTrap(Boolean(confirmDialog), panelRef)
-
   if (!confirmDialog) return null
   const isDestructive = confirmDialog.title.includes('删除') || confirmDialog.title.includes('清空')
   const confirmTone = confirmDialog.tone ?? (isDestructive ? 'danger' : undefined)
@@ -64,20 +55,15 @@ export default function ConfirmDialog() {
   const confirmText = confirmDialog.confirmText ?? (isDestructive ? '确认删除' : '确认')
 
   return (
-    <div
-      data-no-drag-select
-      className="fixed inset-0 z-[110] flex items-center justify-center p-4"
-      onClick={handleClose}
+    <Modal
+      onClose={handleClose}
+      ariaLabel={confirmDialog.title}
+      containerClassName="z-[110] items-center"
+      panelClassName="w-full max-w-sm p-6"
+      tone="deep"
+      animation="confirm"
+      escEnabled={canConfirm}
     >
-      <div className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-md animate-overlay-in" />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        tabIndex={-1}
-        className="relative bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] rounded-3xl shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] max-w-sm w-full p-6 z-10 ring-1 ring-black/5 dark:ring-white/10 animate-confirm-in"
-        onClick={(e) => e.stopPropagation()}
-      >
         <h3 className="mb-2 flex items-center gap-2 text-base font-bold text-gray-800 dark:text-gray-100">
           {confirmDialog.icon === 'info' && (
             <svg className="h-5 w-5 shrink-0 text-blue-500" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
@@ -112,7 +98,6 @@ export default function ConfirmDialog() {
             {confirmText}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

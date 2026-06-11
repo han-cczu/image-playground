@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import type { Conversation } from '../../types'
 import { isArchiveConversation, pickFallbackColor } from '../../lib/conversations'
@@ -10,8 +10,9 @@ interface ConversationItemProps {
   active: boolean
   collapsed: boolean
   taskCount: number
-  onSelect: () => void
-  onDelete: () => void
+  /** 以 id 为参的稳定回调:配合 memo,任务增删只重渲染计数变化的对话项 */
+  onSelect: (id: string) => void
+  onDelete: (id: string) => void
 }
 
 /** 取标题首字符（兼容中文/emoji），用于折叠态图标。 */
@@ -22,7 +23,7 @@ function firstChar(title: string): string {
   return Array.from(trimmed)[0] ?? '?'
 }
 
-export default function ConversationItem({
+export default memo(function ConversationItem({
   conversation,
   active,
   collapsed,
@@ -107,7 +108,7 @@ export default function ConversationItem({
     return (
       <button
         type="button"
-        onClick={onSelect}
+        onClick={() => onSelect(conversation.id)}
         title={`${conversation.title}（${taskCount} 个）`}
         aria-label={`切换到对话：${conversation.title}`}
         aria-current={active ? 'true' : undefined}
@@ -167,7 +168,7 @@ export default function ConversationItem({
       ) : (
         <button
           type="button"
-          onClick={onSelect}
+          onClick={() => onSelect(conversation.id)}
           onDoubleClick={startRename}
           aria-current={active ? 'true' : undefined}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
@@ -255,7 +256,7 @@ export default function ConversationItem({
                 onClick={(e) => {
                   e.stopPropagation()
                   setMenuOpen(false)
-                  onDelete()
+                  onDelete(conversation.id)
                 }}
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-red-500 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10"
               >
@@ -274,4 +275,4 @@ export default function ConversationItem({
       )}
     </div>
   )
-}
+})

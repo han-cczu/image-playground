@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, memo, useCallback, useMemo, useState } from 'react'
 import type { TaskRecord } from '../types'
 import { useStore, reuseConfig, editOutputs, retryGridCell, retryGridMissing, cancelBatch } from '../store'
 import { reconstructMatrix, getGridAxisDef } from '../lib/gridExperiment'
@@ -15,6 +15,33 @@ interface Props {
 const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
 const HEADER_CLASS = 'flex items-center justify-center px-2 py-1 text-center text-xs font-medium text-gray-500 dark:text-gray-400'
+
+interface MatrixCellProps {
+  task: TaskRecord
+  isSelected: boolean
+  onCellClick: (task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => void
+  onDelete: (task: TaskRecord) => void
+}
+
+// memo + 稳定回调:本组件订阅 selectedTaskIds,框选/Ctrl 点选时只有 isSelected 翻转的格重渲染
+const MatrixCell = memo(function MatrixCell({ task, isSelected, onCellClick, onDelete }: MatrixCellProps) {
+  const onClick = useCallback((e: React.MouseEvent | React.TouchEvent) => onCellClick(task, e), [onCellClick, task])
+  const onReuseCb = useCallback(() => reuseConfig(task), [task])
+  const onEditCb = useCallback(() => editOutputs(task), [task])
+  const onDeleteCb = useCallback(() => onDelete(task), [onDelete, task])
+  return (
+    <div className="task-card-wrapper" data-task-id={task.id}>
+      <TaskCard
+        task={task}
+        isSelected={isSelected}
+        onClick={onClick}
+        onReuse={onReuseCb}
+        onEditOutputs={onEditCb}
+        onDelete={onDeleteCb}
+      />
+    </div>
+  )
+})
 
 /** XY 网格矩阵卡:行=Y 取值、列=X 取值,单元格复用 TaskCard,空格可补跑。占据流中整行。 */
 export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
@@ -55,6 +82,32 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
     }
     return map
   }, [tasks])
+
+  const selectedIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds])
+
+  // 进度 / 缺漏基于「矩阵格」而非成员条数:补跑新建 task 会保留旧 error,成员数会被抬高、
+  // gaps 减法在重复坐标下失真(可负、或与真空格相互抵消)。逐格按代表 task 判定才稳。
+  // useMemo:本组件订阅 selectedTaskIds,框选期间每次重渲染不必重扫 cols×rows。
+  const progress = useMemo(() => {
+    if (!matrix) return { totalCells: 0, doneCells: 0, pendingCells: 0 }
+    let doneCells = 0
+    let pendingCells = 0 // 缺失或失败的格
+    for (const col of matrix.cols) {
+      for (const row of matrix.rows) {
+        const rep = repByCell.get(`${col.key}\u0000${row.key}`)
+        if (rep?.status === 'done') doneCells += 1
+        else if (!rep || rep.status === 'error') pendingCells += 1
+      }
+    }
+    return { totalCells: matrix.cols.length * matrix.rows.length, doneCells, pendingCells }
+  }, [matrix, repByCell])
+
+  // 稳定回调(store action 引用稳定),供 MatrixCell 的 memo 依赖
+  const handleCellClick = useCallback((task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => {
+    const isCtrl = isMac ? (e as React.MouseEvent).metaKey : (e as React.MouseEvent).ctrlKey
+    if (isCtrl) toggleTaskSelection(task.id)
+    else setDetailTaskId(task.id)
+  }, [toggleTaskSelection, setDetailTaskId])
 
   if (!matrix) return null
   const { axes, cols, rows } = matrix
@@ -108,34 +161,18 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
     setEditingNote(false)
   }
 
-  // 进度 / 缺漏基于「矩阵格」而非成员条数:补跑新建 task 会保留旧 error,成员数会被抬高、
-  // gaps 减法在重复坐标下失真(可负、或与真空格相互抵消)。逐格按代表 task 判定才稳。
-  const totalCells = cols.length * rows.length
-  let doneCells = 0
-  let pendingCells = 0 // 缺失或失败的格
-  for (const col of cols) {
-    for (const row of rows) {
-      const rep = repTask(col.key, row.key)
-      if (rep?.status === 'done') doneCells += 1
-      else if (!rep || rep.status === 'error') pendingCells += 1
-    }
-  }
+  const { totalCells, doneCells, pendingCells } = progress
   const hasFailuresOrGaps = pendingCells > 0
 
   const allIds = tasks.map((t) => t.id)
-  const allSelected = allIds.length > 0 && allIds.every((id) => selectedTaskIds.includes(id))
+  const allSelected = allIds.length > 0 && allIds.every((id) => selectedIdSet.has(id))
   const toggleSelectAll = () => {
     if (allSelected) {
-      setSelectedTaskIds(selectedTaskIds.filter((id) => !allIds.includes(id)))
+      const allIdSet = new Set(allIds)
+      setSelectedTaskIds(selectedTaskIds.filter((id) => !allIdSet.has(id)))
     } else {
       setSelectedTaskIds(Array.from(new Set([...selectedTaskIds, ...allIds])))
     }
-  }
-
-  const handleCellClick = (task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => {
-    const isCtrl = isMac ? (e as React.MouseEvent).metaKey : (e as React.MouseEvent).ctrlKey
-    if (isCtrl) toggleTaskSelection(task.id)
-    else setDetailTaskId(task.id)
   }
 
   return (
@@ -270,16 +307,13 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
                   )
                 }
                 return (
-                  <div key={col.key} className="task-card-wrapper" data-task-id={task.id}>
-                    <TaskCard
-                      task={task}
-                      isSelected={selectedTaskIds.includes(task.id)}
-                      onClick={(e) => handleCellClick(task, e)}
-                      onReuse={() => reuseConfig(task)}
-                      onEditOutputs={() => editOutputs(task)}
-                      onDelete={() => onDelete(task)}
-                    />
-                  </div>
+                  <MatrixCell
+                    key={col.key}
+                    task={task}
+                    isSelected={selectedIdSet.has(task.id)}
+                    onCellClick={handleCellClick}
+                    onDelete={onDelete}
+                  />
                 )
               })}
             </Fragment>

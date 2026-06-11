@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useStore } from '../../store'
 import { findReusableEmptyConversation, normalizeConversations } from '../../lib/conversations'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
@@ -141,14 +141,20 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
     }
   }, [mobileOpen])
 
-  const handleSelect = (id: string) => {
+  // 稳定回调(zustand action 引用稳定):配合 ConversationItem 的 memo,
+  // 任务增删时只有 taskCount 变化的对话项重渲染
+  const handleSelect = useCallback((id: string) => {
     // F3：active id 必须真实存在；否则忽略点击
     const target = useStore.getState().conversations.find((c) => c.id === id)
     if (!target) return
     setGalleryView(false)
     setActiveConversation(id)
     onMobileClose()
-  }
+  }, [setGalleryView, setActiveConversation, onMobileClose])
+
+  const handleDelete = useCallback((id: string) => {
+    deleteConversationWithTasks(id)
+  }, [deleteConversationWithTasks])
 
   const handleCreate = () => {
     // 避免连按 + 堆积同名空"新对话"：若已存在可复用的空对话，直接切过去
@@ -269,8 +275,8 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
                   active={!galleryView && c.id === activeConversationId}
                   collapsed={sidebarCollapsed}
                   taskCount={taskCountByConversation.get(c.id) ?? 0}
-                  onSelect={() => handleSelect(c.id)}
-                  onDelete={() => deleteConversationWithTasks(c.id)}
+                  onSelect={handleSelect}
+                  onDelete={handleDelete}
                 />
               </li>
             ))}

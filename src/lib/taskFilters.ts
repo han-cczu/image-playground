@@ -1,5 +1,22 @@
 import type { TaskRecord, TaskStatus } from '../types'
 
+/**
+ * 参数搜索文本缓存:JSON.stringify(params) 在大库 + 搜索词逐键触发下是过滤热路径的大头。
+ * 以 params 对象引用为键——store 对 task 的更新是不可变替换({...t, ...patch}),
+ * params 未变时引用保留、缓存命中;params 被替换则新引用自然失效。WeakMap 随对象回收,无泄漏。
+ */
+const paramsSearchTextCache = new WeakMap<object, string>()
+
+function getParamsSearchText(task: TaskRecord): string {
+  const params = task.params
+  let text = paramsSearchTextCache.get(params)
+  if (text === undefined) {
+    text = JSON.stringify(params).toLowerCase()
+    paramsSearchTextCache.set(params, text)
+  }
+  return text
+}
+
 export interface TaskFilterOptions {
   searchQuery: string
   filterStatus: TaskStatus | 'all'
@@ -46,7 +63,6 @@ export function filterAndSortTasks(tasks: TaskRecord[], options: TaskFilterOptio
 
     if (!q) return true
     const prompt = (task.prompt || '').toLowerCase()
-    const paramStr = JSON.stringify(task.params).toLowerCase()
-    return prompt.includes(q) || paramStr.includes(q)
+    return prompt.includes(q) || getParamsSearchText(task).includes(q)
   })
 }

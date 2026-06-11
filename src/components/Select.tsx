@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { usePopoverPlacement } from '../hooks/usePopoverPlacement'
 
 interface Option {
   label: string
@@ -15,11 +16,11 @@ interface SelectProps {
 
 export default function Select({ value, onChange, options, disabled, className }: SelectProps) {
   const [isOpen, setIsOpen] = useState(false)
-  const [openUp, setOpenUp] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const optionRefs = useRef<(HTMLDivElement | null)[]>([])
+  const { openUp, update: updatePlacement } = usePopoverPlacement(triggerRef, { open: isOpen })
 
   const selectedOption = options.find((o) => o.value === value)
   const selectedIndex = options.findIndex((o) => o.value === value)
@@ -40,13 +41,10 @@ export default function Select({ value, onChange, options, disabled, className }
   }, [isOpen, activeIndex])
 
   const openMenu = useCallback((index: number) => {
-    if (triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect()
-      setOpenUp(rect.top > window.innerHeight - rect.bottom)
-    }
+    updatePlacement()
     setActiveIndex(index)
     setIsOpen(true)
-  }, [])
+  }, [updatePlacement])
 
   const commit = useCallback(
     (index: number) => {

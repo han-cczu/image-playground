@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { initStore } from './store'
 import { useStore } from './store'
 import { normalizeSettings, switchApiProfileProvider } from './lib/api/apiProfiles'
@@ -31,8 +31,6 @@ import TourOverlay from './components/TourOverlay'
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
-  const tasks = useStore((s) => s.tasks)
-  const activeConversationId = useStore((s) => s.activeConversationId)
   const galleryView = useStore((s) => s.galleryView)
   const searchQuery = useStore((s) => s.searchQuery)
   const filterStatus = useStore((s) => s.filterStatus)
@@ -44,12 +42,14 @@ export default function App() {
   /**
    * 当前视图下是否存在任务(存在性判定,非全量 filter+sort)。
    * showEmptyState 只关心「有没有」,且仅在其余筛选全为默认时才可能为真——故这里只按对话存在性
-   * 判定即可,无需 filterAndSortTasks 的全量 [...tasks].sort + per-task JSON.stringify。
+   * 判定即可,无需 filterAndSortTasks 的全量 [...tasks].sort + per-task 参数序列化。
+   * 布尔 selector:zustand 仅在值翻转时通知——避免订阅 tasks 数组导致生成期间每次进度更新
+   * 都从 App 顶层把 Header/Sidebar/InputBar/全部弹窗重渲染一遍。
    */
-  const hasTasksInView = useMemo(() => {
-    const convId = galleryView ? null : activeConversationId
-    return tasks.some((t) => !convId || t.conversationId === convId)
-  }, [tasks, galleryView, activeConversationId])
+  const hasTasksInView = useStore((s) => {
+    const convId = s.galleryView ? null : s.activeConversationId
+    return s.tasks.some((t) => !convId || t.conversationId === convId)
+  })
 
   /**
    * 是否展示「真正的空状态」（emoji + 4 个 pill）：
@@ -144,6 +144,10 @@ export default function App() {
 
   const theme = useStore((s) => s.settings.theme ?? 'light')
 
+  // 稳定引用:Sidebar/Header 的 props 不随 App 重渲染变化,配合子组件 memo 生效
+  const closeMobileSidebar = useCallback(() => setMobileSidebarOpen(false), [])
+  const openMobileSidebar = useCallback(() => setMobileSidebarOpen(true), [])
+
   useEffect(() => {
     const applyDark = (isDark: boolean) => {
       document.documentElement.classList.toggle('dark', isDark)
@@ -174,12 +178,12 @@ export default function App() {
         <ErrorBoundary region="sidebar">
           <Sidebar
             mobileOpen={mobileSidebarOpen}
-            onMobileClose={() => setMobileSidebarOpen(false)}
+            onMobileClose={closeMobileSidebar}
           />
         </ErrorBoundary>
         <div className="flex min-h-screen min-w-0 flex-1 flex-col md:h-screen md:min-h-0">
           <ErrorBoundary region="header">
-            <Header onOpenMobileSidebar={() => setMobileSidebarOpen(true)} />
+            <Header onOpenMobileSidebar={openMobileSidebar} />
           </ErrorBoundary>
           <ErrorBoundary region="main">
             <main
