@@ -126,6 +126,8 @@ export default function TaskGrid() {
   const selectedTaskIds = useStore((s) => s.selectedTaskIds)
   const setSelectedTaskIds = useStore((s) => s.setSelectedTaskIds)
   const clearSelection = useStore((s) => s.clearSelection)
+  // includes() 逐卡判定是 O(选中数×卡数);框选拖动期间每次 mousemove 都重渲染,用 Set 摊平
+  const selectedIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds])
   const rootRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
   const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null)
@@ -411,7 +413,7 @@ export default function TaskGrid() {
                   key={task.id}
                   task={task}
                   index={index}
-                  isSelected={selectedTaskIds.includes(task.id)}
+                  isSelected={selectedIdSet.has(task.id)}
                   dragDisabled={dragDisabled}
                   conversationTag={conversationTag}
                   onCardClick={handleCardClick}
