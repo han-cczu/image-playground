@@ -1,5 +1,6 @@
-import { useRef, useEffect } from 'react'
+import { useRef } from 'react'
 import { useStore } from '../../store'
+import { usePopoverDismiss } from '../../hooks/usePopoverDismiss'
 import { calculateImageSize, normalizeImageSize, detectTier, detectRatioFromSize, type SizeTier } from '../../lib/image/size'
 
 /**
@@ -17,27 +18,7 @@ export default function ResolutionMenu({
   const setParams = useStore((s) => s.setParams)
   const ref = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        onClose()
-      }
-    }
-    const onPointer = (e: MouseEvent) => {
-      const target = e.target as Node | null
-      if (!target) return
-      if (ref.current?.contains(target)) return
-      if (anchorRef.current?.contains(target)) return
-      onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    document.addEventListener('mousedown', onPointer)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.removeEventListener('mousedown', onPointer)
-    }
-  }, [anchorRef, onClose])
+  usePopoverDismiss(true, anchorRef, ref, onClose)
 
   const currentTier = detectTier(params.size)
   const apply = (tier: SizeTier | 'auto') => {
@@ -63,7 +44,6 @@ export default function ResolutionMenu({
     <div
       ref={ref}
       role="dialog"
-      aria-modal="true"
       aria-label="选择输出分辨率"
       className="absolute bottom-full left-0 mb-2 min-w-[180px] rounded-2xl border border-gray-200/70 bg-white/95 p-2 shadow-2xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 z-40"
     >
@@ -83,7 +63,7 @@ export default function ResolutionMenu({
               >
                 <span className="flex flex-col leading-tight">
                   <span className="font-medium">{item.label}</span>
-                  <span className="text-[11px] text-gray-400 dark:text-gray-500">{item.hint}</span>
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">{item.hint}</span>
                 </span>
                 {active && (
                   <svg className="h-4 w-4 shrink-0 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">

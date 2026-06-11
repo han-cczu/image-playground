@@ -19,7 +19,7 @@ export default function Lightbox() {
   useLockBodyScroll(Boolean(lightboxImageId))
 
   // 图片与遮罩资源加载(cache-first + 遮罩预览 dataURL)
-  const { src, maskPreviewSrc } = useLightboxImage(lightboxImageId)
+  const { src, maskPreviewSrc, prompt } = useLightboxImage(lightboxImageId)
 
   // 列表导航 + 键盘左右切换
   const { currentIndex, total, showNav, goPrev, goNext } = useLightboxNavigation(lightboxImageId)
@@ -30,6 +30,7 @@ export default function Lightbox() {
     <LightboxInner
       src={src}
       maskPreviewSrc={maskPreviewSrc}
+      prompt={prompt}
       onClose={close}
       showNav={showNav}
       currentIndex={currentIndex}
@@ -43,6 +44,8 @@ export default function Lightbox() {
 interface LightboxInnerProps {
   src: string
   maskPreviewSrc?: string
+  /** 当前图所属任务的提示词,无任务时为空串 */
+  prompt: string
   onClose: () => void
   showNav: boolean
   currentIndex: number
@@ -52,7 +55,7 @@ interface LightboxInnerProps {
 }
 
 /** 内部组件：保证挂载时 DOM 已经存在，所有 ref / effect 都可靠 */
-function LightboxInner({ src, maskPreviewSrc, onClose, showNav, currentIndex, total, onPrev, onNext }: LightboxInnerProps) {
+function LightboxInner({ src, maskPreviewSrc, prompt, onClose, showNav, currentIndex, total, onPrev, onNext }: LightboxInnerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // LightboxInner 仅在打开时挂载,焦点陷阱常驻 true;作用在 containerRef(根节点带 tabIndex={-1} 承接焦点)。
   useFocusTrap(true, containerRef)
@@ -76,12 +79,25 @@ function LightboxInner({ src, maskPreviewSrc, onClose, showNav, currentIndex, to
   const isZoomed = s > 1
   const zoomPercent = Math.round(s * 100)
 
+  // 读屏命名:截断 prompt 作可访问名称(按码点截断,slice 按 code unit 会切裂 emoji 代理对);
+  // 非生成图(参考图/输入图查不到任务 prompt)回退到中性的「图片」,不冒称生成结果
+  const promptCodePoints = Array.from(prompt)
+  const promptSnippet =
+    promptCodePoints.length > 50 ? `${promptCodePoints.slice(0, 50).join('')}…` : prompt
+  const dialogLabel = promptSnippet ? `图片预览：${promptSnippet}` : '图片预览'
+  const imageAlt = promptSnippet
+    ? `生成结果：${promptSnippet}`
+    : showNav && currentIndex >= 0
+      ? `图片 ${currentIndex + 1}/${total}`
+      : '图片'
+
   return (
     <div
       ref={containerRef}
       data-lightbox-root
       role="dialog"
       aria-modal="true"
+      aria-label={dialogLabel}
       tabIndex={-1}
       className="fixed inset-0 z-[60] flex items-center justify-center select-none outline-none"
       style={{ cursor: isZoomed ? (isDragging ? 'grabbing' : 'grab') : 'pointer' }}
@@ -102,7 +118,7 @@ function LightboxInner({ src, maskPreviewSrc, onClose, showNav, currentIndex, to
             src={src}
             className="saveable-image max-w-[85vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
             onDragStart={(e) => e.preventDefault()}
-            alt=""
+            alt={imageAlt}
           />
           {maskPreviewSrc && (
             <img

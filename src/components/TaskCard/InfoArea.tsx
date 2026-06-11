@@ -39,7 +39,7 @@ export default function InfoArea({
           {task.status === 'error' && (
             <button
               onClick={() => retryTask(task)}
-              className="p-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-gray-400 hover:text-blue-500 transition"
+              className="p-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-gray-500 dark:text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition"
               title="重试失败任务"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -86,7 +86,7 @@ export default function InfoArea({
                   <button
                     type="button"
                     onClick={toggle}
-                    className="p-1.5 rounded-md text-gray-400 transition hover:bg-yellow-50 hover:text-yellow-400 dark:hover:bg-yellow-500/10"
+                    className="p-1.5 rounded-md text-gray-500 dark:text-gray-400 transition hover:bg-yellow-50 hover:text-yellow-500 dark:hover:bg-yellow-500/10 dark:hover:text-yellow-400"
                     title="收藏记录"
                   >
                     <svg
@@ -109,7 +109,7 @@ export default function InfoArea({
           )}
           <button
             onClick={onReuse}
-            className="p-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-gray-400 hover:text-blue-500 transition"
+            className="p-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-gray-500 dark:text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition"
             title="复用配置"
           >
             <svg
@@ -128,7 +128,7 @@ export default function InfoArea({
           </button>
           <button
             onClick={onEditOutputs}
-            className="p-1.5 rounded-md hover:bg-green-50 dark:hover:bg-green-950/30 text-gray-400 hover:text-green-500 transition disabled:opacity-30"
+            className="p-1.5 rounded-md hover:bg-green-50 dark:hover:bg-green-950/30 text-gray-500 dark:text-gray-400 hover:text-green-500 dark:hover:text-green-400 transition disabled:opacity-30"
             title="编辑输出"
             disabled={!task.outputImages?.length}
           >
@@ -148,7 +148,7 @@ export default function InfoArea({
           </button>
           <button
             onClick={onDelete}
-            className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 text-gray-400 hover:text-red-500 transition"
+            className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition"
             title="删除记录"
           >
             <svg

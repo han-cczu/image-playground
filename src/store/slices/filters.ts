@@ -38,9 +38,15 @@ export const createFiltersSlice: StateCreator<AppState, [], [], FiltersSlice> = 
 
   // Selection
   selectedTaskIds: [],
-  setSelectedTaskIds: (ids) => set((s) => ({
-    selectedTaskIds: typeof ids === 'function' ? ids(s.selectedTaskIds) : ids,
-  })),
+  setSelectedTaskIds: (ids) => set((s) => {
+    const next = typeof ids === 'function' ? ids(s.selectedTaskIds) : ids
+    // 内容相等(含顺序)时原样返回旧 state,避免无谓换引用触发订阅方重渲染(兜底各调用方)。
+    // 注意:persist 在 set() 后仍会无条件落盘,高频路径需调用方比较后跳过 set(见 TaskGrid 框选)
+    if (next.length === s.selectedTaskIds.length && next.every((id, i) => id === s.selectedTaskIds[i])) {
+      return s
+    }
+    return { selectedTaskIds: next }
+  }),
   toggleTaskSelection: (id, force) => set((s) => {
     const isSelected = s.selectedTaskIds.includes(id)
     const shouldSelect = force === undefined ? !isSelected : force

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store'
+import { usePopoverDismiss } from '../../hooks/usePopoverDismiss'
 import { DEFAULT_PARAMS } from '../../types'
 import { getOutputImageLimitForSettings } from '../../lib/api/paramCompatibility'
 import Select from '../Select'
@@ -64,28 +65,7 @@ export default function AdvancedParamsPopover({ anchorRef, onClose }: Props) {
     if (nLimitHintTimerRef.current != null) window.clearTimeout(nLimitHintTimerRef.current)
   }, [])
 
-  /** Esc 关闭、点击外部关闭 */
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        onClose()
-      }
-    }
-    const onPointer = (e: MouseEvent) => {
-      const target = e.target as Node | null
-      if (!target) return
-      if (popoverRef.current?.contains(target)) return
-      if (anchorRef.current?.contains(target)) return
-      onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    document.addEventListener('mousedown', onPointer)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.removeEventListener('mousedown', onPointer)
-    }
-  }, [anchorRef, onClose])
+  usePopoverDismiss(true, anchorRef, popoverRef, onClose)
 
   const commitOutputCompression = useCallback(() => {
     if (outputCompressionInput.trim() === '') {
@@ -160,7 +140,6 @@ export default function AdvancedParamsPopover({ anchorRef, onClose }: Props) {
     <div
       ref={popoverRef}
       role="dialog"
-      aria-modal="true"
       aria-label="高级参数"
       className="absolute bottom-full right-0 mb-2 w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200/70 bg-white/95 p-4 shadow-2xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 z-40"
     >
@@ -196,7 +175,7 @@ export default function AdvancedParamsPopover({ anchorRef, onClose }: Props) {
             }
           />
           {qualityDisabled && (
-            <span className="ml-1 text-[10px] text-gray-400 dark:text-gray-500">
+            <span className="ml-1 text-[10px] text-gray-500 dark:text-gray-400">
               Codex CLI 不支持质量参数
             </span>
           )}
@@ -236,7 +215,7 @@ export default function AdvancedParamsPopover({ anchorRef, onClose }: Props) {
             }
           />
           {compressionDisabled && (
-            <span className="ml-1 text-[10px] text-gray-400 dark:text-gray-500">
+            <span className="ml-1 text-[10px] text-gray-500 dark:text-gray-400">
               仅 JPEG 和 WebP 支持
             </span>
           )}
@@ -262,7 +241,7 @@ export default function AdvancedParamsPopover({ anchorRef, onClose }: Props) {
             }
           />
           {moderationDisabled && (
-            <span className="ml-1 text-[10px] text-gray-400 dark:text-gray-500">
+            <span className="ml-1 text-[10px] text-gray-500 dark:text-gray-400">
               Responses API 不支持
             </span>
           )}

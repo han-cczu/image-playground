@@ -2,7 +2,7 @@
 export function ZoomBadge({ zoomPercent }: { zoomPercent: number }) {
   return (
     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
-      <span className="px-3 py-1.5 bg-black/50 text-white/80 text-xs rounded-full backdrop-blur-sm transition-opacity duration-500">
+      <span className="px-3 py-1.5 bg-black/60 text-white/90 text-xs rounded-full backdrop-blur-sm transition-opacity duration-500">
         {zoomPercent}%
       </span>
     </div>
@@ -13,7 +13,7 @@ export function ZoomBadge({ zoomPercent }: { zoomPercent: number }) {
 export function IndexIndicator({ currentIndex, total }: { currentIndex: number; total: number }) {
   return (
     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
-      <span className="px-3 py-1.5 bg-black/50 text-white/80 text-xs rounded-full backdrop-blur-sm">
+      <span className="px-3 py-1.5 bg-black/60 text-white/90 text-xs rounded-full backdrop-blur-sm">
         {currentIndex + 1} / {total}
       </span>
     </div>

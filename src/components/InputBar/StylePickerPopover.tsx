@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { useStore } from '../../store'
+import { usePopoverDismiss } from '../../hooks/usePopoverDismiss'
 import { STYLE_PRESETS, type StylePresetKey } from '../../lib/stylePresets'
 
 interface Props {
@@ -33,28 +34,7 @@ export default function StylePickerPopover({ anchorRef, onClose }: Props) {
 
   const popoverRef = useRef<HTMLDivElement>(null)
 
-  /** Esc 关闭、点击外部关闭 */
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        onClose()
-      }
-    }
-    const onPointer = (e: MouseEvent) => {
-      const target = e.target as Node | null
-      if (!target) return
-      if (popoverRef.current?.contains(target)) return
-      if (anchorRef.current?.contains(target)) return
-      onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    document.addEventListener('mousedown', onPointer)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.removeEventListener('mousedown', onPointer)
-    }
-  }, [anchorRef, onClose])
+  usePopoverDismiss(true, anchorRef, popoverRef, onClose)
 
   const handleSelect = (key: StylePresetKey | undefined) => {
     setParams({ stylePreset: key })
@@ -64,6 +44,8 @@ export default function StylePickerPopover({ anchorRef, onClose }: Props) {
   return (
     <div
       ref={popoverRef}
+      role="dialog"
+      aria-label="选择风格预设"
       className="absolute bottom-full left-0 mb-2 min-w-[200px] rounded-2xl border border-gray-200/70 bg-white/95 p-2 shadow-2xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 z-40"
     >
       <ul

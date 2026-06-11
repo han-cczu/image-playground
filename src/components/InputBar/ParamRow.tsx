@@ -196,11 +196,11 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
   return (
     <div className={`grid ${cols} gap-2 text-xs flex-1`}>
       <label className="relative flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">尺寸</span>
+        <span className="text-gray-500 dark:text-gray-400 ml-1">尺寸</span>
         <button
           type="button"
           onClick={onOpenSizePicker}
-          className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] focus:outline-none text-xs text-left transition-all duration-200 shadow-sm font-mono"
+          className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] focus:outline-none focus-visible:border-blue-300 dark:focus-visible:border-blue-500/50 text-xs text-left transition-all duration-200 shadow-sm font-mono"
           title="选择尺寸"
         >
           {displaySize}
@@ -215,7 +215,7 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
         onTouchCancel={hideQualityHint}
         onClick={showQualityHint}
       >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">质量</span>
+        <span className="text-gray-500 dark:text-gray-400 ml-1">质量</span>
         <Select
           value={settings.codexCli ? 'auto' : params.quality}
           onChange={(val) => {
@@ -232,7 +232,7 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
         <ButtonTooltip visible={settings.codexCli && qualityHintVisible} text="Codex CLI 不支持质量参数" />
       </label>
       <label className="flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">格式</span>
+        <span className="text-gray-500 dark:text-gray-400 ml-1">格式</span>
         <Select
           value={params.output_format}
           onChange={(val) => setParams({ output_format: val as any })}
@@ -253,7 +253,7 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
         onTouchCancel={hideCompressionHint}
         onClick={showCompressionHint}
       >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">压缩率</span>
+        <span className="text-gray-500 dark:text-gray-400 ml-1">压缩率</span>
         <input
           value={outputCompressionInput}
           onChange={(e) => setOutputCompressionInput(e.target.value)}
@@ -263,7 +263,7 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
           min={0}
           max={100}
           placeholder="0-100"
-          className={`px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] focus:outline-none text-xs transition-all duration-200 shadow-sm ${
+          className={`px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] focus:outline-none focus:border-blue-300 dark:focus:border-blue-500/40 text-xs transition-all duration-200 shadow-sm ${
             compressionDisabled
               ? 'bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed'
               : 'bg-white/50 dark:bg-white/[0.03]'
@@ -280,7 +280,7 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
         onTouchCancel={hideModerationHint}
         onClick={showModerationHint}
       >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">审核</span>
+        <span className="text-gray-500 dark:text-gray-400 ml-1">审核</span>
         <Select
           value={moderationDisabled ? 'auto' : params.moderation}
           onChange={(val) => {
@@ -300,7 +300,7 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
         <ButtonTooltip visible={moderationDisabled && moderationHintVisible} text="Responses API 不支持审核参数" />
       </label>
       <label className="relative flex flex-col gap-0.5">
-        <span className="text-gray-400 dark:text-gray-500 ml-1">数量</span>
+        <span className="text-gray-500 dark:text-gray-400 ml-1">数量</span>
         <input
           value={nInput}
           onChange={(e) => handleNInputChange(e.target.value)}
@@ -318,7 +318,7 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
           type="number"
           min={1}
           max={outputImageLimit}
-          className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] focus:outline-none text-xs transition-all duration-200 shadow-sm"
+          className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] focus:outline-none focus:border-blue-300 dark:focus:border-blue-500/40 text-xs transition-all duration-200 shadow-sm"
         />
         <ButtonTooltip visible={nLimitHintVisible} text={nLimitHintText} />
       </label>

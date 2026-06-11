@@ -1,13 +1,14 @@
-import { useRef, useEffect } from 'react'
+import { useRef } from 'react'
 import { useStore } from '../../store'
 import { isOpenAIProfile } from '../../types'
+import { usePopoverDismiss } from '../../hooks/usePopoverDismiss'
 import { useModelList } from './hooks/useModelList'
 
 /** 旋转加载指示 */
 function Spinner() {
   return (
     <svg
-      className="h-3.5 w-3.5 animate-spin text-gray-400 dark:text-gray-500"
+      className="h-3.5 w-3.5 animate-spin text-gray-500 dark:text-gray-400"
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden="true"
@@ -41,27 +42,7 @@ export default function ModelMenu({
 
   const { state: modelState, fetchModels } = useModelList(activeProfile)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        onClose()
-      }
-    }
-    const onPointer = (e: MouseEvent) => {
-      const target = e.target as Node | null
-      if (!target) return
-      if (ref.current?.contains(target)) return
-      if (anchorRef.current?.contains(target)) return
-      onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    document.addEventListener('mousedown', onPointer)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.removeEventListener('mousedown', onPointer)
-    }
-  }, [anchorRef, onClose])
+  usePopoverDismiss(true, anchorRef, ref, onClose)
 
   const handlePickModel = (model: string) => {
     if (!activeProfile) return
@@ -78,7 +59,7 @@ export default function ModelMenu({
     // Gemini：占位提示，不拉 API
     if (!isOpenAIProfile(activeProfile)) {
       return (
-        <div className="px-2 py-2 text-[11px] text-gray-400 dark:text-gray-500">
+        <div className="px-2 py-2 text-[11px] text-gray-500 dark:text-gray-400">
           Gemini 暂不支持自动拉取模型列表，请在设置中手填 model
         </div>
       )
@@ -88,7 +69,7 @@ export default function ModelMenu({
     if (!activeProfile.apiKey.trim()) {
       return (
         <div className="flex flex-col gap-1.5 px-2 py-2">
-          <span className="text-[11px] text-gray-400 dark:text-gray-500">请先在设置中补全 API Key</span>
+          <span className="text-[11px] text-gray-500 dark:text-gray-400">请先在设置中补全 API Key</span>
           <button
             type="button"
             onClick={() => {
@@ -110,7 +91,7 @@ export default function ModelMenu({
     return (
       <div>
         <div className="flex items-center justify-between gap-2 px-2 pt-1 pb-1.5">
-          <span className="truncate text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500">
+          <span className="truncate text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
             当前 profile 可用模型 · {activeProfile.name}
           </span>
           {modelState.kind === 'success' && (
@@ -187,7 +168,7 @@ export default function ModelMenu({
                 </li>
               )}
               {modelState.models.length === 0 && !extraTop && (
-                <li className="px-2 py-1.5 text-[11px] text-gray-400 dark:text-gray-500">
+                <li className="px-2 py-1.5 text-[11px] text-gray-500 dark:text-gray-400">
                   API 返回模型列表为空
                 </li>
               )}
@@ -235,14 +216,13 @@ export default function ModelMenu({
     <div
       ref={ref}
       role="dialog"
-      aria-modal="true"
       aria-label="选择当前模型或切换配置"
       className="absolute bottom-full left-0 mb-2 min-w-[240px] max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200/70 bg-white/95 p-2 shadow-2xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 z-40"
     >
       {renderUpperSection()}
 
       <div className="mt-2 border-t border-gray-100 pt-2 dark:border-white/[0.06]">
-        <div className="px-2 pt-1 pb-2 text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500">
+        <div className="px-2 pt-1 pb-2 text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
           切换其他配置
         </div>
         <ul className="flex max-h-[200px] flex-col gap-0.5 overflow-y-auto">
@@ -266,7 +246,7 @@ export default function ModelMenu({
                     <span className="truncate font-medium" title={profile.name}>
                       {profile.name}
                     </span>
-                    <span className="truncate text-[11px] text-gray-400 dark:text-gray-500" title={profile.model}>
+                    <span className="truncate text-[11px] text-gray-500 dark:text-gray-400" title={profile.model}>
                       {profile.provider === 'openai' ? 'OpenAI · ' : 'Gemini · '}
                       {profile.model || '未配置模型'}
                     </span>

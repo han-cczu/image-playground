@@ -39,6 +39,10 @@ function HighlightedTitle({ title, indices }: { title: string; indices: number[]
   )
 }
 
+/** combobox/listbox ARIA 链路的 DOM id（面板单例,静态 id 不冲突;命令 id 全局唯一） */
+const LISTBOX_ID = 'command-palette-listbox'
+const optionDomId = (commandId: string) => `command-option-${commandId}`
+
 /**
  * Enter 执行命令后,在 window 捕获层吞掉本次按住期间的后续 Enter(keydown/keyup),
  * 直到用户松开为止——防止焦点还原到背景按钮后,OS 按键重复直接激活它。
@@ -215,6 +219,7 @@ function CommandPalettePanel({ close }: { close: () => void }) {
               d="M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z"
             />
           </svg>
+          {/* activedescendant 模式:焦点恒在 input,↑↓ 只移高亮,读屏靠 aria-activedescendant 播报 */}
           <input
             value={query}
             onChange={(e) => {
@@ -223,6 +228,13 @@ function CommandPalettePanel({ close }: { close: () => void }) {
             }}
             placeholder="输入命令…"
             aria-label="搜索命令"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls={LISTBOX_ID}
+            aria-autocomplete="list"
+            aria-activedescendant={
+              clampedIndex >= 0 ? optionDomId(flat[clampedIndex].command.id) : undefined
+            }
             className="w-full bg-transparent text-sm text-gray-800 outline-none placeholder:text-gray-400 dark:text-gray-100"
           />
           <kbd className="hidden shrink-0 rounded-md border border-gray-200/80 px-1.5 py-0.5 text-[10px] text-gray-400 sm:block dark:border-white/[0.1]">
@@ -230,13 +242,32 @@ function CommandPalettePanel({ close }: { close: () => void }) {
           </kbd>
         </div>
 
-        <div ref={listRef} className="max-h-[50vh] overflow-y-auto p-2 custom-scrollbar">
-          {flat.length === 0 ? (
-            <div className="px-3 py-8 text-center text-sm text-gray-400">无匹配命令</div>
-          ) : (
+        {/* 空态放 listbox 外:listbox 的合法子节点只有 group/option;role=status 让零结果对读屏可感知 */}
+        {flat.length === 0 && (
+          <div role="status" className="px-3 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+            无匹配命令
+          </div>
+        )}
+        <div
+          ref={listRef}
+          id={LISTBOX_ID}
+          role="listbox"
+          aria-label="命令列表"
+          className={`max-h-[50vh] overflow-y-auto custom-scrollbar ${flat.length === 0 ? '' : 'p-2'}`}
+        >
+          {flat.length > 0 &&
             groups.map(({ group, items }) => (
-              <div key={group} className="mb-1 last:mb-0">
-                <div className="px-3 pb-1 pt-2 text-[11px] font-medium text-gray-400 dark:text-gray-500">
+              <div
+                key={group}
+                role="group"
+                aria-label={COMMAND_GROUP_LABELS[group]}
+                className="mb-1 last:mb-0"
+              >
+                {/* 组名由 group 的 aria-label 承担,标题对读屏隐藏,listbox 子树只留 group/option */}
+                <div
+                  aria-hidden="true"
+                  className="px-3 pb-1 pt-2 text-[11px] font-medium text-gray-500 dark:text-gray-400"
+                >
                   {COMMAND_GROUP_LABELS[group]}
                 </div>
                 {items.map(({ command, indices }) => {
@@ -247,6 +278,11 @@ function CommandPalettePanel({ close }: { close: () => void }) {
                     <button
                       key={command.id}
                       type="button"
+                      role="option"
+                      id={optionDomId(command.id)}
+                      // activedescendant 模式:DOM 焦点恒在 input,option 退出 Tab 序,否则 Tab 聚焦项与 Enter 执行的高亮项错位
+                      tabIndex={-1}
+                      aria-selected={isHighlighted}
                       data-command-index={index}
                       onClick={() => command.run()}
                       onMouseMove={() => {
@@ -261,13 +297,15 @@ function CommandPalettePanel({ close }: { close: () => void }) {
                       <span className="truncate">
                         <HighlightedTitle title={command.title} indices={indices} />
                       </span>
+                      {/* option 子树按 presentational 处理,svg 的 aria-label 会被剪枝;sr-only 文本走 name-from-contents 可靠曝光 */}
+                      {command.active && <span className="sr-only">（当前）</span>}
                       {command.active && (
                         <svg
                           className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400"
                           fill="none"
                           stroke="currentColor"
                           viewBox="0 0 24 24"
-                          aria-label="当前"
+                          aria-hidden="true"
                         >
                           <path
                             strokeLinecap="round"
@@ -281,11 +319,10 @@ function CommandPalettePanel({ close }: { close: () => void }) {
                   )
                 })}
               </div>
-            ))
-          )}
+            ))}
         </div>
 
-        <div className="border-t border-gray-200/70 px-4 py-2 text-[11px] text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
+        <div className="border-t border-gray-200/70 px-4 py-2 text-[11px] text-gray-500 dark:border-white/[0.08] dark:text-gray-400">
           ↑↓ 选择 · Enter 执行 · Esc 关闭
         </div>
     </Modal>

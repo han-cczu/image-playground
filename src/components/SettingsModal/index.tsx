@@ -17,7 +17,6 @@ import {
 import type { ApiProfile, AppSettings, CaptionerProfile, PromptOptimizerProfile } from '../../types'
 import Modal, { ModalCloseButton, ModalTitle } from '../Modal'
 import { ProfileSelector } from './ProfileSelector'
-import { NamedProfileSelector } from './NamedProfileSelector'
 import { ApiProfileSection } from './ApiProfileSection'
 import { OptimizerSection } from './OptimizerSection'
 import { CaptionerSection } from './CaptionerSection'
@@ -415,6 +414,7 @@ export default function SettingsModal() {
               <ProfileSelector
                 profiles={draft.profiles}
                 activeProfileId={draft.activeProfileId}
+                showProviderBadge
                 open={apiManager.showMenu}
                 onOpenChange={apiManager.setShowMenu}
                 onSelect={apiManager.switchTo}
@@ -442,7 +442,7 @@ export default function SettingsModal() {
               <h4 className="text-base font-semibold text-gray-800 dark:text-gray-200">
                 提示词优化 API
               </h4>
-              <NamedProfileSelector
+              <ProfileSelector
                 profiles={draft.optimizerProfiles}
                 activeProfileId={draft.activeOptimizerProfileId}
                 open={optimizerManager.showMenu}
@@ -469,7 +469,7 @@ export default function SettingsModal() {
               <h4 className="text-base font-semibold text-gray-800 dark:text-gray-200">
                 反推提示词 API
               </h4>
-              <NamedProfileSelector
+              <ProfileSelector
                 profiles={draft.captionerProfiles}
                 activeProfileId={draft.activeCaptionerProfileId}
                 open={captionerManager.showMenu}
@@ -527,6 +527,8 @@ export default function SettingsModal() {
                 setConfirmDialog({
                   title: '清空所有数据',
                   message: '确定要清空所有任务记录、图片数据和供应商配置吗？此操作不可恢复。',
+                  // 不可恢复操作:确认键延迟启用,防止连点误触
+                  minConfirmDelayMs: 800,
                   action: proceed,
                 })
               }

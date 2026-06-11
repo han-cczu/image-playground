@@ -224,11 +224,14 @@ export default function InfoPanel({
               const displaySrc = (isMaskTarget && maskPreviewSrc) ? maskPreviewSrc : (imageSrcs[imgId] || '')
               return (
                 <div key={imgId} className="relative group inline-block">
-                  <div
-                    className={`relative w-16 h-16 rounded-lg overflow-hidden border cursor-pointer hover:opacity-80 transition ${
+                  <button
+                    type="button"
+                    className={`relative block w-16 h-16 rounded-lg overflow-hidden border cursor-pointer hover:opacity-80 transition ${
                       isMaskTarget ? 'border-blue-500 border-2 shadow-sm' : 'border-gray-200 dark:border-white/[0.08]'
                     }`}
                     onClick={() => setLightboxImageId(imgId, allInputImageIds)}
+                    aria-label={isMaskTarget ? '放大查看参考图(遮罩目标)' : '放大查看参考图'}
+                    title="点击放大"
                   >
                     {displaySrc && (
                       <img
@@ -242,7 +245,7 @@ export default function InfoPanel({
                         MASK
                       </span>
                     )}
-                  </div>
+                  </button>
                 </div>
               )
             })}

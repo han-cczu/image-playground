@@ -33,8 +33,8 @@ export default function ConfirmDialog() {
     return () => window.clearTimeout(timer)
   }, [confirmDialog])
 
+  // 冷静期(minConfirmDelayMs)只锁「确认」:防的是惯性秒点破坏性操作;取消/Esc/遮罩是逃生门,任何时刻都可关
   const handleClose = () => {
-    if (!canConfirm) return
     setConfirmDialog(null)
   }
 
@@ -62,7 +62,6 @@ export default function ConfirmDialog() {
       panelClassName="w-full max-w-sm p-6"
       tone="deep"
       animation="confirm"
-      escEnabled={canConfirm}
     >
         <h3 className="mb-2 flex items-center gap-2 text-base font-bold text-gray-800 dark:text-gray-100">
           {confirmDialog.icon === 'info' && (

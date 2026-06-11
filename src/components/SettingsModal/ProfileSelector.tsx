@@ -1,18 +1,18 @@
-import type { ApiProfile } from '../../types'
-
-function providerLabel(provider: string) {
+function providerLabel(provider: string | undefined) {
   if (provider === 'gemini') return 'Gemini'
   return 'OpenAI'
 }
 
+// 三套配置组(API / 优化器 / 图说器)共用的下拉选择器;仅 API 组传 showProviderBadge 展示服务商徽标
 export interface ProfileSelectorProps {
-  profiles: ApiProfile[]
+  profiles: { id: string; name: string; provider?: string }[]
   activeProfileId: string
   open: boolean
   onOpenChange: (open: boolean) => void
   onSelect: (id: string) => void
   onCreate: () => void
   onDelete: (id: string) => void
+  showProviderBadge?: boolean
 }
 
 export function ProfileSelector({
@@ -23,6 +23,7 @@ export function ProfileSelector({
   onSelect,
   onCreate,
   onDelete,
+  showProviderBadge = false,
 }: ProfileSelectorProps) {
   const activeProfile = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
 
@@ -31,14 +32,16 @@ export function ProfileSelector({
       <button
         type="button"
         onClick={() => onOpenChange(!open)}
-        className="flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:hover:bg-white/[0.06]"
+        className="flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus-visible:border-blue-300 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus-visible:border-blue-500/50 dark:hover:bg-white/[0.06]"
         title={activeProfile?.name}
       >
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate">{activeProfile?.name}</span>
-          <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
-            {providerLabel(activeProfile?.provider ?? 'openai')}
-          </span>
+          {showProviderBadge && (
+            <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+              {providerLabel(activeProfile?.provider)}
+            </span>
+          )}
         </span>
         <svg className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -74,9 +77,11 @@ export function ProfileSelector({
                     className="flex min-w-0 flex-1 items-center gap-2 pr-2"
                   >
                     <span className="min-w-0 truncate">{profile.name}</span>
-                    <span className={`rounded px-1.5 py-0.5 text-xs shrink-0 ${profile.id === activeProfileId ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-white/[0.08] dark:text-gray-400'}`}>
-                      {providerLabel(profile.provider)}
-                    </span>
+                    {showProviderBadge && (
+                      <span className={`rounded px-1.5 py-0.5 text-xs shrink-0 ${profile.id === activeProfileId ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-white/[0.08] dark:text-gray-400'}`}>
+                        {providerLabel(profile.provider)}
+                      </span>
+                    )}
                   </button>
 
                   {profiles.length > 1 && (

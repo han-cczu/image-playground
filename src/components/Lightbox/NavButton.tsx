@@ -9,8 +9,12 @@ interface NavButtonProps {
 /** 左右切换按钮:方向参数化;点击需阻止冒泡,避免触发容器的单击关闭 */
 export default function NavButton({ direction, onNavigate }: NavButtonProps) {
   const isPrev = direction === 'prev'
+  const label = isPrev ? '上一张' : '下一张'
   return (
     <button
+      type="button"
+      aria-label={label}
+      title={label}
       className={`${navBtnClass} ${isPrev ? 'left-3 sm:left-5' : 'right-3 sm:right-5'}`}
       onClick={(e) => { e.stopPropagation(); onNavigate() }}
     >

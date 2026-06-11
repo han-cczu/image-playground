@@ -70,6 +70,8 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
     setConfirmDialog({
       title: '批量删除',
       message: `确定要删除选中的 ${selectedTaskIds.length} 条记录吗？`,
+      // 全选+秒点确认是误删风险最高点:短暂禁用确认键,强制看清数量再删
+      minConfirmDelayMs: 700,
       action: () => {
         removeMultipleTasks(selectedTaskIds)
       },

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useStore, submitGridTask } from '../../store'
+import { usePopoverDismiss } from '../../hooks/usePopoverDismiss'
 import type { GridAxis, GridAxisKey } from '../../types'
 import { GRID_AXIS_DEFS, getGridAxisDef, countGridImages, type GridAxisCtx } from '../../lib/gridExperiment'
 import { MAX_PROMPT_EXPANSION_HARD } from '../../lib/promptExpand'
@@ -53,28 +54,7 @@ export default function GridConfigPopover({ anchorRef, onClose }: Props) {
     [yKind, ctx],
   )
 
-  /** Esc / 点击外部关闭 */
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        onClose()
-      }
-    }
-    const onPointer = (e: MouseEvent) => {
-      const target = e.target as Node | null
-      if (!target) return
-      if (popoverRef.current?.contains(target)) return
-      if (anchorRef.current?.contains(target)) return
-      onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    document.addEventListener('mousedown', onPointer)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.removeEventListener('mousedown', onPointer)
-    }
-  }, [anchorRef, onClose])
+  usePopoverDismiss(true, anchorRef, popoverRef, onClose)
 
   const toggle = (keys: string[], key: string): string[] =>
     keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key]
@@ -128,7 +108,6 @@ export default function GridConfigPopover({ anchorRef, onClose }: Props) {
     <div
       ref={popoverRef}
       role="dialog"
-      aria-modal="true"
       aria-label="参数网格"
       className="absolute bottom-full left-0 mb-2 w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200/70 bg-white/95 p-4 shadow-2xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 z-40"
     >
@@ -187,7 +166,7 @@ export default function GridConfigPopover({ anchorRef, onClose }: Props) {
           )}
         </div>
 
-        <p className="text-[11px] text-gray-400 dark:text-gray-500">
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">
           其余参数沿用当前底栏设置。未选「提示词通配」轴时，提示词中的 {'{a|b}'} 不会展开。
         </p>
 

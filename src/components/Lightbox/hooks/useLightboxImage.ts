@@ -14,6 +14,11 @@ export function useLightboxImage(lightboxImageId: string | null) {
   const [maskImageSrc, setMaskImageSrc] = useState('')
   const [maskPreviewSrc, setMaskPreviewSrc] = useState('')
 
+  // 当前图所属生成任务的提示词(仅供读屏命名;输入图/上传图找不到任务时为空串)
+  const prompt = lightboxImageId
+    ? tasks.find((t) => t.outputImages?.includes(lightboxImageId))?.prompt.trim() ?? ''
+    : ''
+
   // 图片加载
   useEffect(() => {
     if (!lightboxImageId) {
@@ -78,5 +83,5 @@ export function useLightboxImage(lightboxImageId: string | null) {
     }
   }, [src, maskImageSrc])
 
-  return { src, maskPreviewSrc }
+  return { src, maskPreviewSrc, prompt }
 }

@@ -27,7 +27,7 @@ export default function BrushSizePanel({
   return createPortal(
     <div
       ref={panelRef}
-      className="fixed z-[100] h-44 w-14 -translate-x-1/2 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700"
+      className="fixed z-[100] h-44 w-14 -translate-x-1/2 rounded-xl border border-gray-200/70 bg-white/95 shadow-2xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
       style={{ left: anchor.left, bottom: anchor.bottom }}
     >
       <input

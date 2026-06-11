@@ -388,7 +388,7 @@ export default function InputBar() {
                   </div>
                 </div>
                 {mobileCollapsed && (
-                  <div className="text-xs text-gray-400 dark:text-gray-500 mb-2 ml-1">
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mb-2 ml-1">
                     {maskDraft ? `1 张遮罩主图 · ${referenceImages.length} 张参考图` : `${inputImages.length} 张参考图`}
                   </div>
                 )}

@@ -36,6 +36,13 @@ export default function ImagePanel({
 
   const outputLen = task.outputImages?.length || 0
 
+  // 读屏命名:截断 prompt 作主图描述;无提示词时回退到序号。按码点截断,slice 按 code unit 会切裂 emoji 代理对
+  const trimmedPrompt = task.prompt.trim()
+  const promptCodePoints = Array.from(trimmedPrompt)
+  const promptSnippet =
+    promptCodePoints.length > 50 ? `${promptCodePoints.slice(0, 50).join('')}…` : trimmedPrompt
+  const imageAlt = promptSnippet ? `生成结果：${promptSnippet}` : `生成图片 ${imageIndex + 1}/${outputLen}`
+
   // 比例标签对齐图片左缘(object-contain 留白时不能贴面板),resize 时重算
   useEffect(() => {
     const updateImageLabelLeft = () => {
@@ -72,24 +79,33 @@ export default function ImagePanel({
     <div ref={imagePanelRef} className="md:w-1/2 w-full h-64 md:h-auto bg-gray-100 dark:bg-black/20 relative flex items-center justify-center flex-shrink-0 min-h-[16rem]">
       {task.status === 'done' && outputLen > 0 && currentOutputImageSrc && (
         <>
-          <img
-            ref={mainImageRef}
-            src={currentOutputImageSrc}
-            className="saveable-image max-w-[calc(100%-2rem)] max-h-[calc(100%-2rem)] object-contain cursor-pointer"
-            onLoad={() => {
-              const panel = imagePanelRef.current
-              const image = mainImageRef.current
-              if (!panel || !image) return
-
-              const panelRect = panel.getBoundingClientRect()
-              const imageRect = image.getBoundingClientRect()
-              setImageLabelLeft(Math.max(8, imageRect.left - panelRect.left))
-            }}
+          {/* 包一层真按钮让放大操作键盘可达;原图片上的尺寸约束移到按钮,图片在按钮内等比缩放,渲染盒与原先一致 */}
+          <button
+            type="button"
             onClick={() =>
               setLightboxImageId(task.outputImages[imageIndex], task.outputImages)
             }
-            alt=""
-          />
+            className="flex h-[calc(100%-2rem)] w-[calc(100%-2rem)] cursor-pointer items-center justify-center"
+            // aria-label 优先于内容命名,会把 img alt 整体遮蔽——把描述并入按钮名称,img 改装饰
+            aria-label={`放大查看 ${imageAlt}`}
+            title="点击放大"
+          >
+            <img
+              ref={mainImageRef}
+              src={currentOutputImageSrc}
+              className="saveable-image max-w-full max-h-full object-contain"
+              onLoad={() => {
+                const panel = imagePanelRef.current
+                const image = mainImageRef.current
+                if (!panel || !image) return
+
+                const panelRect = panel.getBoundingClientRect()
+                const imageRect = image.getBoundingClientRect()
+                setImageLabelLeft(Math.max(8, imageRect.left - panelRect.left))
+              }}
+              alt=""
+            />
+          </button>
           <div data-selectable-text className="absolute top-[15px] flex items-center gap-1.5" style={{ left: imageLabelLeft }}>
             {currentImageRatio && currentImageSize ? (
               <>
@@ -114,22 +130,28 @@ export default function ImagePanel({
           {outputLen > 1 && (
             <>
               <button
+                type="button"
                 onClick={() =>
                   setImageIndex(
                     (imageIndex - 1 + outputLen) % outputLen,
                   )
                 }
                 className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/30 text-white hover:bg-black/50 transition"
+                aria-label="上一张"
+                title="上一张"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
               <button
+                type="button"
                 onClick={() =>
                   setImageIndex((imageIndex + 1) % outputLen)
                 }
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/30 text-white hover:bg-black/50 transition"
+                aria-label="下一张"
+                title="下一张"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />

@@ -25,7 +25,7 @@ export default function TextareaInput({
         rows={1}
         placeholder="描述你想要的图片，支持粘贴图片..."
         aria-label="描述图片"
-        className="w-full px-4 py-3 rounded-2xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] text-sm focus:outline-none leading-relaxed resize-none shadow-sm transition-[border-color,box-shadow] duration-200"
+        className="w-full px-4 py-3 rounded-2xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] text-sm focus:outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-500/20 dark:focus:border-blue-500/40 dark:focus:ring-blue-500/20 leading-relaxed resize-none shadow-sm transition-[border-color,box-shadow] duration-200"
       />
       {value.trim().length > 0 && (
         <button

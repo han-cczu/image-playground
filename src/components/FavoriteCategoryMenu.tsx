@@ -237,6 +237,7 @@ export default function FavoriteCategoryMenu({
           <div className="mb-1.5 flex flex-wrap items-center gap-1.5 px-0.5" role="radiogroup" aria-label="分类颜色">
             {FAVORITE_CATEGORY_COLORS.map((color) => {
               const selected = color === draftColor
+              // 圆点视觉保持 16px,命中区由外层按钮扩到 24×24(WCAG 2.5.8 最小目标)
               return (
                 <button
                   key={color}
@@ -245,13 +246,17 @@ export default function FavoriteCategoryMenu({
                   aria-checked={selected}
                   aria-label={`选择颜色 ${color}`}
                   onClick={() => setDraftColor(color)}
-                  className={`h-4 w-4 shrink-0 rounded-full transition ${
-                    selected
-                      ? 'ring-2 ring-offset-2 ring-blue-500 ring-offset-white dark:ring-offset-gray-900'
-                      : 'ring-1 ring-black/5 hover:ring-black/20 dark:ring-white/10 dark:hover:ring-white/30'
-                  }`}
-                  style={{ backgroundColor: color }}
-                />
+                  className="group flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                >
+                  <span
+                    className={`h-4 w-4 rounded-full transition ${
+                      selected
+                        ? 'ring-2 ring-offset-2 ring-blue-500 ring-offset-white dark:ring-offset-gray-900'
+                        : 'ring-1 ring-black/5 group-hover:ring-black/20 dark:ring-white/10 dark:group-hover:ring-white/30'
+                    }`}
+                    style={{ backgroundColor: color }}
+                  />
+                </button>
               )
             })}
           </div>

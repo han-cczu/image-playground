@@ -1,7 +1,9 @@
 import { useEffect, useRef, type RefObject } from 'react'
 
+// tabindex="-1" 一律排除:原生 Tab 会跳过它们,陷阱的环若把它们计入,
+// 首尾判定会与真实 Tab 序错位,焦点可能从环中段单步逃逸出弹窗
 const FOCUSABLE_SELECTOR =
-  'a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])'
+  'a[href]:not([tabindex="-1"]),button:not([disabled]):not([tabindex="-1"]),input:not([disabled]):not([tabindex="-1"]),textarea:not([disabled]):not([tabindex="-1"]),select:not([disabled]):not([tabindex="-1"]),[tabindex]:not([tabindex="-1"])'
 
 /**
  * 陷阱栈:叠层弹窗(如 SettingsModal 上的 ConfirmDialog)各自持有 document 级监听,

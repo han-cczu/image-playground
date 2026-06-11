@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useStore } from '../../store'
+import { usePopoverDismiss } from '../../hooks/usePopoverDismiss'
 import { fuzzyMatch } from '../../lib/fuzzyMatch'
 import { countPromptExpansion } from '../../lib/promptExpand'
 import {
@@ -42,35 +43,14 @@ export default function SnippetPopover({ anchorRef, onClose, onInsert }: Props) 
   const [query, setQuery] = useState('')
   const [edit, setEdit] = useState<EditState | null>(null)
 
-  /** Esc 关闭、点击外部关闭（编辑态下 Esc 先退回列表）。依赖布尔态而非 edit 对象,编辑表单逐键输入不重挂监听 */
-  const inEdit = edit !== null
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      // IME 组字中按 Esc 是取消候选词,留给输入法处理(对齐 useCloseOnEscape 的守卫)
-      if (e.isComposing || e.keyCode === 229) return
-      // 删除确认弹窗打开时把 Esc 让给它(其 useCloseOnEscape 在 window 层,会被这里的 stopPropagation 挡掉)
-      if (useStore.getState().confirmDialog) return
-      e.stopPropagation()
-      if (inEdit) setEdit(null)
-      else onClose()
-    }
-    const onPointer = (e: MouseEvent) => {
-      const target = e.target as Node | null
-      if (!target) return
-      // 删除确认弹窗(渲染在 App 根、popover DOM 之外)打开时不算外部点击:点「取消」不应顺带关掉 popover
-      if (useStore.getState().confirmDialog) return
-      if (popoverRef.current?.contains(target)) return
-      if (anchorRef.current?.contains(target)) return
-      onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    document.addEventListener('mousedown', onPointer)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.removeEventListener('mousedown', onPointer)
-    }
-  }, [anchorRef, onClose, inEdit])
+  // 删除确认弹窗(渲染在 App 根、popover DOM 之外)打开时整体让位:外点判定暂停
+  // (点「取消」不应顺带关掉 popover),Esc 由后注册、处于栈顶的确认弹窗消费
+  const confirmDialogOpen = useStore((s) => Boolean(s.confirmDialog))
+  usePopoverDismiss(true, anchorRef, popoverRef, onClose, {
+    disabled: confirmDialogOpen,
+    // 编辑态下 Esc 先退回列表,再次 Esc 才关闭 popover
+    onEscape: () => (edit !== null ? setEdit(null) : onClose()),
+  })
 
   /** fuzzy 过滤排序：空 query 按 sortOrder（store 已保证有序），命中按得分降序 */
   const filtered = useMemo(() => {
@@ -117,6 +97,8 @@ export default function SnippetPopover({ anchorRef, onClose, onInsert }: Props) 
   return (
     <div
       ref={popoverRef}
+      role="dialog"
+      aria-label="提示词片段"
       className="absolute bottom-full left-0 mb-2 w-[300px] rounded-2xl border border-gray-200/70 bg-white/95 p-2 shadow-2xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 z-40"
     >
       {edit ? (
@@ -174,11 +156,11 @@ export default function SnippetPopover({ anchorRef, onClose, onInsert }: Props) 
           )}
 
           {snippets.length === 0 ? (
-            <div className="px-2 py-5 text-center text-xs text-gray-400 dark:text-gray-500">
+            <div className="px-2 py-5 text-center text-xs text-gray-500 dark:text-gray-400">
               还没有片段——保存当前输入试试
             </div>
           ) : filtered.length === 0 ? (
-            <div className="px-2 py-5 text-center text-xs text-gray-400 dark:text-gray-500">
+            <div className="px-2 py-5 text-center text-xs text-gray-500 dark:text-gray-400">
               无匹配片段
             </div>
           ) : (
@@ -211,7 +193,7 @@ export default function SnippetPopover({ anchorRef, onClose, onInsert }: Props) 
                           </span>
                         )}
                       </span>
-                      <span className="w-full truncate pr-12 text-xs text-gray-400 dark:text-gray-500">
+                      <span className="w-full truncate pr-12 text-xs text-gray-500 dark:text-gray-400">
                         {snippet.content}
                       </span>
                     </button>

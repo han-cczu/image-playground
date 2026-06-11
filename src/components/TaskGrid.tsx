@@ -138,6 +138,10 @@ export default function TaskGrid() {
   const startedOnCard = useRef(false)
   const startedWithCtrl = useRef(false)
   const initialSelection = useRef<string[]>([])
+  // 上次实际提交给 store 的选区快照,仅在一次框选期间有效(beginSelection 重置)。
+  // zustand persist 包装层在每次 set() 后无条件 partialize+stringify+写 localStorage,
+  // 与返回值是否同引用无关——store 内 return s 短路止不住写盘,必须在这里比较后跳过 set 调用。
+  const lastAppliedSelection = useRef<Set<string> | null>(null)
   const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
   const filteredTasks = useMemo(() => {
@@ -258,6 +262,7 @@ export default function TaskGrid() {
     startedOnCard.current = Boolean(target.closest('.task-card-wrapper'))
     startedWithCtrl.current = isCtrl
     initialSelection.current = [...useStore.getState().selectedTaskIds]
+    lastAppliedSelection.current = new Set(initialSelection.current)
 
     isDragging.current = true
     hasDragged.current = false
@@ -304,6 +309,19 @@ export default function TaskGrid() {
       }
     })
 
+    // mousemove 高频路径:与上次提交的选区集合相等就直接返回,跳过 set(短路理由见 ref 定义处)
+    const prev = lastAppliedSelection.current
+    if (prev && prev.size === newSelected.size) {
+      let unchanged = true
+      for (const id of newSelected) {
+        if (!prev.has(id)) {
+          unchanged = false
+          break
+        }
+      }
+      if (unchanged) return
+    }
+    lastAppliedSelection.current = newSelected
     setSelectedTaskIds(Array.from(newSelected))
   }
 

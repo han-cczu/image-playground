@@ -426,6 +426,8 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
           : `确定删除对话「${target.title}」？`,
       confirmText: '删除',
       tone: 'danger',
+      // 连带删除整段对话+全部任务+图片且不可恢复,影响面远超单条删除:加冷静期防连点误触
+      minConfirmDelayMs: 700,
       action: () => {
         void (async () => {
           try {
