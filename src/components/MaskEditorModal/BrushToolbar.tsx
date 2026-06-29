@@ -1,6 +1,6 @@
 import type { Tool } from './types'
 
-interface BrushToolbarProps {
+export interface BrushToolbarProps {
   tool: Tool
   onToolChange: (tool: Tool) => void
   brushSize: number

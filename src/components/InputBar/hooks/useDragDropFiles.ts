@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
+import { useLatestRef } from '../../../hooks/useLatestRef'
+import { getImageFileMime, isImageFile } from '../../../lib/image/fileMime'
 
 function isEditableElement(el: Element | null): boolean {
   if (!el) return false
@@ -6,14 +8,44 @@ function isEditableElement(el: Element | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || (el as HTMLElement).isContentEditable === true
 }
 
-export function useDragDropFiles(args: {
-  onFiles: (files: File[]) => void
-}): { isDragging: boolean } {
+function isFileTransfer(dataTransfer: DataTransfer | null): boolean {
+  return Array.from(dataTransfer?.types ?? []).includes('Files')
+}
+
+function hasDroppedFiles(dataTransfer: DataTransfer | null): boolean {
+  return (dataTransfer?.files?.length ?? 0) > 0
+}
+
+function imageExtensionFromMime(mime: string): string {
+  const normalized = mime.toLowerCase()
+  if (normalized === 'image/jpeg') return 'jpg'
+  if (normalized === 'image/svg+xml') return 'svg'
+  return normalized.slice('image/'.length).split('+')[0] || 'png'
+}
+
+function getPastedImageFile(item: DataTransferItem): File | null {
+  const file = item.getAsFile()
+  if (!file) return null
+  if (isImageFile(file)) return file
+  const itemMime = item.type.trim().toLowerCase()
+  if (!itemMime.startsWith('image/')) return null
+
+  const name =
+    file.name.trim() ||
+    `pasted-image.${imageExtensionFromMime(itemMime)}`
+  return new File([file], name, {
+    type: getImageFileMime(file) ?? itemMime,
+    lastModified: file.lastModified,
+  })
+}
+
+export function useDragDropFiles(args: { onFiles: (files: File[]) => void }): {
+  isDragging: boolean
+} {
   const { onFiles } = args
   const [isDragging, setIsDragging] = useState(false)
   const dragCounter = useRef(0)
-  const onFilesRef = useRef(onFiles)
-  onFilesRef.current = onFiles
+  const onFilesRef = useLatestRef(onFiles)
 
   // 粘贴图片
   useEffect(() => {
@@ -26,10 +58,8 @@ export function useDragDropFiles(args: {
       if (!items) return
       const imageFiles: File[] = []
       for (const item of Array.from(items)) {
-        if (item.type.startsWith('image/')) {
-          const file = item.getAsFile()
-          if (file) imageFiles.push(file)
-        }
+        const file = getPastedImageFile(item)
+        if (file) imageFiles.push(file)
       }
       if (imageFiles.length > 0) {
         e.preventDefault()
@@ -38,34 +68,42 @@ export function useDragDropFiles(args: {
     }
     document.addEventListener('paste', handlePaste)
     return () => document.removeEventListener('paste', handlePaste)
-  }, [])
+  }, [onFilesRef])
 
   // 拖拽图片 - 监听整个页面
   useEffect(() => {
     const handleDragEnter = (e: DragEvent) => {
+      if (!isFileTransfer(e.dataTransfer)) return
       e.preventDefault()
       e.stopPropagation()
       dragCounter.current++
-      if (e.dataTransfer?.types.includes('Files')) {
-        setIsDragging(true)
-      }
+      setIsDragging(true)
     }
 
     const handleDragOver = (e: DragEvent) => {
+      if (!isFileTransfer(e.dataTransfer) && dragCounter.current === 0) return
       e.preventDefault()
       e.stopPropagation()
     }
 
     const handleDragLeave = (e: DragEvent) => {
+      if (!isFileTransfer(e.dataTransfer) && dragCounter.current === 0) return
       e.preventDefault()
       e.stopPropagation()
-      dragCounter.current--
+      dragCounter.current = Math.max(0, dragCounter.current - 1)
       if (dragCounter.current === 0) {
         setIsDragging(false)
       }
     }
 
     const handleDrop = (e: DragEvent) => {
+      if (
+        !isFileTransfer(e.dataTransfer) &&
+        !hasDroppedFiles(e.dataTransfer) &&
+        dragCounter.current === 0
+      ) {
+        return
+      }
       e.preventDefault()
       e.stopPropagation()
       dragCounter.current = 0
@@ -97,7 +135,7 @@ export function useDragDropFiles(args: {
       window.removeEventListener('dragend', resetDrag)
       window.removeEventListener('blur', resetDrag)
     }
-  }, [])
+  }, [onFilesRef])
 
   return { isDragging }
 }

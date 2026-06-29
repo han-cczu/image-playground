@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { listModels } from '../../lib/api/listModels'
 import {
   DEFAULT_CAPTIONER_MODEL,
@@ -27,20 +27,26 @@ export function CaptionerSection({
 }: CaptionerSectionProps) {
   const [showApiKey, setShowApiKey] = useState(false)
   const [modelListOpen, setModelListOpen] = useState(false)
-  const [modelListLoading, setModelListLoading] = useState(false)
-  const [modelList, setModelList] = useState<string[] | null>(null)
-  const [modelListError, setModelListError] = useState<string | null>(null)
-
-  useEffect(() => {
-    setModelListOpen(false)
-    setModelList(null)
-    setModelListError(null)
-  }, [captioner.id, captioner.baseUrl, captioner.apiKey])
+  const [modelListLoadingKey, setModelListLoadingKey] = useState('')
+  const [modelListState, setModelListState] = useState<{
+    key: string
+    list: string[] | null
+    error: string | null
+  }>({ key: '', list: null, error: null })
+  const modelListRequestSeqRef = useRef(0)
+  const latestModelListRequestByKeyRef = useRef<Map<string, number>>(new Map())
+  const modelListKey = `${captioner.id}:${captioner.baseUrl}:${captioner.apiKey}`
+  const modelListLoading = modelListLoadingKey === modelListKey
+  const modelList = modelListState.key === modelListKey ? modelListState.list : null
+  const modelListError = modelListState.key === modelListKey ? modelListState.error : null
 
   const fetchModelList = useCallback(async () => {
+    const key = modelListKey
     setModelListOpen(true)
-    setModelListLoading(true)
-    setModelListError(null)
+    setModelListLoadingKey(key)
+    setModelListState({ key, list: null, error: null })
+    const requestId = ++modelListRequestSeqRef.current
+    latestModelListRequestByKeyRef.current.set(key, requestId)
     try {
       const tempProfile: OpenAIProfile = {
         id: 'captioner-temp',
@@ -55,15 +61,19 @@ export function CaptionerSection({
         apiProxy: false,
       }
       const ids = await listModels(tempProfile)
-      setModelList(ids)
-      if (ids.length === 0) setModelListError('接口返回为空')
+      if (latestModelListRequestByKeyRef.current.get(key) !== requestId) return
+      setModelListState({ key, list: ids, error: ids.length === 0 ? '接口返回为空' : null })
     } catch (err) {
-      setModelList(null)
-      setModelListError(err instanceof Error ? err.message : String(err))
+      if (latestModelListRequestByKeyRef.current.get(key) !== requestId) return
+      setModelListState({
+        key,
+        list: null,
+        error: err instanceof Error ? err.message : String(err),
+      })
     } finally {
-      setModelListLoading(false)
+      setModelListLoadingKey((current) => (current === key ? '' : current))
     }
-  }, [captioner.baseUrl, captioner.apiKey, captioner.model, captioner.timeout])
+  }, [captioner.baseUrl, captioner.apiKey, captioner.model, captioner.timeout, modelListKey])
 
   const provider = captioner.provider ?? 'openai'
 
@@ -72,9 +82,19 @@ export function CaptionerSection({
   const switchProvider = (p: 'openai' | 'gemini') => {
     if (p === provider) return
     if (p === 'gemini') {
-      onUpdate({ provider: 'gemini', baseUrl: DEFAULT_GEMINI_BASE_URL, model: DEFAULT_GEMINI_CHAT_MODEL })
+      onUpdate({
+        provider: 'gemini',
+        baseUrl: DEFAULT_GEMINI_BASE_URL,
+        apiKey: '',
+        model: DEFAULT_GEMINI_CHAT_MODEL,
+      })
     } else {
-      onUpdate({ provider: 'openai', baseUrl: DEFAULT_SETTINGS.baseUrl, model: DEFAULT_CAPTIONER_MODEL })
+      onUpdate({
+        provider: 'openai',
+        baseUrl: DEFAULT_SETTINGS.baseUrl,
+        apiKey: '',
+        model: DEFAULT_CAPTIONER_MODEL,
+      })
     }
   }
 

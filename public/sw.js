@@ -10,6 +10,7 @@ const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon.s
 // assets,白屏。开发态占位符未替换 → 解析为空数组,行为与替换前一致。
 const PRECACHE_MANIFEST = '__PRECACHE_MANIFEST__'
 const PRECACHE_ASSETS = PRECACHE_MANIFEST.startsWith('[') ? JSON.parse(PRECACHE_MANIFEST) : []
+const ASSETS_PATH = new URL('./assets/', self.location.href).pathname
 
 // kill-switch 是单向逃生通道：部署翻车（旧 SW 把用户锁死）时把下方常量改成 true 部署一次，
 // 已注册旧 SW 的浏览器在下次访问时会自动 unregister 并强制刷新所有 tab，从而回到无 SW 拦截的正常网络。
@@ -50,11 +51,13 @@ if (KILL_SWITCH) {
 
   self.addEventListener('activate', (event) => {
     event.waitUntil(
-      caches.keys().then((keys) =>
-        Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))),
-      ),
+      caches
+        .keys()
+        .then((keys) =>
+          Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))),
+        )
+        .then(() => self.clients.claim()),
     )
-    self.clients.claim()
   })
 
   self.addEventListener('fetch', (event) => {
@@ -68,9 +71,7 @@ if (KILL_SWITCH) {
     if (request.mode === 'navigate') {
       // HTML 不写回缓存：在线时永远拿网络版本，避免旧 HTML 引用已删除的 hashed assets 文件名导致白屏。
       // 离线兜底由 install 阶段的 cache.addAll(['./index.html', ...]) 提供，会在下次部署的 activate 时随 CACHE_NAME 切换而刷新。
-      event.respondWith(
-        fetch(request).catch(() => caches.match('./index.html')),
-      )
+      event.respondWith(fetch(request).catch(() => caches.match('./index.html')))
       return
     }
 
@@ -81,9 +82,14 @@ if (KILL_SWITCH) {
         return fetch(request).then((response) => {
           // 仅缓存内容寻址的 hashed 静态资源(/assets/);其余同源 GET 只走网络不写缓存,
           // 避免运行时缓存对所有同源 GET 无限 cache.put(单次部署生命周期内只增不减、可能逼近配额)。
-          if (response.ok && url.pathname.includes('/assets/')) {
+          if (response.ok && url.pathname.startsWith(ASSETS_PATH)) {
             const copy = response.clone()
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
+            caches
+              .open(CACHE_NAME)
+              .then((cache) => cache.put(request, copy))
+              .catch(() => {
+                /* runtime cache failures must not fail the network response */
+              })
           }
           return response
         })

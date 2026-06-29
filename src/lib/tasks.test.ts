@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { TaskRecord } from '../types'
-import { normalizeTask, normalizeTasks, MAX_IMAGE_IDS_PER_TASK } from './tasks'
+import { MAX_TASK_PARAM_STRING_LEN } from './api/paramCompatibility'
+import { MAX_PROMPT_EXPANSION_HARD } from './promptExpand'
+import {
+  normalizeTask,
+  normalizeTasks,
+  MAX_IMAGE_IDS_PER_TASK,
+  MAX_TASKS,
+  MAX_TASK_TEXT_LEN,
+} from './tasks'
 
 describe('normalizeTask', () => {
   it('丢弃无 id / 非对象的条目(返回 null)', () => {
@@ -39,11 +47,122 @@ describe('normalizeTask', () => {
     expect(task!.error).toBeNull()
   })
 
+  it('截断导入任务中的长文本字段,避免旧库/备份拖慢搜索与详情渲染', () => {
+    const long = 'x'.repeat(MAX_TASK_TEXT_LEN + 50)
+    const longParam = 'p'.repeat(MAX_TASK_PARAM_STRING_LEN + 50)
+    const task = normalizeTask({
+      id: 't',
+      prompt: long,
+      params: { size: longParam, stylePreset: longParam },
+      apiProfileId: long,
+      apiProfileName: long,
+      apiModel: long,
+      revisedPromptByImage: { img: long },
+      partialFailureMessage: long,
+      persistenceError: long,
+      error: long,
+      batchId: long,
+      favoriteCategoryId: long,
+      conversationId: long,
+      maskTargetImageId: long,
+      maskImageId: long,
+      gridAxes: { x: { kind: 'prompt', values: [{ key: long, label: long }] } },
+      gridCoord: { x: long },
+    })
+
+    expect(task!.prompt).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.params.size).toHaveLength(MAX_TASK_PARAM_STRING_LEN)
+    expect(task!.params.stylePreset).toHaveLength(MAX_TASK_PARAM_STRING_LEN)
+    expect(task!.apiProfileId).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.apiProfileName).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.apiModel).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.revisedPromptByImage!.img).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.partialFailureMessage).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.persistenceError).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.error).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.batchId).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.favoriteCategoryId).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.conversationId).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.maskTargetImageId).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.maskImageId).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.gridAxes!.x.values[0].key).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.gridAxes!.x.values[0].label).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.gridCoord!.x).toHaveLength(MAX_TASK_TEXT_LEN)
+  })
+
+  it('把导入的 output_compression 收敛到 Image API 支持范围', () => {
+    const low = normalizeTask({
+      id: 't-low',
+      params: { output_format: 'jpeg', output_compression: -12 },
+    })
+    expect(low!.params.output_compression).toBe(0)
+
+    const high = normalizeTask({
+      id: 't-high',
+      actualParams: { output_format: 'webp', output_compression: 150 },
+    })
+    expect(high!.actualParams).toEqual({ output_format: 'webp', output_compression: 100 })
+
+    const fractional = normalizeTask({
+      id: 't-fractional',
+      params: { output_format: 'jpeg', output_compression: 42.7 },
+    })
+    expect(fractional!.params.output_compression).toBe(43)
+
+    const png = normalizeTask({
+      id: 't-png',
+      params: { output_format: 'png', output_compression: 80 },
+    })
+    expect(png!.params.output_compression).toBeNull()
+
+    const implicitPng = normalizeTask({
+      id: 't-implicit-png',
+      params: { output_compression: 80 },
+    })
+    expect(implicitPng!.params.output_compression).toBeNull()
+  })
+
+  it('把导入的 n 收敛到有限整数范围', () => {
+    expect(normalizeTask({ id: 't-fractional', params: { n: 1.7 } })!.params.n).toBe(2)
+    expect(normalizeTask({ id: 't-low', params: { n: 0 } })!.params.n).toBe(1)
+    expect(normalizeTask({ id: 't-high', params: { n: 99 } })!.params.n).toBe(10)
+    expect(normalizeTask({ id: 't-actual', actualParams: { n: 2.2 } })!.actualParams).toEqual({
+      n: 2,
+    })
+  })
+
+  it('丢弃非法 partialFailureCount,避免导入负数/无限值污染 UI', () => {
+    expect(
+      normalizeTask({ id: 'negative', partialFailureCount: -1 })!.partialFailureCount,
+    ).toBeUndefined()
+    expect(
+      normalizeTask({ id: 'infinite', partialFailureCount: Infinity })!.partialFailureCount,
+    ).toBeUndefined()
+    expect(normalizeTask({ id: 'valid', partialFailureCount: 2 })!.partialFailureCount).toBe(2)
+  })
+
+  it('丢弃导入任务中的负 elapsed,避免负耗时污染 UI', () => {
+    expect(normalizeTask({ id: 'negative-elapsed', elapsed: -1 })!.elapsed).toBeNull()
+    expect(normalizeTask({ id: 'valid-elapsed', elapsed: 1500 })!.elapsed).toBe(1500)
+  })
+
   it('过滤非字符串 id 并按上限截断 inputImageIds/outputImages', () => {
     const many = Array.from({ length: MAX_IMAGE_IDS_PER_TASK + 10 }, (_, i) => `img${i}`)
-    const task = normalizeTask({ id: 't', inputImageIds: ['ok', 1, null, 'ok2'], outputImages: many })
+    const task = normalizeTask({
+      id: 't',
+      inputImageIds: ['ok', 1, null, 'ok2'],
+      outputImages: many,
+    })
     expect(task!.inputImageIds).toEqual(['ok', 'ok2'])
     expect(task!.outputImages).toHaveLength(MAX_IMAGE_IDS_PER_TASK)
+  })
+
+  it('截断导入任务中的图片 id 字段,避免有限数组携带超长字符串', () => {
+    const long = 'x'.repeat(MAX_TASK_TEXT_LEN + 50)
+    const task = normalizeTask({ id: 't', inputImageIds: [long], outputImages: [long] })
+
+    expect(task!.inputImageIds[0]).toHaveLength(MAX_TASK_TEXT_LEN)
+    expect(task!.outputImages[0]).toHaveLength(MAX_TASK_TEXT_LEN)
   })
 
   it('剔除 Record 字段中的危险 key,且不污染 Object.prototype', () => {
@@ -57,9 +176,42 @@ describe('normalizeTask', () => {
     expect(({} as Record<string, unknown>).polluted).toBeUndefined()
   })
 
+  it('截断导入任务中 Record 字段的图片 id key', () => {
+    const long = 'x'.repeat(MAX_TASK_TEXT_LEN + 50)
+    const task = normalizeTask({
+      id: 't',
+      actualParamsByImage: { [long]: { size: '1024x1024' } },
+      revisedPromptByImage: { [long]: 'revised' },
+    })
+
+    expect(Object.keys(task!.actualParamsByImage!)).toEqual([long.slice(0, MAX_TASK_TEXT_LEN)])
+    expect(Object.keys(task!.revisedPromptByImage!)).toEqual([long.slice(0, MAX_TASK_TEXT_LEN)])
+  })
+
   it('normalizeTasks 过滤掉非法条目', () => {
     const tasks = normalizeTasks([{ id: 'a' }, null, { id: '' }, { id: 'b' }, 'x'])
     expect(tasks.map((t) => t.id)).toEqual(['a', 'b'])
+  })
+
+  it('normalizeTasks deduplicates task ids using the last valid record', () => {
+    const tasks = normalizeTasks([
+      { id: 'duplicate', prompt: 'older' },
+      { id: 'unique', prompt: 'only' },
+      { id: 'duplicate', prompt: 'newer' },
+    ])
+
+    expect(tasks.map((t) => t.id)).toEqual(['unique', 'duplicate'])
+    expect(tasks.find((t) => t.id === 'duplicate')?.prompt).toBe('newer')
+  })
+
+  it('normalizeTasks caps task count to avoid importing unbounded manifests', () => {
+    const tasks = normalizeTasks(
+      Array.from({ length: MAX_TASKS + 10 }, (_, index) => ({ id: `t-${index}` })),
+    )
+
+    expect(tasks).toHaveLength(MAX_TASKS)
+    expect(tasks[0].id).toBe('t-0')
+    expect(tasks[tasks.length - 1].id).toBe(`t-${MAX_TASKS - 1}`)
   })
 
   it('非数组输入返回空数组', () => {
@@ -72,14 +224,26 @@ describe('normalizeTask', () => {
       id: 't',
       batchId: 'batch-1',
       gridAxes: {
-        x: { kind: 'quality', values: [{ key: 'low', label: '低' }, { key: 'high', label: '高' }] },
+        x: {
+          kind: 'quality',
+          values: [
+            { key: 'low', label: '低' },
+            { key: 'high', label: '高' },
+          ],
+        },
         y: { kind: 'size', values: [{ key: '1K', label: '1024×1024' }] },
       },
       gridCoord: { x: 'low', y: '1K' },
     })
     expect(task!.batchId).toBe('batch-1')
     expect(task!.gridAxes).toEqual({
-      x: { kind: 'quality', values: [{ key: 'low', label: '低' }, { key: 'high', label: '高' }] },
+      x: {
+        kind: 'quality',
+        values: [
+          { key: 'low', label: '低' },
+          { key: 'high', label: '高' },
+        ],
+      },
       y: { kind: 'size', values: [{ key: '1K', label: '1024×1024' }] },
     })
     expect(task!.gridCoord).toEqual({ x: 'low', y: '1K' })
@@ -91,7 +255,9 @@ describe('normalizeTask', () => {
       gridAxes: { x: { kind: 'prompt', values: [{ key: 'a cat', label: 'a cat' }] } },
       gridCoord: { x: 'a cat' },
     })
-    expect(singleAxis!.gridAxes).toEqual({ x: { kind: 'prompt', values: [{ key: 'a cat', label: 'a cat' }] } })
+    expect(singleAxis!.gridAxes).toEqual({
+      x: { kind: 'prompt', values: [{ key: 'a cat', label: 'a cat' }] },
+    })
     expect(singleAxis!.gridCoord).toEqual({ x: 'a cat' })
 
     // y 轴 kind 非法被剔除后,gridCoord.y 必须同步剔除——否则矩阵重建拿到「单轴 + 双维坐标」
@@ -128,15 +294,80 @@ describe('normalizeTask', () => {
       },
       gridCoord: { x: 'low' },
     })
-    expect(dualAxesSingleCoord!.gridAxes).toEqual({ x: { kind: 'quality', values: [{ key: 'low', label: '低' }] } })
+    expect(dualAxesSingleCoord!.gridAxes).toEqual({
+      x: { kind: 'quality', values: [{ key: 'low', label: '低' }] },
+    })
     expect(dualAxesSingleCoord!.gridCoord).toEqual({ x: 'low' })
+  })
+
+  it('丢弃超过运行时上限的导入 gridAxes,避免恶意矩阵拖垮渲染路径', () => {
+    const values = Array.from({ length: MAX_PROMPT_EXPANSION_HARD + 1 }, (_, index) => ({
+      key: `v-${index}`,
+      label: `值 ${index}`,
+    }))
+
+    const task = normalizeTask({
+      id: 't',
+      batchId: 'batch-1',
+      gridAxes: { x: { kind: 'prompt', values } },
+      gridCoord: { x: 'v-0' },
+    })
+
+    expect(task!.batchId).toBe('batch-1')
+    expect(task!.gridAxes).toBeUndefined()
+    expect(task!.gridCoord).toBeUndefined()
+  })
+
+  it('按笛卡尔积丢弃超过运行时上限的导入双轴 gridAxes', () => {
+    const xValues = Array.from({ length: 20 }, (_, index) => ({
+      key: `x-${index}`,
+      label: `X ${index}`,
+    }))
+    const yValues = Array.from(
+      { length: Math.floor(MAX_PROMPT_EXPANSION_HARD / 20) + 1 },
+      (_, index) => ({
+        key: `y-${index}`,
+        label: `Y ${index}`,
+      }),
+    )
+
+    const task = normalizeTask({
+      id: 't',
+      batchId: 'batch-1',
+      gridAxes: {
+        x: { kind: 'quality', values: xValues },
+        y: { kind: 'size', values: yValues },
+      },
+      gridCoord: { x: 'x-0', y: 'y-0' },
+    })
+
+    expect(task!.gridAxes).toBeUndefined()
+    expect(task!.gridCoord).toBeUndefined()
   })
 
   it('非法 gridAxes/gridCoord 被丢弃(kind 白名单 / values 结构 / 坐标类型)', () => {
     expect(normalizeTask({ id: 't', batchId: 42 })!.batchId).toBeUndefined()
-    expect(normalizeTask({ id: 't', gridAxes: { x: { kind: 'evil', values: [{ key: 'a', label: 'a' }] } }, gridCoord: { x: 'a' } })!.gridAxes).toBeUndefined()
-    expect(normalizeTask({ id: 't', gridAxes: { x: { kind: 'quality', values: [] } }, gridCoord: { x: 'a' } })!.gridAxes).toBeUndefined()
-    expect(normalizeTask({ id: 't', gridAxes: { x: { kind: 'quality', values: [{ key: 1, label: 'a' }] } }, gridCoord: { x: 'a' } })!.gridAxes).toBeUndefined()
+    expect(
+      normalizeTask({
+        id: 't',
+        gridAxes: { x: { kind: 'evil', values: [{ key: 'a', label: 'a' }] } },
+        gridCoord: { x: 'a' },
+      })!.gridAxes,
+    ).toBeUndefined()
+    expect(
+      normalizeTask({
+        id: 't',
+        gridAxes: { x: { kind: 'quality', values: [] } },
+        gridCoord: { x: 'a' },
+      })!.gridAxes,
+    ).toBeUndefined()
+    expect(
+      normalizeTask({
+        id: 't',
+        gridAxes: { x: { kind: 'quality', values: [{ key: 1, label: 'a' }] } },
+        gridCoord: { x: 'a' },
+      })!.gridAxes,
+    ).toBeUndefined()
     expect(normalizeTask({ id: 't', gridCoord: { x: 42 } })!.gridCoord).toBeUndefined()
     expect(normalizeTask({ id: 't', gridCoord: 'low' })!.gridCoord).toBeUndefined()
   })
@@ -148,7 +379,15 @@ describe('normalizeTask', () => {
     const full: Required<TaskRecord> = {
       id: 't-full',
       prompt: 'p',
-      params: { size: '1024x1024', quality: 'high', output_format: 'webp', output_compression: 80, moderation: 'low', n: 2, stylePreset: 'photo' },
+      params: {
+        size: '1024x1024',
+        quality: 'high',
+        output_format: 'webp',
+        output_compression: 80,
+        moderation: 'low',
+        n: 2,
+        stylePreset: 'photo',
+      },
       apiProvider: 'gemini',
       apiProfileId: 'profile-id-1',
       apiProfileName: 'My Profile',

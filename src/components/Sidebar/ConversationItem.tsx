@@ -93,7 +93,9 @@ export default memo(function ConversationItem({
       return
     }
     if (trimmed !== conversation.title) {
-      void renameConversation(conversation.id, trimmed)
+      void renameConversation(conversation.id, trimmed).catch(() => {
+        /* store action already restores state and surfaces the error */
+      })
     }
     setIsRenaming(false)
   }

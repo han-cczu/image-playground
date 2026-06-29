@@ -29,6 +29,7 @@ export default function MaskInfoPopover({ open, onOpenChange }: MaskInfoPopoverP
   }
 
   const startMaskInfoTouch = () => {
+    clearMaskInfoTimer()
     maskInfoTimerRef.current = window.setTimeout(() => {
       onOpenChange(true)
       maskInfoTimerRef.current = null

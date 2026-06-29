@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
@@ -41,10 +41,7 @@ function TourPanel() {
   const hasApiKey = useStore((s) => Boolean(s.settings.apiKey.trim()))
   const isMobile = useIsMobile()
 
-  const steps = useMemo(
-    () => buildTourSteps({ isMobile, hasApiKey }),
-    [isMobile, hasApiKey],
-  )
+  const steps = useMemo(() => buildTourSteps({ isMobile, hasApiKey }), [isMobile, hasApiKey])
   // isMobile 中途变化会让 steps 变短:下标 clamp 防越界
   const stepIndex = Math.min(tourStep, steps.length - 1)
   const step = steps[stepIndex]
@@ -69,17 +66,17 @@ function TourPanel() {
     [],
   )
 
-  const close = () => {
+  const close = useCallback(() => {
     setTourActive(false)
     // 无条件置已看:自动触发时(hasSeenTour 必为 false)完成首跑标记;
     // 重看路径它已是 true,重写幂等——无需区分入口
     setHasSeenTour(true)
-  }
-  const next = () => {
+  }, [setHasSeenTour, setTourActive])
+  const next = useCallback(() => {
     if (stepIndex < steps.length - 1) setTourStep(stepIndex + 1)
     else close()
-  }
-  const back = () => setTourStep(Math.max(0, stepIndex - 1))
+  }, [close, setTourStep, stepIndex, steps.length])
+  const back = useCallback(() => setTourStep(Math.max(0, stepIndex - 1)), [setTourStep, stepIndex])
 
   // 进入步骤:执行 onEnter 副作用 → rAF 轮询锚点(等待展开动画/异步渲染)→ 超时按声明降级。
   // 首次解析同样走 rAF:setState 全部发生在帧回调内;等待帧里 activeRect 沿用上一步
@@ -113,8 +110,7 @@ function TourPanel() {
     }
     raf = requestAnimationFrame(tryResolve)
     return () => cancelAnimationFrame(raf)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, stepIndex])
+  }, [close, setMobileInputCollapsed, setTourStep, step, stepIndex, steps.length])
 
   // 跟随:resize / 滚动(capture,捕获 main 内滚)/ 布局变化时重算锚点(rAF 节流)
   useEffect(() => {

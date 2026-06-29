@@ -3,6 +3,9 @@ import type { Conversation } from '../types'
 /** 「历史记录」对话固定 id，承载未归类（无 favoriteCategoryId）的旧任务，不允许删除。 */
 export const ARCHIVE_CONVERSATION_ID = '__archive__'
 export const ARCHIVE_CONVERSATION_TITLE = '历史记录'
+export const MAX_CONVERSATIONS = 500
+export const MAX_CONVERSATION_ID_LEN = 5000
+export const MAX_CONVERSATION_TITLE_LEN = 80
 
 /** 迁移版本：写入 localStorage 防止 reseed 重跑。 */
 export const CONVERSATION_MIGRATION_VERSION = 1
@@ -34,8 +37,18 @@ export function createArchiveConversation(now = Date.now()): Conversation {
   }
 }
 
+export function normalizeConversationTitle(value: unknown): string {
+  return typeof value === 'string' && value.trim()
+    ? value.trim().slice(0, MAX_CONVERSATION_TITLE_LEN)
+    : '新对话'
+}
+
 export function isArchiveConversation(id: string | null | undefined): boolean {
   return id === ARCHIVE_CONVERSATION_ID
+}
+
+function isValidColor(color: unknown): color is string {
+  return typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)
 }
 
 /**
@@ -52,22 +65,23 @@ export function normalizeConversations(
     if (!entry || typeof entry !== 'object') return
     const item = entry as Partial<Conversation>
     if (typeof item.id !== 'string' || !item.id.trim()) return
+    const id = item.id.slice(0, MAX_CONVERSATION_ID_LEN)
 
     const createdAt =
       typeof item.createdAt === 'number' && Number.isFinite(item.createdAt) ? item.createdAt : now
     const updatedAt =
       typeof item.updatedAt === 'number' && Number.isFinite(item.updatedAt) ? item.updatedAt : createdAt
 
-    byId.set(item.id, {
-      id: item.id,
-      title: typeof item.title === 'string' && item.title.trim() ? item.title : '新对话',
+    byId.set(id, {
+      id,
+      title: normalizeConversationTitle(item.title),
       createdAt,
       updatedAt,
       sortOrder:
         typeof item.sortOrder === 'number' && Number.isFinite(item.sortOrder)
           ? item.sortOrder
           : index,
-      color: typeof item.color === 'string' ? item.color : item.color === null ? null : undefined,
+      color: isValidColor(item.color) ? item.color : item.color === null ? null : undefined,
     })
   })
 
@@ -76,7 +90,7 @@ export function normalizeConversations(
     if (a.id === ARCHIVE_CONVERSATION_ID && b.id !== ARCHIVE_CONVERSATION_ID) return 1
     if (b.id === ARCHIVE_CONVERSATION_ID && a.id !== ARCHIVE_CONVERSATION_ID) return -1
     return b.updatedAt - a.updatedAt || a.id.localeCompare(b.id)
-  })
+  }).slice(0, MAX_CONVERSATIONS)
 }
 
 /**

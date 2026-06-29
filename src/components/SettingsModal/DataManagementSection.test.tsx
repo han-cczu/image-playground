@@ -29,7 +29,10 @@ function makeStats(overrides: Partial<StorageStats> = {}): StorageStats {
   }
 }
 
-function renderSection(stats: StorageStats | null, props: Partial<Parameters<typeof DataManagementSection>[0]> = {}) {
+function renderSection(
+  stats: StorageStats | null,
+  props: Partial<Parameters<typeof DataManagementSection>[0]> = {},
+) {
   return render(
     <DataManagementSection
       storageStats={stats}
@@ -65,7 +68,10 @@ describe('DataManagementSection 持久化徽标(H4)', () => {
   })
 
   it('申请被浏览器拒绝时给出显式反馈而非静默(按钮变「重试」)', async () => {
-    vi.stubGlobal('navigator', { ...window.navigator, storage: { persist: vi.fn(async () => false) } })
+    vi.stubGlobal('navigator', {
+      ...window.navigator,
+      storage: { persist: vi.fn(async () => false) },
+    })
     renderSection(makeStats({ persisted: false }))
     fireEvent.click(screen.getByRole('button', { name: '申请持久化' }))
     await waitFor(() => {
@@ -75,7 +81,10 @@ describe('DataManagementSection 持久化徽标(H4)', () => {
   })
 
   it('申请成功后切换为已授权徽标', async () => {
-    vi.stubGlobal('navigator', { ...window.navigator, storage: { persist: vi.fn(async () => true) } })
+    vi.stubGlobal('navigator', {
+      ...window.navigator,
+      storage: { persist: vi.fn(async () => true) },
+    })
     renderSection(makeStats({ persisted: false }))
     fireEvent.click(screen.getByRole('button', { name: '申请持久化' }))
     await waitFor(() => {
@@ -87,7 +96,12 @@ describe('DataManagementSection 持久化徽标(H4)', () => {
 describe('DataManagementSection 导出/导入忙碌态(M13)', () => {
   it('导出进行中按钮禁用并显示「导出中…」,完成后恢复', async () => {
     let release!: () => void
-    const onExport = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
+    const onExport = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        }),
+    )
     renderSection(makeStats(), { onExport })
 
     fireEvent.click(screen.getByRole('button', { name: /导出/ }))
@@ -108,5 +122,71 @@ describe('DataManagementSection 导出/导入忙碌态(M13)', () => {
     fireEvent.click(button)
     fireEvent.click(button)
     expect(onExport).toHaveBeenCalledOnce()
+  })
+
+  it('替换导入的模式不依赖 React state 提交时机', async () => {
+    const onImport = vi.fn(async () => {})
+    const onConfirmReplaceImport = vi.fn((proceed: () => void | Promise<void>) => {
+      void proceed()
+    })
+    const { container } = renderSection(makeStats(), { onImport, onConfirmReplaceImport })
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!
+    const file = new File(['zip'], 'backup.zip', { type: 'application/zip' })
+
+    fireEvent.click(screen.getByRole('button', { name: '替换导入' }))
+    fireEvent.change(input, { target: { files: [file] } })
+
+    await waitFor(() => expect(onImport).toHaveBeenCalled())
+    expect(onImport).toHaveBeenCalledWith(file, 'replace')
+  })
+
+  it('合并导入不会沿用上一次替换导入的 pending mode', async () => {
+    const onImport = vi.fn(async () => {})
+    const onConfirmReplaceImport = vi.fn((proceed: () => void | Promise<void>) => {
+      void proceed()
+    })
+    const { container } = renderSection(makeStats(), { onImport, onConfirmReplaceImport })
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!
+    const replaceFile = new File(['replace'], 'replace.zip', { type: 'application/zip' })
+    const mergeFile = new File(['merge'], 'merge.zip', { type: 'application/zip' })
+
+    fireEvent.click(screen.getByRole('button', { name: '替换导入' }))
+    fireEvent.change(input, { target: { files: [replaceFile] } })
+    await waitFor(() => expect(onImport).toHaveBeenCalledWith(replaceFile, 'replace'))
+
+    fireEvent.click(screen.getByRole('button', { name: '合并导入' }))
+    fireEvent.change(input, { target: { files: [mergeFile] } })
+
+    await waitFor(() => expect(onImport).toHaveBeenCalledTimes(2))
+    expect(onImport).toHaveBeenLastCalledWith(mergeFile, 'merge')
+  })
+
+  it('导入失败后仍清空文件输入并复位导入模式', async () => {
+    const onImport: (file: File, mode: 'merge' | 'replace') => Promise<void> = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('import failed'))
+      .mockResolvedValueOnce(undefined)
+    const onConfirmReplaceImport = vi.fn((proceed: () => void | Promise<void>) => {
+      void proceed()
+    })
+    const { container } = renderSection(makeStats(), { onImport, onConfirmReplaceImport })
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!
+    const failedFile = new File(['replace'], 'same.zip', { type: 'application/zip' })
+    const retryFile = new File(['merge'], 'same.zip', { type: 'application/zip' })
+
+    fireEvent.click(screen.getByRole('button', { name: '替换导入' }))
+    fireEvent.change(input, { target: { files: [failedFile] } })
+
+    await waitFor(() => expect(onImport).toHaveBeenCalledWith(failedFile, 'replace'))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '合并导入' })).toHaveProperty('disabled', false),
+    )
+    expect(input.value).toBe('')
+
+    fireEvent.click(screen.getByRole('button', { name: '合并导入' }))
+    fireEvent.change(input, { target: { files: [retryFile] } })
+
+    await waitFor(() => expect(onImport).toHaveBeenCalledTimes(2))
+    expect(onImport).toHaveBeenLastCalledWith(retryFile, 'merge')
   })
 })

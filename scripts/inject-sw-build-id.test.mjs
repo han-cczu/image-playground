@@ -1,9 +1,21 @@
-import { describe, it, expect } from 'vitest'
-import { generateBuildId, injectBuildId } from './inject-sw-build-id.mjs'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import {
+  generateBuildId,
+  injectBuildId,
+  injectPrecacheManifest,
+  listPrecacheAssets,
+  readGitShortHash,
+} from './inject-sw-build-id.mjs'
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
 
 describe('generateBuildId', () => {
   it('combines git short hash and timestamp', () => {
-    expect(generateBuildId({ gitHash: 'a1b2c3d', now: 1716284400000 })).toBe('a1b2c3d-1716284400000')
+    expect(generateBuildId({ gitHash: 'a1b2c3d', now: 1716284400000 })).toBe(
+      'a1b2c3d-1716284400000',
+    )
   })
 
   it('falls back to "nogit" when gitHash is null', () => {
@@ -18,6 +30,14 @@ describe('generateBuildId', () => {
     const a = generateBuildId({ gitHash: 'a1b2c3d', now: 1 })
     const b = generateBuildId({ gitHash: 'a1b2c3d', now: 2 })
     expect(a).not.toBe(b)
+  })
+})
+
+describe('readGitShortHash', () => {
+  it('prefers GIT_COMMIT from Docker build args before shelling out to git', () => {
+    vi.stubEnv('GIT_COMMIT', 'deadbee')
+
+    expect(readGitShortHash()).toBe('deadbee')
   })
 })
 
@@ -36,6 +56,46 @@ describe('injectBuildId', () => {
   })
 
   it('throws when placeholder is missing (double injection guard)', () => {
-    expect(() => injectBuildId(`const CACHE_NAME = 'already-replaced'`, 'h-1')).toThrow(/找不到占位符/)
+    expect(() => injectBuildId(`const CACHE_NAME = 'already-replaced'`, 'h-1')).toThrow(
+      /找不到占位符/,
+    )
+  })
+})
+
+describe('injectPrecacheManifest', () => {
+  it('replaces the precache placeholder with a JSON asset array', () => {
+    const sw = `const PRECACHE_MANIFEST = '__PRECACHE_MANIFEST__'`
+
+    expect(injectPrecacheManifest(sw, ['./assets/index-a.js', './assets/index-b.css'])).toBe(
+      `const PRECACHE_MANIFEST = '["./assets/index-a.js","./assets/index-b.css"]'`,
+    )
+  })
+
+  it('throws when the precache placeholder is missing', () => {
+    expect(() => injectPrecacheManifest(`const PRECACHE_MANIFEST = '[]'`, [])).toThrow(
+      /预缓存清单注入失败/,
+    )
+  })
+
+  it('rejects asset names that cannot be embedded in the quoted service-worker string', () => {
+    expect(() => injectPrecacheManifest(`'__PRECACHE_MANIFEST__'`, [`./assets/bad'.js`])).toThrow(
+      /单引号/,
+    )
+  })
+})
+
+describe('listPrecacheAssets', () => {
+  it('returns sorted dist asset paths and ignores nested directories', async () => {
+    const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'image-playground-assets-'))
+    const assetsDir = join(dir, 'assets')
+    await mkdir(assetsDir)
+    await writeFile(join(assetsDir, 'b.js'), '')
+    await writeFile(join(assetsDir, 'a.css'), '')
+    await mkdir(join(assetsDir, 'nested'))
+
+    expect(listPrecacheAssets(dir)).toEqual(['./assets/a.css', './assets/b.js'])
   })
 })

@@ -1,11 +1,24 @@
-import type { ApiProfile, ApiProvider, AppSettings, GridAxis, InputImage, TaskParams, TaskRecord } from '../types'
+import type {
+  ApiProfile,
+  ApiProvider,
+  AppSettings,
+  GridAxis,
+  InputImage,
+  TaskParams,
+  TaskRecord,
+} from '../types'
 import { useStore } from '../store'
-import { getActiveApiProfile, normalizeSettings, validateApiProfile } from './api/apiProfiles'
+import {
+  DEFAULT_API_TIMEOUT,
+  getActiveApiProfile,
+  normalizeSettings,
+  validateApiProfile,
+} from './api/apiProfiles'
 import {
   getAllTasks,
   putTask,
   deleteTask as dbDeleteTask,
-  getAllImages,
+  getImage,
   deleteImage,
   storeImage,
   storedImageToDataUrl,
@@ -14,6 +27,7 @@ import {
   persistConversationMigration,
 } from './db'
 import { callImageApi } from './api'
+import { resolveChatTimeoutMs } from './api/chatCompletionsShared'
 import { buildFinalPrompt } from './stylePresets'
 import {
   countPromptExpansion,
@@ -22,14 +36,21 @@ import {
   MAX_PROMPT_EXPANSION_HARD,
 } from './promptExpand'
 import { mapWithConcurrency } from './concurrency'
-import { collectReferencedImageIds } from './storageStats'
-import { buildGridCells, countGridCells, countGridImages, reconstructMatrix } from './gridExperiment'
+import { collectReferencedImageIds, pruneOrphanImages } from './storageStats'
+import {
+  buildGridCells,
+  countGridCells,
+  countGridImages,
+  reconstructMatrix,
+} from './gridExperiment'
 import { getImageDimensions, validateMaskMatchesImage } from './image/canvasImage'
+import { fileToImageDataUrl, getImageFileMime } from './image/fileMime'
 import { orderInputImagesForMask } from './image/mask'
 import { getChangedParams, normalizeParamsForSettings } from './api/paramCompatibility'
 import {
   deleteCachedImage,
   ensureImageCached,
+  evictCachedImageDataUrl,
   setCachedImage,
 } from './imageCache'
 import {
@@ -43,9 +64,16 @@ import {
 } from './conversations'
 import { reseedConversationsFromFavoriteCategories } from './conversationMigration'
 import { SORT_STEP, SORT_EPSILON, computeReorderedSortOrders } from './taskSort'
+import { MAX_INPUT_IMAGES_PER_SUBMISSION, MAX_TASK_TEXT_LEN, normalizeTasks } from './tasks'
+import {
+  clearPendingIndexedDbTaskWrite,
+  markPendingIndexedDbTaskWrite,
+} from '../store/idbSyncState'
+import { registerIndexedDbSyncRuntimeTerminator } from '../store/idbRuntimeBridge'
 
 const syncHttpWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const taskAbortControllers = new Map<string, AbortController>()
+let initStorePromise: Promise<void> | null = null
 
 /**
  * 仅测试用:清空模块级运行期 Map。永挂的 callImageApi mock 会让 executeTask 阻塞在 await、
@@ -55,12 +83,17 @@ export function resetTaskRuntimeForTest(): void {
   for (const timer of syncHttpWatchdogTimers.values()) clearTimeout(timer)
   syncHttpWatchdogTimers.clear()
   taskAbortControllers.clear()
+  initStorePromise = null
 }
 export const SYNC_HTTP_INTERRUPTED_ERROR = '请求中断'
 const TASK_CANCELLED_ERROR = '已取消生成'
 
 function createSyncHttpTimeoutError(timeoutSeconds: number) {
   return `请求超时：超过 ${timeoutSeconds} 秒仍未完成，请稍后重试或提高超时时间。`
+}
+
+function normalizeTaskRuntimeText(value: unknown): string {
+  return (value instanceof Error ? value.message : String(value)).slice(0, MAX_TASK_TEXT_LEN)
 }
 
 let uid = 0
@@ -140,6 +173,72 @@ export function terminateRunningTaskRuntimes(tasks: TaskRecord[]): void {
   }
 }
 
+registerIndexedDbSyncRuntimeTerminator(terminateRunningTaskRuntimes)
+
+function getTaskImageIds(task: TaskRecord): string[] {
+  return [
+    ...(task.inputImageIds || []),
+    ...(task.maskTargetImageId ? [task.maskTargetImageId] : []),
+    ...(task.maskImageId ? [task.maskImageId] : []),
+    ...(task.outputImages || []),
+  ]
+}
+
+/**
+ * 删除任务后同步清理瞬态 UI 引用。否则任务/图片已从 store 移除,但 selection、detail、
+ * compare 或 lightbox 仍指向旧 id,会让后续操作命中不可见任务,甚至出现空预览却锁 body 滚动。
+ */
+export function clearTransientUiReferencesForDeletedTasks(deletedTasks: TaskRecord[]): void {
+  if (!deletedTasks.length) return
+
+  const deletedTaskIds = new Set(deletedTasks.map((task) => task.id))
+  const deletedImageIds = new Set<string>()
+  for (const task of deletedTasks) {
+    for (const imageId of getTaskImageIds(task)) deletedImageIds.add(imageId)
+  }
+
+  useStore.setState((state) => {
+    const selectedTaskIds = state.selectedTaskIds.filter((id) => !deletedTaskIds.has(id))
+    const nextCompareTaskIds = state.compareTaskIds?.filter((id) => !deletedTaskIds.has(id)) ?? null
+    const compareTaskIds =
+      nextCompareTaskIds && nextCompareTaskIds.length >= 2 ? nextCompareTaskIds : null
+    const stillUsedImageIds = collectReferencedImageIds(state.tasks, state.inputImages)
+    const orphanedImageIds = new Set(
+      [...deletedImageIds].filter((imageId) => !stillUsedImageIds.has(imageId)),
+    )
+    const lightboxImageList = state.lightboxImageList.filter((id) => !orphanedImageIds.has(id))
+    const nextCaptionBatchImageIds =
+      state.captionBatchImageIds?.filter((id) => !orphanedImageIds.has(id)) ?? null
+    const clearLightbox = state.lightboxImageId
+      ? orphanedImageIds.has(state.lightboxImageId)
+      : false
+    const maskDraft =
+      state.maskDraft && orphanedImageIds.has(state.maskDraft.targetImageId)
+        ? null
+        : state.maskDraft
+
+    return {
+      selectedTaskIds,
+      detailTaskId:
+        state.detailTaskId && deletedTaskIds.has(state.detailTaskId) ? null : state.detailTaskId,
+      lineageTaskId:
+        state.lineageTaskId && deletedTaskIds.has(state.lineageTaskId) ? null : state.lineageTaskId,
+      compareTaskIds,
+      lightboxImageId: clearLightbox ? null : state.lightboxImageId,
+      lightboxImageList,
+      maskEditorImageId:
+        state.maskEditorImageId && orphanedImageIds.has(state.maskEditorImageId)
+          ? null
+          : state.maskEditorImageId,
+      maskDraft,
+      captionBatchImageIds:
+        nextCaptionBatchImageIds && nextCaptionBatchImageIds.length > 0
+          ? nextCaptionBatchImageIds
+          : null,
+    }
+  })
+}
+
 /**
  * 回滚一组刚 storeImage 的图片(成对删 DB + 内存缓存),但只删当前没有任何 task / inputImage 引用的,
  * 避免误删内容寻址去重命中的在用图。供 executeTask 写图后早退、蒙版保存竞态复用。
@@ -147,13 +246,7 @@ export function terminateRunningTaskRuntimes(tasks: TaskRecord[]): void {
 export async function rollbackStoredImages(imageIds: string[]): Promise<void> {
   if (!imageIds.length) return
   const { tasks, inputImages } = useStore.getState()
-  const stillUsed = new Set<string>()
-  for (const t of tasks) {
-    for (const id of t.inputImageIds || []) stillUsed.add(id)
-    if (t.maskImageId) stillUsed.add(t.maskImageId)
-    for (const id of t.outputImages || []) stillUsed.add(id)
-  }
-  for (const img of inputImages) stillUsed.add(img.id)
+  const stillUsed = collectReferencedImageIds(tasks, inputImages)
   for (const id of imageIds) {
     if (!stillUsed.has(id)) {
       await deleteImage(id)
@@ -162,10 +255,35 @@ export async function rollbackStoredImages(imageIds: string[]): Promise<void> {
   }
 }
 
+async function rollbackStoredImagesSilently(imageIds: string[]): Promise<void> {
+  try {
+    await rollbackStoredImages(imageIds)
+  } catch (err) {
+    useStore
+      .getState()
+      .showToast(`清理临时图片失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+  }
+}
+
 function updateTaskInStoreSilently(taskId: string, patch: Partial<TaskRecord>) {
   void updateTaskInStore(taskId, patch).catch(() => {
     /* updateTaskInStore already surfaced the persistence error */
   })
+}
+
+async function persistTaskSilently(task: TaskRecord) {
+  try {
+    await putTask(task)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const state = useStore.getState()
+    state.setTasks(
+      state.tasks.map((item) =>
+        item.id === task.id ? { ...item, persistenceError: message } : item,
+      ),
+    )
+    state.showToast(`保存任务失败：${message}`, 'error')
+  }
 }
 
 function failSyncHttpTaskIfStillRunning(taskId: string, error: string, now = Date.now()) {
@@ -181,6 +299,16 @@ function failSyncHttpTaskIfStillRunning(taskId: string, error: string, now = Dat
     elapsed: Math.max(0, now - task.createdAt),
   })
   return true
+}
+
+export function createCancelledTask(task: TaskRecord, now = Date.now()): TaskRecord {
+  return {
+    ...task,
+    status: 'error',
+    error: TASK_CANCELLED_ERROR,
+    finishedAt: now,
+    elapsed: Math.max(0, now - task.createdAt),
+  }
 }
 
 /**
@@ -249,10 +377,13 @@ export function scheduleSyncHttpWatchdog(taskId: string, timeoutSeconds: number)
   // (runEnqueuedTasks)队列里排队等待才被取出执行;若按 createdAt 计时,排队时长会被错误计入,
   // 导致后段任务在请求真正开始前(或刚开始)就被误判「请求超时」而假失败。
   // 注:elapsed(用户感知总耗时)仍基于 createdAt,语义不同,不受此影响。
-  const timeoutMs = Math.max(0, timeoutSeconds * 1000)
+  const timeoutMs = resolveChatTimeoutMs(timeoutSeconds, DEFAULT_API_TIMEOUT)
   const timer = setTimeout(() => {
     syncHttpWatchdogTimers.delete(taskId)
-    const failed = failSyncHttpTaskIfStillRunning(taskId, createSyncHttpTimeoutError(timeoutSeconds))
+    const failed = failSyncHttpTaskIfStillRunning(
+      taskId,
+      createSyncHttpTimeoutError(timeoutSeconds),
+    )
     if (failed) useStore.getState().showToast('生成任务请求超时', 'error')
   }, timeoutMs)
   syncHttpWatchdogTimers.set(taskId, timer)
@@ -279,6 +410,14 @@ export function showCodexCliPrompt(force = false, reason = '接口返回的提�
 
 /** 初始化：加载 conversations → 跑迁移 → 加载 tasks → 激活默认对话 → 清理孤立图片 */
 export async function initStore() {
+  if (initStorePromise) return initStorePromise
+  initStorePromise = initStoreOnce().finally(() => {
+    initStorePromise = null
+  })
+  return initStorePromise
+}
+
+async function initStoreOnce() {
   // 启动时间戳:孤儿图清理只删早于此刻创建的图,放过 init 异步窗口里(另一标签)新写入的图。
   const initStartedAt = Date.now()
   /*
@@ -287,13 +426,15 @@ export async function initStore() {
    * ========================================================================
    */
   // 1.1 conversations + tasks 各自 readonly 读取
-  const [rawConversations, storedTasks] = await Promise.all([
+  const [rawConversations, storedTaskRecords] = await Promise.all([
     getAllConversations(),
     getAllTasks(),
   ])
+  const storedTasks = normalizeTasks(storedTaskRecords, initStartedAt)
 
   // 1.2 中断进行中的同步 HTTP 任务
-  const { tasks: interruptedNormalizedTasks, interruptedTasks } = markInterruptedSyncHttpTasks(storedTasks)
+  const { tasks: interruptedNormalizedTasks, interruptedTasks } =
+    markInterruptedSyncHttpTasks(storedTasks)
 
   /*
    * ========================================================================
@@ -305,11 +446,8 @@ export async function initStore() {
   const migrationVersion = readConversationMigrationVersion()
   const normalizedExistingConversations = normalizeConversations(rawConversations)
   // 2.2 已迁移过且无 task 缺 conversationId 时跳过
-  const hasOrphanTasks = interruptedNormalizedTasks.some(
-    (task) => !task.conversationId,
-  )
-  const shouldRunReseed =
-    migrationVersion < CONVERSATION_MIGRATION_VERSION || hasOrphanTasks
+  const hasOrphanTasks = interruptedNormalizedTasks.some((task) => !task.conversationId)
+  const shouldRunReseed = migrationVersion < CONVERSATION_MIGRATION_VERSION || hasOrphanTasks
 
   let finalConversations = normalizedExistingConversations
   let finalTasks = interruptedNormalizedTasks
@@ -331,7 +469,8 @@ export async function initStore() {
       (task) => dirtyIds.has(task.id) || interruptedTasks.some((t) => t.id === task.id),
     )
     // 仅在确有变更时才写库,避免 localStorage 版本号被清空时每次启动空跑一次全表写事务(M4)
-    const conversationsChanged = migratedConversations.length !== normalizedExistingConversations.length
+    const conversationsChanged =
+      migratedConversations.length !== normalizedExistingConversations.length
     if (persistTasks.length || conversationsChanged) {
       await persistConversationMigration(migratedConversations, persistTasks)
     }
@@ -377,27 +516,22 @@ export async function initStore() {
   const persistedInputImages = useStore.getState().inputImages
   const referencedIds = collectReferencedImageIds(tasks, persistedInputImages)
 
-  // 清理孤立图片（不预加载到内存，按需在 ensureImageCached 时加载）
-  const images = await getAllImages()
-  const imageById = new Map(images.map((img) => [img.id, img]))
   // 删除前重读最新引用集:init 的多个 await 窗口里,本页提交或另一标签页可能已新增引用 / 写入新图。
   // 叠加 createdAt >= initStartedAt 守卫,放过 init 期间另一标签刚 storeImage 但其 task 尚未被本页读到的新图。
   // 两层互补,最坏只漏删孤儿(良性存储泄漏),绝不误删在用图。
   const latestState = useStore.getState()
   const latestReferencedIds = collectReferencedImageIds(latestState.tasks, latestState.inputImages)
-  for (const img of images) {
-    if (referencedIds.has(img.id) || latestReferencedIds.has(img.id)) continue
-    if ((img.createdAt ?? 0) >= initStartedAt) continue
-    await deleteImage(img.id)
-    deleteCachedImage(img.id)
-  }
+  await pruneOrphanImages(new Set([...referencedIds, ...latestReferencedIds]), initStartedAt)
+
   // 输入图片需要立即可用（用于显示在输入栏），仍然缓存这部分
   const restoredInputImages = (
     await Promise.all(
       persistedInputImages.map(async (img) => {
         if (img.dataUrl) return img
-        const storedImage = imageById.get(img.id)
-        const dataUrl = storedImage ? await storedImageToDataUrl(storedImage) : ''
+        const storedImage = await getImage(img.id)
+        const dataUrl = storedImage
+          ? await storedImageToDataUrl(storedImage).catch(() => '')
+          : ''
         return { ...img, dataUrl: dataUrl ?? '' }
       }),
     )
@@ -405,8 +539,24 @@ export async function initStore() {
   for (const img of restoredInputImages) {
     setCachedImage(img.id, img.dataUrl)
   }
-  if (restoredInputImages.length !== persistedInputImages.length || restoredInputImages.some((img, index) => img.dataUrl !== persistedInputImages[index]?.dataUrl)) {
-    useStore.getState().setInputImages(restoredInputImages)
+  const latestInputImages = useStore.getState().inputImages
+  const restoredById = new Map(restoredInputImages.map((img) => [img.id, img]))
+  const persistedInputIds = new Set(persistedInputImages.map((img) => img.id))
+  const nextInputImages = latestInputImages.flatMap((img) => {
+    const restored = restoredById.get(img.id)
+    if (restored) return [restored]
+    if (persistedInputIds.has(img.id) && !img.dataUrl) return []
+    return [img]
+  })
+  const changed =
+    nextInputImages.length !== latestInputImages.length ||
+    nextInputImages.some(
+      (img, index) =>
+        img.id !== latestInputImages[index]?.id ||
+        img.dataUrl !== latestInputImages[index]?.dataUrl,
+    )
+  if (changed) {
+    useStore.getState().setInputImages(nextInputImages)
   }
 
   // 请求持久化存储授权:未授权时整个源的 IndexedDB/localStorage 处于浏览器 best-effort 驱逐域,
@@ -447,17 +597,16 @@ async function maybeUpdateConversationOnFirstTask(conversationId: string, newTas
   const isFirstTask = !hadPriorTask
   const isUnnamed = !target.title || target.title === '新对话'
 
-  const nextTitle = isFirstTask && isUnnamed
-    ? deriveConversationTitleFromPrompt(newTask.prompt)
-    : target.title
+  const nextTitle =
+    isFirstTask && isUnnamed ? deriveConversationTitleFromPrompt(newTask.prompt) : target.title
   const updated = {
     ...target,
     title: nextTitle,
     updatedAt: newTask.createdAt,
   }
-  useStore.getState().setConversations(
-    state.conversations.map((c) => (c.id === conversationId ? updated : c)),
-  )
+  useStore
+    .getState()
+    .setConversations(state.conversations.map((c) => (c.id === conversationId ? updated : c)))
   try {
     await putConversation(updated)
   } catch {
@@ -518,6 +667,7 @@ async function enqueueTask(spec: EnqueueTaskSpec): Promise<string | null> {
 
   const latestTasks = useStore.getState().tasks
   useStore.getState().setTasks([task, ...latestTasks])
+  markPendingIndexedDbTaskWrite(taskId)
   try {
     await putTask(task)
   } catch (err) {
@@ -528,6 +678,8 @@ async function enqueueTask(spec: EnqueueTaskSpec): Promise<string | null> {
     state.setTasks(state.tasks.filter((t) => t.id !== taskId))
     state.showToast(`保存任务失败：${message}`, 'error')
     return null
+  } finally {
+    clearPendingIndexedDbTaskWrite(taskId)
   }
   return taskId
 }
@@ -540,7 +692,32 @@ async function enqueueTask(spec: EnqueueTaskSpec): Promise<string | null> {
  */
 async function runEnqueuedTasks(taskIds: string[], limit?: number): Promise<void> {
   const effective = limit ?? useStore.getState().settings.batchConcurrency
-  await mapWithConcurrency(taskIds, effective, (id) => executeTask(id))
+  try {
+    await mapWithConcurrency(taskIds, effective, (id) => executeTask(id))
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const error = `批量调度失败：${message}`
+    const taskIdSet = new Set(taskIds)
+    const now = Date.now()
+    const failedTasks: TaskRecord[] = []
+    const nextTasks = useStore.getState().tasks.map((task) => {
+      if (taskIdSet.has(task.id) && task.status === 'running') {
+        const failedTask: TaskRecord = {
+          ...task,
+          status: 'error',
+          error,
+          finishedAt: now,
+          elapsed: Math.max(0, now - task.createdAt),
+        }
+        failedTasks.push(failedTask)
+        return failedTask
+      }
+      return task
+    })
+    useStore.getState().setTasks(nextTasks)
+    useStore.getState().showToast(error, 'error')
+    await Promise.all(failedTasks.map((task) => persistTaskSilently(task)))
+  }
 }
 
 interface PreparedSubmission {
@@ -564,7 +741,7 @@ async function prepareSubmission(
   options: { allowFullMask?: boolean },
   onFullMaskRetry: () => void,
 ): Promise<PreparedSubmission | null> {
-  const { settings, inputImages, maskDraft, params, showToast, setConfirmDialog } = useStore.getState()
+  const { settings, inputImages, maskDraft, params, setConfirmDialog } = useStore.getState()
 
   let orderedInputImages = inputImages
   let maskImageId: string | null = null
@@ -573,7 +750,10 @@ async function prepareSubmission(
   if (maskDraft) {
     try {
       orderedInputImages = orderInputImagesForMask(inputImages, maskDraft.targetImageId)
-      const coverage = await validateMaskMatchesImage(maskDraft.maskDataUrl, orderedInputImages[0].dataUrl)
+      const coverage = await validateMaskMatchesImage(
+        maskDraft.maskDataUrl,
+        orderedInputImages[0].dataUrl,
+      )
       if (coverage === 'full' && !options.allowFullMask) {
         setConfirmDialog({
           title: '确认编辑整张图片？',
@@ -591,14 +771,26 @@ async function prepareSubmission(
       if (!inputImages.some((img) => img.id === maskDraft.targetImageId)) {
         useStore.getState().clearMaskDraft()
       }
-      showToast(err instanceof Error ? err.message : String(err), 'error')
+      useStore.getState().showToast(err instanceof Error ? err.message : String(err), 'error')
       return null
     }
   }
 
   // 持久化输入图片到 IndexedDB（此前只在内存缓存中）
-  for (const img of orderedInputImages) {
-    await storeImage(img.dataUrl)
+  const storedInputImageIds: string[] = []
+  try {
+    for (const img of orderedInputImages) {
+      storedInputImageIds.push(await storeImage(img.dataUrl))
+    }
+  } catch (err) {
+    await rollbackStoredImagesSilently([
+      ...storedInputImageIds,
+      ...(maskImageId ? [maskImageId] : []),
+    ])
+    useStore
+      .getState()
+      .showToast(`保存输入图片失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+    return null
   }
 
   const normalizedParams = normalizeParamsForSettings(params, settings)
@@ -623,7 +815,9 @@ async function prepareSubmission(
 }
 
 /** 提交新任务 */
-export async function submitTask(options: { allowFullMask?: boolean; allowLargeBatch?: boolean } = {}) {
+export async function submitTask(
+  options: { allowFullMask?: boolean; allowLargeBatch?: boolean } = {},
+) {
   const { settings, prompt, params, showToast, setConfirmDialog } = useStore.getState()
 
   const activeProfile = getActiveApiProfile(settings)
@@ -650,17 +844,18 @@ export async function submitTask(options: { allowFullMask?: boolean; allowLargeB
     return
   }
   if (expansionCount > MAX_PROMPT_EXPANSION && !options.allowLargeBatch) {
-    const totalImages = expansionCount * params.n
+    const previewParams = normalizeParamsForSettings(params, settings)
+    const totalImages = expansionCount * previewParams.n
     setConfirmDialog({
       title: '批量生成确认',
       message:
-        params.n > 1
-          ? `检测到提示词通配，将展开为 ${expansionCount} 条提示词，每条 ${params.n} 张，共 ${totalImages} 张图片。是否继续？`
+        previewParams.n > 1
+          ? `检测到提示词通配，将展开为 ${expansionCount} 条提示词，每条 ${previewParams.n} 张，共 ${totalImages} 张图片。是否继续？`
           : `检测到提示词通配，将展开为 ${expansionCount} 条提示词（共 ${expansionCount} 张图片）。是否继续？`,
       confirmText: '继续生成',
       tone: 'warning',
       action: () => {
-        void submitTask({ ...options, allowLargeBatch: true })
+        return submitTask({ ...options, allowLargeBatch: true })
       },
     })
     return
@@ -668,17 +863,23 @@ export async function submitTask(options: { allowFullMask?: boolean; allowLargeB
 
   const prepared = await prepareSubmission(options, () => {
     // 保留其它确认标志(如 allowLargeBatch),避免大批量 + 整图遮罩双确认互相丢标志形成弹窗循环。
-    void submitTask({ ...options, allowFullMask: true })
+    return submitTask({ ...options, allowFullMask: true })
   })
   if (!prepared) return
-  const { normalizedParams, inputImageIds, maskImageId, maskTargetImageId, activeConversationId } = prepared
+  const { normalizedParams, inputImageIds, maskImageId, maskTargetImageId, activeConversationId } =
+    prepared
 
   // 通配展开:无通配时为 [trimmedPrompt] 原样(与重构前单条路径严格等价)。
   const prompts = expandPromptTemplate(trimmedPrompt)
   const batchId = prompts.length > 1 ? genId() : undefined
   if (prompts.length > 1) {
     // 提交前预告本批将生成的总图片数(展开数 × n),让用户对「一条提示词变多条」有知情(对齐 spec §6)。
-    showToast(`通配将生成 ${prompts.length} 条提示词、共 ${prompts.length * normalizedParams.n} 张图片`, 'success')
+    useStore
+      .getState()
+      .showToast(
+        `通配将生成 ${prompts.length} 条提示词、共 ${prompts.length * normalizedParams.n} 张图片`,
+        'success',
+      )
   }
   const taskIds: string[] = []
   for (const expandedPrompt of prompts) {
@@ -750,39 +951,53 @@ export async function submitGridTask(
   const cellCount = countGridCells(gridConfig)
   const yCount = gridConfig.y ? gridConfig.y.values.length : 1
   if (cellCount > MAX_PROMPT_EXPANSION_HARD) {
-    showToast(`网格将生成 ${cellCount} 格，超过上限 ${MAX_PROMPT_EXPANSION_HARD}，请减少轴取值`, 'error')
+    showToast(
+      `网格将生成 ${cellCount} 格，超过上限 ${MAX_PROMPT_EXPANSION_HARD}，请减少轴取值`,
+      'error',
+    )
     return
   }
   if (cellCount > MAX_PROMPT_EXPANSION && !options.allowLargeBatch) {
-    const totalImages = countGridImages(gridConfig, params.n)
+    const previewParams = normalizeParamsForSettings(params, settings)
+    const totalImages = countGridImages(gridConfig, previewParams.n)
     setConfirmDialog({
       title: '批量生成确认',
       message:
-        params.n > 1
-          ? `网格将生成 ${gridConfig.x.values.length}×${yCount} = ${cellCount} 格，每格 ${params.n} 张，共 ${totalImages} 张图片。是否继续？`
+        previewParams.n > 1
+          ? `网格将生成 ${gridConfig.x.values.length}×${yCount} = ${cellCount} 格，每格 ${previewParams.n} 张，共 ${totalImages} 张图片。是否继续？`
           : `网格将生成 ${gridConfig.x.values.length}×${yCount} = ${cellCount} 格（共 ${cellCount} 张图片）。是否继续？`,
       confirmText: '继续生成',
       tone: 'warning',
       action: () => {
-        void submitGridTask(gridConfig, { ...options, allowLargeBatch: true })
+        return submitGridTask(gridConfig, { ...options, allowLargeBatch: true })
       },
     })
     return
   }
 
   const prepared = await prepareSubmission(options, () => {
-    void submitGridTask(gridConfig, { ...options, allowFullMask: true })
+    return submitGridTask(gridConfig, { ...options, allowFullMask: true })
   })
   if (!prepared) return
-  const { normalizedParams, inputImageIds, maskImageId, maskTargetImageId, activeConversationId } = prepared
+  const { normalizedParams, inputImageIds, maskImageId, maskTargetImageId, activeConversationId } =
+    prepared
 
   // 笛卡尔积(base 用归一化后的 params 与当前 prompt;prompt 轴取值来自通配展开,见 gridExperiment)
-  const cells = buildGridCells(gridConfig, { params: normalizedParams, prompt: prompt.trim() })
+  const cells = buildGridCells(gridConfig, {
+    settings,
+    params: normalizedParams,
+    prompt: prompt.trim(),
+  })
   const gridAxes = { x: gridConfig.x, ...(gridConfig.y ? { y: gridConfig.y } : {}) }
   const batchId = genId()
   // 真实总图 = Σ 各格 n(n 作轴时各格不同)
   const totalImages = cells.reduce((sum, c) => sum + c.params.n, 0)
-  showToast(`网格生成：${gridConfig.x.values.length}×${yCount}，共 ${totalImages} 张图片`, 'success')
+  useStore
+    .getState()
+    .showToast(
+      `网格生成：${gridConfig.x.values.length}×${yCount}，共 ${totalImages} 张图片`,
+      'success',
+    )
 
   const taskIds: string[] = []
   for (const cell of cells) {
@@ -824,24 +1039,30 @@ async function enqueueGridCell(
 ): Promise<string | null> {
   if (!sample.gridAxes) return null
   const { settings, activeConversationId } = useStore.getState()
-  const activeProfile = getActiveApiProfile(settings)
+  const retryProfile = getGridRetryProfile(settings, sample)
+  const retrySettings = settingsWithProfile(settings, retryProfile)
   const xVal = sample.gridAxes.x.values.find((v) => v.key === coord.x)
-  const yVal = coord.y != null ? sample.gridAxes.y?.values.find((v) => v.key === coord.y) : undefined
+  const yVal =
+    coord.y != null ? sample.gridAxes.y?.values.find((v) => v.key === coord.y) : undefined
   if (!xVal) return null
   // 用单值轴重建该格(非轴 params 取 sample 快照),buildGridCells 负责轴 override。
   const cellAxes = {
     x: { ...sample.gridAxes.x, values: [xVal] },
     ...(sample.gridAxes.y && yVal ? { y: { ...sample.gridAxes.y, values: [yVal] } } : {}),
   }
-  const [cell] = buildGridCells(cellAxes, { params: { ...sample.params }, prompt: sample.prompt })
+  const [cell] = buildGridCells(cellAxes, {
+    settings: retrySettings,
+    params: normalizeParamsForSettings(sample.params, retrySettings),
+    prompt: sample.prompt,
+  })
   if (!cell) return null
   return enqueueTask({
     prompt: cell.prompt,
     params: cell.params,
-    apiProvider: activeProfile.provider,
-    apiProfileId: activeProfile.id,
-    apiProfileName: activeProfile.name,
-    apiModel: activeProfile.model,
+    apiProvider: retryProfile.provider,
+    apiProfileId: retryProfile.id,
+    apiProfileName: retryProfile.name,
+    apiModel: retryProfile.model,
     inputImageIds: [...sample.inputImageIds],
     maskTargetImageId: sample.maskTargetImageId ?? null,
     maskImageId: sample.maskImageId ?? null,
@@ -852,9 +1073,32 @@ async function enqueueGridCell(
   })
 }
 
+function getGridRetryProfile(settings: AppSettings, sample: TaskRecord): ApiProfile {
+  const hasPinnedProfile = Boolean(
+    sample.apiProfileId || sample.apiProfileName || sample.apiProvider || sample.apiModel,
+  )
+  if (hasPinnedProfile) {
+    const resolved = resolveExecutionProfile(settings, sample)
+    if (resolved) return resolved.profile
+  }
+  return getActiveApiProfile(settings)
+}
+
+function settingsWithProfile(settings: AppSettings, profile: ApiProfile): AppSettings {
+  const profiles = settings.profiles.some((candidate) => candidate.id === profile.id)
+    ? settings.profiles.map((candidate) => (candidate.id === profile.id ? profile : candidate))
+    : [profile, ...settings.profiles]
+  return normalizeSettings({ ...settings, profiles, activeProfileId: profile.id })
+}
+
 /** 补跑单个网格格(结果回到矩阵原坐标)。 */
-export function retryGridCell(batchId: string, coord: { x: string; y?: string }): void {
-  const sample = useStore.getState().tasks.find((t) => t.batchId === batchId && t.gridAxes)
+export function retryGridCell(
+  batchId: string,
+  coord: { x: string; y?: string },
+  sampleOverride?: TaskRecord,
+): void {
+  const sample =
+    sampleOverride ?? useStore.getState().tasks.find((t) => t.batchId === batchId && t.gridAxes)
   if (!sample) return
   void enqueueGridCell(batchId, coord, sample).then((id) => {
     if (id) executeTask(id)
@@ -862,31 +1106,45 @@ export function retryGridCell(batchId: string, coord: { x: string; y?: string })
 }
 
 /** 补跑网格中「缺失或全部失败」的格(scope:全部 / 指定行 / 指定列)。 */
-export function retryGridMissing(batchId: string, scope: 'all' | { row: string } | { col: string }): void {
+export function retryGridMissing(
+  batchId: string,
+  scope: 'all' | { row: string } | { col: string },
+): void {
   const members = useStore.getState().tasks.filter((t) => t.batchId === batchId && t.gridAxes)
   const sample = members[0]
   const matrix = reconstructMatrix(members)
   if (!sample || !matrix) return
 
-  const targets: { x: string; y?: string }[] = []
+  const targets: Array<{ coord: { x: string; y?: string }; sample: TaskRecord }> = []
   for (const col of matrix.cols) {
     if (typeof scope === 'object' && 'col' in scope && col.key !== scope.col) continue
     for (const row of matrix.rows) {
       if (typeof scope === 'object' && 'row' in scope && row.key !== scope.row) continue
       const cellTasks = matrix.cellTasks(col.key, row.key)
-      const hasLive = cellTasks.some((t) => t.status === 'done' || t.status === 'running')
-      if (!hasLive) targets.push({ x: col.key, ...(matrix.axes.y ? { y: row.key } : {}) })
+      const representative = latestGridCellTask(cellTasks)
+      const hasLive = representative?.status === 'done' || representative?.status === 'running'
+      if (!hasLive) {
+        targets.push({
+          coord: { x: col.key, ...(matrix.axes.y ? { y: row.key } : {}) },
+          sample: representative ?? sample,
+        })
+      }
     }
   }
   if (!targets.length) return
   void (async () => {
     const ids: string[] = []
-    for (const coord of targets) {
-      const id = await enqueueGridCell(batchId, coord, sample)
+    for (const target of targets) {
+      const id = await enqueueGridCell(batchId, target.coord, target.sample)
       if (id) ids.push(id)
     }
     if (ids.length) void runEnqueuedTasks(ids)
   })()
+}
+
+function latestGridCellTask(tasks: TaskRecord[]): TaskRecord | null {
+  if (!tasks.length) return null
+  return tasks.reduce((latest, task) => (task.createdAt > latest.createdAt ? task : latest))
 }
 
 /**
@@ -957,6 +1215,7 @@ async function executeTask(taskId: string) {
   // 即便随后控制器被移出 map,这个 detached signal 仍能让下游 fetch 观察到 aborted=true 而真正中止;
   // 否则在输入图 await 窗口内取消时,callImageApi 再从 map 读会拿到 undefined,请求跑到 provider timeout 才停。
   const requestSignal = taskAbortControllers.get(taskId)?.signal
+  const outputIds: string[] = []
 
   try {
     // 获取输入图片 data URLs
@@ -1000,26 +1259,32 @@ async function executeTask(taskId: string) {
     if (!latestBeforeSuccess || latestBeforeSuccess.status !== 'running') return
 
     // 存储输出图片
-    const outputIds: string[] = []
     for (const dataUrl of result.images) {
       const imgId = await storeImage(dataUrl, 'generated')
       setCachedImage(imgId, dataUrl)
       outputIds.push(imgId)
     }
-    const actualParamsByImage = result.actualParamsList?.reduce<Record<string, Partial<TaskParams>>>((acc, params, index) => {
+    const actualParamsByImage = result.actualParamsList?.reduce<
+      Record<string, Partial<TaskParams>>
+    >((acc, params, index) => {
       const imgId = outputIds[index]
       if (imgId && params && Object.keys(params).length > 0) acc[imgId] = params
       return acc
     }, {})
-    const revisedPromptByImage = result.revisedPrompts?.reduce<Record<string, string>>((acc, revisedPrompt, index) => {
-      const imgId = outputIds[index]
-      if (imgId && revisedPrompt && revisedPrompt.trim()) acc[imgId] = revisedPrompt
-      return acc
-    }, {})
+    const revisedPromptByImage = result.revisedPrompts?.reduce<Record<string, string>>(
+      (acc, revisedPrompt, index) => {
+        const imgId = outputIds[index]
+        if (imgId && revisedPrompt && revisedPrompt.trim()) acc[imgId] = revisedPrompt
+        return acc
+      },
+      {},
+    )
     const promptWasRevised = result.revisedPrompts?.some(
       (revisedPrompt) => revisedPrompt?.trim() && revisedPrompt.trim() !== finalPrompt.trim(),
     )
-    const hasRevisedPromptValue = result.revisedPrompts?.some((revisedPrompt) => revisedPrompt?.trim())
+    const hasRevisedPromptValue = result.revisedPrompts?.some((revisedPrompt) =>
+      revisedPrompt?.trim(),
+    )
     // codexCli 提示引导的是 active profile 的设置,执行 profile 与 active 不一致(排队期间切走)时不提示
     if (
       executingOnActiveProfile &&
@@ -1038,25 +1303,38 @@ async function executeTask(taskId: string) {
     const latestBeforeUpdate = useStore.getState().tasks.find((t) => t.id === taskId)
     if (!latestBeforeUpdate || latestBeforeUpdate.status !== 'running') {
       // 任务在写图期间被删/取消:回滚已存但无引用的输出图,避免孤儿记录泄漏
-      await rollbackStoredImages(outputIds)
+      await rollbackStoredImagesSilently(outputIds)
       return
     }
+    const finishedAt = Date.now()
     await updateTaskInStore(taskId, {
       outputImages: outputIds,
       actualParams: { ...result.actualParams, n: outputIds.length },
-      actualParamsByImage: actualParamsByImage && Object.keys(actualParamsByImage).length > 0 ? actualParamsByImage : undefined,
-      revisedPromptByImage: revisedPromptByImage && Object.keys(revisedPromptByImage).length > 0 ? revisedPromptByImage : undefined,
+      actualParamsByImage:
+        actualParamsByImage && Object.keys(actualParamsByImage).length > 0
+          ? actualParamsByImage
+          : undefined,
+      revisedPromptByImage:
+        revisedPromptByImage && Object.keys(revisedPromptByImage).length > 0
+          ? revisedPromptByImage
+          : undefined,
       partialFailureCount: result.partialFailureCount,
-      partialFailureMessage: result.partialFailureMessage,
+      partialFailureMessage:
+        typeof result.partialFailureMessage === 'string'
+          ? result.partialFailureMessage.slice(0, MAX_TASK_TEXT_LEN)
+          : undefined,
       status: 'done',
-      finishedAt: Date.now(),
-      elapsed: Date.now() - task.createdAt,
+      finishedAt,
+      elapsed: Math.max(0, finishedAt - task.createdAt),
     })
 
     if (result.partialFailureCount) {
       useStore
         .getState()
-        .showToast(`部分完成：成功 ${outputIds.length} 张，失败 ${result.partialFailureCount} 个请求`, 'error')
+        .showToast(
+          `部分完成：成功 ${outputIds.length} 张，失败 ${result.partialFailureCount} 个请求`,
+          'error',
+        )
     } else {
       useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
     }
@@ -1071,16 +1349,18 @@ async function executeTask(taskId: string) {
     }
   } catch (err) {
     clearSyncHttpWatchdogTimer(taskId)
+    await rollbackStoredImagesSilently(outputIds)
     // 任务可能在请求进行中被删除/取消:find 不到或已非 running 时直接退出,不要用 `?? task` 复活已删任务。
     const latestTask = useStore.getState().tasks.find((t) => t.id === taskId)
     if (!latestTask || latestTask.status !== 'running') return
     // L7:用 silent 变体(内部已 toast + 标 persistenceError 并吞错),避免错误态写库再次失败时
     // 越过 catch 逃逸成未捕获 rejection、并跳过下面的 setDetailTaskId。
+    const finishedAt = Date.now()
     updateTaskInStoreSilently(taskId, {
       status: 'error',
-      error: err instanceof Error ? err.message : String(err),
-      finishedAt: Date.now(),
-      elapsed: Date.now() - task.createdAt,
+      error: normalizeTaskRuntimeText(err),
+      finishedAt,
+      elapsed: Math.max(0, finishedAt - task.createdAt),
     })
     // 批量任务(batchId 存在)失败时逐个自动弹详情会互相打架,改由失败卡片的 error 态呈现;
     // 单任务保持原行为:失败即弹详情。
@@ -1089,16 +1369,14 @@ async function executeTask(taskId: string) {
     clearTaskAbortController(taskId)
     // 释放输入图片的内存缓存（已持久化到 IndexedDB，后续按需从 DB 加载）
     for (const imgId of task.inputImageIds) {
-      deleteCachedImage(imgId)
+      evictCachedImageDataUrl(imgId)
     }
   }
 }
 
 export async function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>): Promise<void> {
   const { tasks, setTasks } = useStore.getState()
-  const updated = tasks.map((t) =>
-    t.id === taskId ? { ...t, ...patch } : t,
-  )
+  const updated = tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t))
   setTasks(updated)
   const task = updated.find((t) => t.id === taskId)
   if (!task) return
@@ -1108,9 +1386,11 @@ export async function updateTaskInStore(taskId: string, patch: Partial<TaskRecor
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     const state = useStore.getState()
-    state.setTasks(state.tasks.map((item) =>
-      item.id === taskId ? { ...item, persistenceError: message } : item,
-    ))
+    state.setTasks(
+      state.tasks.map((item) =>
+        item.id === taskId ? { ...item, persistenceError: message } : item,
+      ),
+    )
     state.showToast(`保存任务失败：${message}`, 'error')
     throw err
   }
@@ -1138,11 +1418,7 @@ export function getTaskSortKey(task: TaskRecord): number {
  * 将 taskId 移到 prevTaskId 与 nextTaskId 之间。任一邻居为 null 表示拖到最前/最后。
  * 常规走 gap-based 中点(仅写被拖动任务);中点逼近浮点精度时,对全量任务整数化重排自愈。
  */
-export function reorderTask(
-  taskId: string,
-  prevTaskId: string | null,
-  nextTaskId: string | null,
-) {
+export function reorderTask(taskId: string, prevTaskId: string | null, nextTaskId: string | null) {
   const { tasks, setTasks } = useStore.getState()
   const prev = prevTaskId ? tasks.find((t) => t.id === prevTaskId) : null
   const next = nextTaskId ? tasks.find((t) => t.id === nextTaskId) : null
@@ -1152,7 +1428,9 @@ export function reorderTask(
   // 拖拽本就限定在无筛选/同对话视图,prev/next 也来自当前对话,故子集已足够。
   if (prev && next && Math.abs(getTaskSortKey(prev) - getTaskSortKey(next)) < SORT_EPSILON) {
     const dragged = tasks.find((t) => t.id === taskId)
-    const scoped = dragged ? tasks.filter((t) => t.conversationId === dragged.conversationId) : tasks
+    const scoped = dragged
+      ? tasks.filter((t) => t.conversationId === dragged.conversationId)
+      : tasks
     const orderedIds = [...scoped]
       .sort((a, b) => {
         const ka = getTaskSortKey(a)
@@ -1174,7 +1452,7 @@ export function reorderTask(
       return t
     })
     setTasks(updated)
-    void Promise.all(changed.map((t) => putTask(t).catch(() => {})))
+    void Promise.all(changed.map((t) => persistTaskSilently(t)))
     return
   }
 
@@ -1196,7 +1474,7 @@ export function reorderTask(
 export async function retryTask(task: TaskRecord) {
   // 网格 task 重试走补跑分支:结果回到矩阵原坐标(否则跑出矩阵成散图)。
   if (task.batchId && task.gridCoord) {
-    retryGridCell(task.batchId, task.gridCoord)
+    retryGridCell(task.batchId, task.gridCoord, task)
     return
   }
   const { settings, activeConversationId } = useStore.getState()
@@ -1219,22 +1497,45 @@ export async function retryTask(task: TaskRecord) {
 
 /** 复用配置 */
 export async function reuseConfig(task: TaskRecord) {
-  const { settings, setPrompt, setParams, setInputImages, setMaskDraft, clearMaskDraft, showToast } = useStore.getState()
+  const { settings, setPrompt, setInputImages, setMaskDraft, clearMaskDraft } = useStore.getState()
   setPrompt(task.prompt)
-  setParams(normalizeParamsForSettings(task.params, settings))
+  useStore.setState({ params: normalizeParamsForSettings(task.params, settings) })
 
   // 恢复输入图片
   const imgs: InputImage[] = []
+  let failedImages = 0
+  let skippedImages = 0
+  const seenInputImageIds = new Set<string>()
   for (const imgId of task.inputImageIds) {
-    const dataUrl = await ensureImageCached(imgId)
+    if (seenInputImageIds.has(imgId)) continue
+    seenInputImageIds.add(imgId)
+    if (imgs.length >= MAX_INPUT_IMAGES_PER_SUBMISSION) {
+      skippedImages++
+      continue
+    }
+    let dataUrl: string | undefined
+    try {
+      dataUrl = await ensureImageCached(imgId)
+    } catch {
+      failedImages++
+      continue
+    }
     if (dataUrl) {
       imgs.push({ id: imgId, dataUrl })
+    } else {
+      failedImages++
     }
   }
   setInputImages(imgs)
-  const maskTargetImageId = task.maskTargetImageId ?? (task.maskImageId ? task.inputImageIds[0] : null)
+  const maskTargetImageId =
+    task.maskTargetImageId ?? (task.maskImageId ? task.inputImageIds[0] : null)
   if (maskTargetImageId && task.maskImageId && imgs.some((img) => img.id === maskTargetImageId)) {
-    const maskDataUrl = await ensureImageCached(task.maskImageId)
+    let maskDataUrl: string | undefined
+    try {
+      maskDataUrl = await ensureImageCached(task.maskImageId)
+    } catch {
+      failedImages++
+    }
     if (maskDataUrl) {
       setMaskDraft({
         targetImageId: maskTargetImageId,
@@ -1247,164 +1548,420 @@ export async function reuseConfig(task: TaskRecord) {
   } else {
     clearMaskDraft()
   }
-  showToast('已复用配置到输入框', 'success')
+  if (failedImages) {
+    useStore.getState().showToast(`已复用配置，但 ${failedImages} 张图片无法读取`, 'error')
+    return
+  }
+  if (skippedImages) {
+    useStore
+      .getState()
+      .showToast(`已复用配置，但超过上限的 ${skippedImages} 张参考图未加入`, 'error')
+    return
+  }
+  useStore.getState().showToast('已复用配置到输入框', 'success')
 }
 
 /** 编辑输出：将输出图加入输入 */
 export async function editOutputs(task: TaskRecord) {
-  const { inputImages, addInputImage, showToast } = useStore.getState()
+  const { inputImages, addInputImage } = useStore.getState()
   if (!task.outputImages?.length) return
 
   let added = 0
+  let failed = 0
+  let skippedFull = 0
+  const seenImageIds = new Set(inputImages.map((image) => image.id))
   for (const imgId of task.outputImages) {
-    if (inputImages.find((i) => i.id === imgId)) continue
-    const dataUrl = await ensureImageCached(imgId)
+    if (seenImageIds.has(imgId)) continue
+    if (useStore.getState().inputImages.length >= MAX_INPUT_IMAGES_PER_SUBMISSION) {
+      seenImageIds.add(imgId)
+      skippedFull++
+      continue
+    }
+    let dataUrl: string | undefined
+    try {
+      dataUrl = await ensureImageCached(imgId)
+    } catch {
+      failed++
+      continue
+    }
     if (dataUrl) {
+      const beforeInputCount = useStore.getState().inputImages.length
       addInputImage({ id: imgId, dataUrl })
-      added++
+      const afterInputImages = useStore.getState().inputImages
+      const isNowInput = afterInputImages.some((image) => image.id === imgId)
+      if (isNowInput) seenImageIds.add(imgId)
+      if (isNowInput && afterInputImages.length > beforeInputCount) {
+        added++
+      } else if (!isNowInput && afterInputImages.length >= MAX_INPUT_IMAGES_PER_SUBMISSION) {
+        seenImageIds.add(imgId)
+        skippedFull++
+      }
+    } else {
+      failed++
     }
   }
-  showToast(`已添加 ${added} 张输出图到输入`, 'success')
+  if (failed) {
+    useStore.getState().showToast(`添加输出图失败：${failed} 张图片无法读取`, 'error')
+    return
+  }
+  if (skippedFull && added === 0) {
+    useStore
+      .getState()
+      .showToast(`参考图数量已达上限（${MAX_INPUT_IMAGES_PER_SUBMISSION} 张）`, 'error')
+    return
+  }
+  if (added === 0) {
+    useStore.getState().showToast('输出图已在输入中', 'info')
+    return
+  }
+  useStore.getState().showToast(`已添加 ${added} 张输出图到输入`, 'success')
 }
 
 /** 删除多条任务 */
 export async function removeMultipleTasks(taskIds: string[]) {
-  const { tasks, setTasks, inputImages, showToast, selectedTaskIds } = useStore.getState()
+  const { tasks, setTasks } = useStore.getState()
 
-  if (!taskIds.length) return
+  const requestedIds = new Set(taskIds)
+  const existingTaskIds = new Set(tasks.map((task) => task.id))
+  const deleteTaskIds = taskIds.filter((id) => existingTaskIds.has(id))
+  const toDelete = new Set(deleteTaskIds)
+  if (!toDelete.size) {
+    const newSelection = useStore.getState().selectedTaskIds.filter((id) => !requestedIds.has(id))
+    useStore.getState().setSelectedTaskIds(newSelection)
+    return
+  }
 
-  const toDelete = new Set(taskIds)
-  const remaining = tasks.filter(t => !toDelete.has(t.id))
+  const remaining = tasks.filter((t) => !toDelete.has(t.id))
+  const restoreAfterFailedDelete = new Map<string, TaskRecord>()
+  const cancelledRestoreIds = new Set<string>()
+  const deleteStartedAt = Date.now()
 
   // 收集所有被删除任务的关联图片
   const deletedImageIds = new Set<string>()
   for (const t of tasks) {
     if (toDelete.has(t.id)) {
-      if (t.status === 'running') terminateTaskRuntime(t.id)
-      for (const id of t.inputImageIds || []) deletedImageIds.add(id)
-      if (t.maskImageId) deletedImageIds.add(t.maskImageId)
-      for (const id of t.outputImages || []) deletedImageIds.add(id)
+      if (t.status === 'running') {
+        terminateTaskRuntime(t.id)
+        restoreAfterFailedDelete.set(t.id, createCancelledTask(t, deleteStartedAt))
+        cancelledRestoreIds.add(t.id)
+      } else {
+        restoreAfterFailedDelete.set(t.id, t)
+      }
+      for (const id of getTaskImageIds(t)) deletedImageIds.add(id)
     }
   }
 
   setTasks(remaining)
-  for (const id of taskIds) {
-    await dbDeleteTask(id)
+  const confirmedDeletedIds = new Set<string>()
+  try {
+    for (const id of deleteTaskIds) {
+      await dbDeleteTask(id)
+      confirmedDeletedIds.add(id)
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const latest = useStore.getState()
+    const presentIds = new Set(latest.tasks.map((t) => t.id))
+    const staleRequestedIds = [...requestedIds].filter((id) => !existingTaskIds.has(id))
+    const unconfirmedTasks = tasks
+      .filter((t) => toDelete.has(t.id) && !confirmedDeletedIds.has(t.id))
+      .map((t) => restoreAfterFailedDelete.get(t.id) ?? t)
+    const cancelledRestores = unconfirmedTasks.filter((t) => cancelledRestoreIds.has(t.id))
+    latest.setTasks([...unconfirmedTasks.filter((t) => !presentIds.has(t.id)), ...latest.tasks])
+    clearTransientUiReferencesForDeletedTasks(
+      tasks.filter((task) => confirmedDeletedIds.has(task.id)),
+    )
+    const selectionWithoutStaleRequestedIds = useStore
+      .getState()
+      .selectedTaskIds.filter((id) => !staleRequestedIds.includes(id))
+    useStore.getState().setSelectedTaskIds(selectionWithoutStaleRequestedIds)
+    latest.showToast(`删除记录失败：${message}`, 'error')
+    await Promise.all(cancelledRestores.map((t) => persistTaskSilently(t)))
+    throw err
+  }
+
+  clearTransientUiReferencesForDeletedTasks(tasks.filter((task) => toDelete.has(task.id)))
+  const afterConfirmedDelete = useStore.getState()
+  const selectionWithoutRequestedIds = afterConfirmedDelete.selectedTaskIds.filter(
+    (id) => !requestedIds.has(id),
+  )
+  if (selectionWithoutRequestedIds.length !== afterConfirmedDelete.selectedTaskIds.length) {
+    afterConfirmedDelete.setSelectedTaskIds(selectionWithoutRequestedIds)
   }
 
   // 找出其他任务仍引用的图片
-  const stillUsed = new Set<string>()
-  for (const t of remaining) {
-    for (const id of t.inputImageIds || []) stillUsed.add(id)
-    if (t.maskImageId) stillUsed.add(t.maskImageId)
-    for (const id of t.outputImages || []) stillUsed.add(id)
-  }
-  for (const img of inputImages) stillUsed.add(img.id)
+  const latestBeforeImagePrune = useStore.getState()
+  const stillUsed = collectReferencedImageIds(
+    latestBeforeImagePrune.tasks,
+    latestBeforeImagePrune.inputImages,
+  )
 
   // 删除孤立图片
-  for (const imgId of deletedImageIds) {
-    if (!stillUsed.has(imgId)) {
-      await deleteImage(imgId)
-      deleteCachedImage(imgId)
+  try {
+    for (const imgId of deletedImageIds) {
+      if (!stillUsed.has(imgId)) {
+        await deleteImage(imgId)
+        deleteCachedImage(imgId)
+      }
     }
+  } catch (err) {
+    useStore
+      .getState()
+      .showToast(
+        `记录已删除，但清理关联图片失败：${err instanceof Error ? err.message : String(err)}`,
+        'error',
+      )
+    return
   }
 
-  // 如果删除的任务在选中列表中，则移除
-  const newSelection = selectedTaskIds.filter(id => !toDelete.has(id))
-  if (newSelection.length !== selectedTaskIds.length) {
-    useStore.getState().setSelectedTaskIds(newSelection)
-  }
-
-  showToast(`已删除 ${taskIds.length} 条记录`, 'success')
+  useStore.getState().showToast(`已删除 ${deleteTaskIds.length} 条记录`, 'success')
 }
 
 /** 删除单条任务 */
 export async function removeTask(task: TaskRecord) {
-  const { tasks, setTasks, inputImages, showToast } = useStore.getState()
+  const { tasks, setTasks } = useStore.getState()
+  const currentTask = tasks.find((item) => item.id === task.id)
+  if (!currentTask) {
+    clearTransientUiReferencesForDeletedTasks([task])
+    return
+  }
+
+  const restoreAfterFailedDelete =
+    currentTask.status === 'running' ? createCancelledTask(currentTask) : currentTask
 
   // 删除在途任务前先中止请求并清 watchdog/controller,避免请求继续跑、watchdog 误报、控制器残留
-  if (task.status === 'running') terminateTaskRuntime(task.id)
+  if (currentTask.status === 'running') terminateTaskRuntime(currentTask.id)
 
   // 收集此任务关联的图片
-  const taskImageIds = new Set([
-    ...(task.inputImageIds || []),
-    ...(task.maskImageId ? [task.maskImageId] : []),
-    ...(task.outputImages || []),
-  ])
+  const taskImageIds = new Set(getTaskImageIds(currentTask))
 
   // 从列表移除
-  const remaining = tasks.filter((t) => t.id !== task.id)
+  const remaining = tasks.filter((t) => t.id !== currentTask.id)
   setTasks(remaining)
-  await dbDeleteTask(task.id)
+  try {
+    await dbDeleteTask(currentTask.id)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const latest = useStore.getState()
+    latest.setTasks(
+      latest.tasks.some((t) => t.id === currentTask.id)
+        ? latest.tasks
+        : [restoreAfterFailedDelete, ...latest.tasks],
+    )
+    latest.showToast(`删除记录失败：${message}`, 'error')
+    if (currentTask.status === 'running') await persistTaskSilently(restoreAfterFailedDelete)
+    throw err
+  }
+
+  clearTransientUiReferencesForDeletedTasks([currentTask])
 
   // 找出其他任务仍引用的图片
-  const stillUsed = new Set<string>()
-  for (const t of remaining) {
-    for (const id of t.inputImageIds || []) stillUsed.add(id)
-    if (t.maskImageId) stillUsed.add(t.maskImageId)
-    for (const id of t.outputImages || []) stillUsed.add(id)
-  }
-  for (const img of inputImages) stillUsed.add(img.id)
+  const latestBeforeImagePrune = useStore.getState()
+  const stillUsed = collectReferencedImageIds(
+    latestBeforeImagePrune.tasks,
+    latestBeforeImagePrune.inputImages,
+  )
 
   // 删除孤立图片
-  for (const imgId of taskImageIds) {
-    if (!stillUsed.has(imgId)) {
-      await deleteImage(imgId)
-      deleteCachedImage(imgId)
+  try {
+    for (const imgId of taskImageIds) {
+      if (!stillUsed.has(imgId)) {
+        await deleteImage(imgId)
+        deleteCachedImage(imgId)
+      }
     }
+  } catch (err) {
+    useStore
+      .getState()
+      .showToast(
+        `记录已删除，但清理关联图片失败：${err instanceof Error ? err.message : String(err)}`,
+        'error',
+      )
+    return
   }
 
-  showToast('记录已删除', 'success')
+  useStore.getState().showToast('记录已删除', 'success')
 }
 
 /** 输入图片单文件大小上限;上传/拖放/粘贴最终都汇聚到 addImageFromFile,在此单点设限即覆盖三入口。 */
 export const MAX_INPUT_IMAGE_BYTES = 50 * 1024 * 1024
+const ADD_IMAGE_FROM_URL_TIMEOUT_MS = 60_000
 
 /** 输入图片解码后总像素(宽×高)上限。仅限文件字节不够:高压缩比图可解码成上亿像素位图,缩略图/遮罩主图全尺寸解码时 OOM。 */
 export const MAX_INPUT_IMAGE_PIXELS = 64 * 1024 * 1024 // 约 6400 万像素(8192×8192)
 
-async function assertImagePixelLimit(dataUrl: string): Promise<void> {
+export async function assertImagePixelLimit(dataUrl: string): Promise<void> {
   const { width, height } = await getImageDimensions(dataUrl)
   if (width * height > MAX_INPUT_IMAGE_PIXELS) {
-    throw new Error(`图片分辨率过大:${width}×${height} 超过约 ${Math.round(MAX_INPUT_IMAGE_PIXELS / 1_000_000)} 百万像素上限`)
+    throw new Error(
+      `图片分辨率过大:${width}×${height} 超过约 ${Math.round(MAX_INPUT_IMAGE_PIXELS / 1_000_000)} 百万像素上限`,
+    )
   }
 }
 
 /** 添加图片到输入（文件上传） */
 export async function addImageFromFile(file: File): Promise<void> {
-  if (!file.type.startsWith('image/')) return
+  if (!getImageFileMime(file)) return
+  if (useStore.getState().inputImages.length >= MAX_INPUT_IMAGES_PER_SUBMISSION) {
+    throw new Error(`参考图数量已达上限（${MAX_INPUT_IMAGES_PER_SUBMISSION} 张）`)
+  }
   if (file.size > MAX_INPUT_IMAGE_BYTES) {
     throw new Error(`图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
   }
-  const dataUrl = await fileToDataUrl(file)
+  const dataUrl = await fileToImageDataUrl(file)
   await assertImagePixelLimit(dataUrl)
   const id = await storeImage(dataUrl, 'upload')
   setCachedImage(id, dataUrl)
+  const beforeCount = useStore.getState().inputImages.length
   useStore.getState().addInputImage({ id, dataUrl })
+  const afterInputImages = useStore.getState().inputImages
+  if (
+    !afterInputImages.some((image) => image.id === id) ||
+    afterInputImages.length === beforeCount
+  ) {
+    await rollbackStoredImagesSilently([id])
+    throw new Error(
+      afterInputImages.some((image) => image.id === id)
+        ? '图片已在参考图中'
+        : `参考图数量已达上限（${MAX_INPUT_IMAGES_PER_SUBMISSION} 张）`,
+    )
+  }
+}
+
+function createAbortError(): DOMException {
+  return new DOMException('aborted', 'AbortError')
+}
+
+function readBlobWithAbort(response: Response, signal: AbortSignal): Promise<Blob> {
+  if (signal.aborted) throw createAbortError()
+  if (!response.body) {
+    return new Promise((resolve, reject) => {
+      const onAbort = () => reject(createAbortError())
+      signal.addEventListener('abort', onAbort, { once: true })
+      try {
+        response
+          .blob()
+          .then(resolve, reject)
+          .finally(() => {
+            signal.removeEventListener('abort', onAbort)
+          })
+      } catch (err) {
+        signal.removeEventListener('abort', onAbort)
+        reject(err)
+      }
+    })
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = response.body!.getReader()
+    const chunks: Uint8Array[] = []
+    let bytes = 0
+    let settled = false
+    const cleanup = () => {
+      signal.removeEventListener('abort', onAbort)
+      try {
+        reader.releaseLock()
+      } catch {
+        /* Ignore cleanup errors; abort/read failures carry the useful signal. */
+      }
+    }
+    const finish = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      fn()
+    }
+    const onAbort = () => {
+      void reader.cancel().catch(() => undefined)
+      finish(() => reject(createAbortError()))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+
+    const pump = (): void => {
+      try {
+        reader.read().then(
+          ({ done, value }) => {
+            if (done) {
+              finish(() =>
+                resolve(
+                  new Blob(
+                    chunks.map((chunk) => new Uint8Array(chunk)),
+                    { type: response.headers.get('Content-Type') || 'application/octet-stream' },
+                  ),
+                ),
+              )
+              return
+            }
+            if (value) {
+              bytes += value.byteLength
+              if (bytes > MAX_INPUT_IMAGE_BYTES) {
+                void reader.cancel().catch(() => undefined)
+                finish(() =>
+                  reject(
+                    new Error(
+                      `图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`,
+                    ),
+                  ),
+                )
+                return
+              }
+              chunks.push(value)
+            }
+            pump()
+          },
+          (err) => finish(() => reject(err)),
+        )
+      } catch (err) {
+        finish(() => reject(err))
+      }
+    }
+    pump()
+  })
 }
 
 /** 添加图片到输入（右键菜单）—— 支持 data/blob/http URL */
 export async function addImageFromUrl(src: string): Promise<void> {
-  const res = await fetch(src)
-  const blob = await res.blob()
-  if (!blob.type.startsWith('image/')) throw new Error('不是有效的图片')
-  if (blob.size > MAX_INPUT_IMAGE_BYTES) {
-    throw new Error(`图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
+  if (useStore.getState().inputImages.length >= MAX_INPUT_IMAGES_PER_SUBMISSION) {
+    throw new Error(`参考图数量已达上限（${MAX_INPUT_IMAGES_PER_SUBMISSION} 张）`)
   }
-  const dataUrl = await blobToDataUrl(blob)
-  await assertImagePixelLimit(dataUrl)
-  const id = await storeImage(dataUrl, 'upload')
-  setCachedImage(id, dataUrl)
-  useStore.getState().addInputImage({ id, dataUrl })
-}
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), ADD_IMAGE_FROM_URL_TIMEOUT_MS)
+  try {
+    const res = await fetch(src, { signal: controller.signal })
+    if (!res.ok) throw new Error(`图片 URL 下载失败：HTTP ${res.status}`)
+    const contentLength = Number(res.headers.get('Content-Length'))
+    if (Number.isFinite(contentLength) && contentLength > MAX_INPUT_IMAGE_BYTES) {
+      throw new Error(`图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
+    }
+    const blob = await readBlobWithAbort(res, controller.signal)
+    if (!blob.type.startsWith('image/')) throw new Error('不是有效的图片')
+    if (blob.size > MAX_INPUT_IMAGE_BYTES) {
+      throw new Error(`图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
+    }
+    const dataUrl = await blobToDataUrl(blob)
+    await assertImagePixelLimit(dataUrl)
+    const id = await storeImage(dataUrl, 'upload')
+    setCachedImage(id, dataUrl)
+    const beforeCount = useStore.getState().inputImages.length
+    useStore.getState().addInputImage({ id, dataUrl })
+    const afterInputImages = useStore.getState().inputImages
+    if (
+      !afterInputImages.some((image) => image.id === id) ||
+      afterInputImages.length === beforeCount
+    ) {
+      await rollbackStoredImagesSilently([id])
+      throw new Error(
+        afterInputImages.some((image) => image.id === id)
+          ? '图片已在参考图中'
+          : `参考图数量已达上限（${MAX_INPUT_IMAGES_PER_SUBMISSION} 张）`,
+      )
+    }
+  } catch (err) {
+    if (controller.signal.aborted) throw new Error('图片 URL 下载超时', { cause: err })
+    throw err
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store'
-import { DEFAULT_PARAMS } from '../../types'
+import { DEFAULT_PARAMS, type TaskParams } from '../../types'
 import { getOutputImageLimitForSettings } from '../../lib/api/paramCompatibility'
 import { normalizeImageSize } from '../../lib/image/size'
 import Select from '../Select'
@@ -9,11 +9,22 @@ import ButtonTooltip from './ButtonTooltip'
 const SELECT_CLASS =
   'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-xs transition-all duration-200 shadow-sm'
 
-const QUALITY_OPTIONS = [
+const QUALITY_OPTIONS: Array<{ label: string; value: TaskParams['quality'] }> = [
   { label: 'auto', value: 'auto' },
   { label: 'low', value: 'low' },
   { label: 'medium', value: 'medium' },
   { label: 'high', value: 'high' },
+]
+
+const OUTPUT_FORMAT_OPTIONS: Array<{ label: string; value: TaskParams['output_format'] }> = [
+  { label: 'PNG', value: 'png' },
+  { label: 'JPEG', value: 'jpeg' },
+  { label: 'WebP', value: 'webp' },
+]
+
+const MODERATION_OPTIONS: Array<{ label: string; value: TaskParams['moderation'] }> = [
+  { label: 'auto', value: 'auto' },
+  { label: 'low', value: 'low' },
 ]
 
 interface Props {
@@ -32,10 +43,8 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
   const nLimitHintText = `OpenAI 最大请求数量为 ${outputImageLimit}`
   const displaySize = normalizeImageSize(params.size) || DEFAULT_PARAMS.size
 
-  const [outputCompressionInput, setOutputCompressionInput] = useState(
-    params.output_compression == null ? '' : String(params.output_compression),
-  )
-  const [nInput, setNInput] = useState(String(params.n))
+  const [outputCompressionDraft, setOutputCompressionDraft] = useState<string | null>(null)
+  const [nDraft, setNDraft] = useState<string | null>(null)
   const [nInputFocused, setNInputFocused] = useState(false)
   const [nLimitHintVisible, setNLimitHintVisible] = useState(false)
   const [compressionHintVisible, setCompressionHintVisible] = useState(false)
@@ -46,20 +55,17 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
   const qualityHintTimerRef = useRef<number | null>(null)
   const nLimitHintTimerRef = useRef<number | null>(null)
 
-  useEffect(() => {
-    setOutputCompressionInput(
-      params.output_compression == null ? '' : String(params.output_compression),
-    )
-  }, [params.output_compression])
-
-  useEffect(() => {
-    setNInput(String(params.n))
-  }, [params.n])
+  const outputCompressionInput =
+    outputCompressionDraft ??
+    (params.output_compression == null ? '' : String(params.output_compression))
+  const nInput = nDraft ?? String(params.n)
 
   useEffect(
     () => () => {
-      if (compressionHintTimerRef.current != null) window.clearTimeout(compressionHintTimerRef.current)
-      if (moderationHintTimerRef.current != null) window.clearTimeout(moderationHintTimerRef.current)
+      if (compressionHintTimerRef.current != null)
+        window.clearTimeout(compressionHintTimerRef.current)
+      if (moderationHintTimerRef.current != null)
+        window.clearTimeout(moderationHintTimerRef.current)
       if (qualityHintTimerRef.current != null) window.clearTimeout(qualityHintTimerRef.current)
       if (nLimitHintTimerRef.current != null) window.clearTimeout(nLimitHintTimerRef.current)
     },
@@ -68,18 +74,18 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
 
   const commitOutputCompression = useCallback(() => {
     if (outputCompressionInput.trim() === '') {
-      setOutputCompressionInput('')
+      setOutputCompressionDraft(null)
       setParams({ output_compression: null })
       return
     }
     const nextValue = Number(outputCompressionInput)
     if (Number.isNaN(nextValue)) {
-      setOutputCompressionInput(params.output_compression == null ? '' : String(params.output_compression))
+      setOutputCompressionDraft(null)
       return
     }
-    setOutputCompressionInput(String(nextValue))
+    setOutputCompressionDraft(null)
     setParams({ output_compression: nextValue })
-  }, [outputCompressionInput, params.output_compression, setParams])
+  }, [outputCompressionInput, setParams])
 
   const commitN = useCallback(() => {
     setNLimitHintVisible(false)
@@ -91,7 +97,7 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
     const normalizedValue =
       nInput.trim() === '' ? DEFAULT_PARAMS.n : Number.isNaN(nextValue) ? params.n : nextValue
     const clampedValue = Math.min(outputImageLimit, Math.max(1, normalizedValue))
-    setNInput(String(clampedValue))
+    setNDraft(null)
     setParams({ n: clampedValue })
   }, [nInput, outputImageLimit, params.n, setParams])
 
@@ -114,7 +120,7 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
 
   const handleNInputChange = useCallback(
     (value: string) => {
-      setNInput(value)
+      setNDraft(value)
       const nextValue = Number(value)
       if (!Number.isNaN(nextValue) && nextValue > outputImageLimit) showNLimitHint()
       else hideNLimitHint()
@@ -148,6 +154,7 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
   }
   const startModerationHintTouch = () => {
     if (!moderationDisabled) return
+    clearModerationHintTimer()
     moderationHintTimerRef.current = window.setTimeout(() => {
       setModerationHintVisible(true)
       moderationHintTimerRef.current = null
@@ -166,6 +173,7 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
     }
   }
   const startCompressionHintTouch = () => {
+    clearCompressionHintTimer()
     compressionHintTimerRef.current = window.setTimeout(() => {
       setCompressionHintVisible(true)
       compressionHintTimerRef.current = null
@@ -187,6 +195,7 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
   }
   const startQualityHintTouch = () => {
     if (!settings.codexCli) return
+    clearQualityHintTimer()
     qualityHintTimerRef.current = window.setTimeout(() => {
       setQualityHintVisible(true)
       qualityHintTimerRef.current = null
@@ -219,7 +228,7 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
         <Select
           value={settings.codexCli ? 'auto' : params.quality}
           onChange={(val) => {
-            if (!settings.codexCli) setParams({ quality: val as any })
+            if (!settings.codexCli) setParams({ quality: val })
           }}
           options={QUALITY_OPTIONS}
           disabled={settings.codexCli}
@@ -229,18 +238,17 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
               : SELECT_CLASS
           }
         />
-        <ButtonTooltip visible={settings.codexCli && qualityHintVisible} text="Codex CLI 不支持质量参数" />
+        <ButtonTooltip
+          visible={settings.codexCli && qualityHintVisible}
+          text="Codex CLI 不支持质量参数"
+        />
       </label>
       <label className="flex flex-col gap-0.5">
         <span className="text-gray-500 dark:text-gray-400 ml-1">格式</span>
         <Select
           value={params.output_format}
-          onChange={(val) => setParams({ output_format: val as any })}
-          options={[
-            { label: 'PNG', value: 'png' },
-            { label: 'JPEG', value: 'jpeg' },
-            { label: 'WebP', value: 'webp' },
-          ]}
+          onChange={(val) => setParams({ output_format: val })}
+          options={OUTPUT_FORMAT_OPTIONS}
           className={SELECT_CLASS}
         />
       </label>
@@ -256,8 +264,9 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
         <span className="text-gray-500 dark:text-gray-400 ml-1">压缩率</span>
         <input
           value={outputCompressionInput}
-          onChange={(e) => setOutputCompressionInput(e.target.value)}
+          onChange={(e) => setOutputCompressionDraft(e.target.value)}
           onBlur={commitOutputCompression}
+          onFocus={() => setOutputCompressionDraft(outputCompressionInput)}
           disabled={compressionDisabled}
           type="number"
           min={0}
@@ -284,12 +293,9 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
         <Select
           value={moderationDisabled ? 'auto' : params.moderation}
           onChange={(val) => {
-            if (!moderationDisabled) setParams({ moderation: val as any })
+            if (!moderationDisabled) setParams({ moderation: val })
           }}
-          options={[
-            { label: 'auto', value: 'auto' },
-            { label: 'low', value: 'low' },
-          ]}
+          options={MODERATION_OPTIONS}
           disabled={moderationDisabled}
           className={
             moderationDisabled
@@ -297,14 +303,20 @@ export default function ParamRow({ cols, onOpenSizePicker }: Props) {
               : SELECT_CLASS
           }
         />
-        <ButtonTooltip visible={moderationDisabled && moderationHintVisible} text="Responses API 不支持审核参数" />
+        <ButtonTooltip
+          visible={moderationDisabled && moderationHintVisible}
+          text="Responses API 不支持审核参数"
+        />
       </label>
       <label className="relative flex flex-col gap-0.5">
         <span className="text-gray-500 dark:text-gray-400 ml-1">数量</span>
         <input
           value={nInput}
           onChange={(e) => handleNInputChange(e.target.value)}
-          onFocus={() => setNInputFocused(true)}
+          onFocus={() => {
+            setNInputFocused(true)
+            setNDraft(nInput)
+          }}
           onBlur={() => {
             setNInputFocused(false)
             commitN()

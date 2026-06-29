@@ -26,7 +26,10 @@ interface Props {
   onDelete: () => void
   onClick: (e: React.MouseEvent | React.TouchEvent) => void
   isSelected?: boolean
-  dragHandle?: DragHandle
+  dragActivatorRef?: DragHandle['ref']
+  dragListeners?: DragHandle['listeners']
+  dragAttributes?: DragHandle['attributes']
+  dragDisabled?: boolean
   /** 图库视图下渲染所属对话标签；undefined 时不渲染 */
   conversationTag?: ConversationTagProp
 }
@@ -39,7 +42,10 @@ function TaskCard({
   onDelete,
   onClick,
   isSelected,
-  dragHandle,
+  dragActivatorRef,
+  dragListeners,
+  dragAttributes,
+  dragDisabled,
   conversationTag,
 }: Props) {
   // 封面懒加载:进视口附近才读 IDB;走 objectURL 而非 dataUrl,全尺寸 base64 不再常驻 JS 堆
@@ -75,13 +81,15 @@ function TaskCard({
 
       <div
         className={`group relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer duration-200 hover:shadow-lg dark:hover:shadow-[0_10px_40px_-12px_rgba(99,102,241,0.35)] dark:hover:bg-gray-800/80 ${
-          !isSwiping ? 'transition-[box-shadow,border-color,background-color,transform]' : 'transition-[box-shadow,border-color,background-color]'
+          !isSwiping
+            ? 'transition-[box-shadow,border-color,background-color,transform]'
+            : 'transition-[box-shadow,border-color,background-color]'
         } ${
           task.status === 'running'
             ? 'border-blue-400 generating'
             : isSelected
-            ? 'border-blue-500 shadow-md ring-2 ring-blue-500/50'
-            : 'border-gray-200 dark:border-white/[0.08] hover:border-gray-300 dark:hover:border-white/[0.18]'
+              ? 'border-blue-500 shadow-md ring-2 ring-blue-500/50'
+              : 'border-gray-200 dark:border-white/[0.08] hover:border-gray-300 dark:hover:border-white/[0.18]'
         }`}
         style={{
           transform: swipeOffset ? `translateX(${swipeOffset}px)` : undefined,
@@ -117,62 +125,72 @@ function TaskCard({
         onTouchCancel={handleTouchCancel}
       >
         {/* 选中时的角标 */}
-      {isSelected && (
-        <div className="absolute top-2 right-2 z-10 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center shadow-sm">
-          <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-          </svg>
-        </div>
-      )}
-      {/* 拖拽手柄（仅桌面端） */}
-      {dragHandle && (
-        <button
-          type="button"
-          ref={dragHandle.ref}
-          {...(dragHandle.disabled ? {} : dragHandle.attributes)}
-          {...(dragHandle.disabled ? {} : dragHandle.listeners)}
-          onClick={(e) => e.stopPropagation()}
-          title={dragHandle.disabled ? '清除筛选后可调整顺序' : '拖动调整顺序'}
-          aria-label="拖动调整顺序"
-          className={`hidden sm:flex absolute top-2 z-10 w-5 h-5 items-center justify-center rounded-md transition-opacity ${
-            isSelected ? 'right-9' : 'right-2'
-          } ${
-            dragHandle.disabled
-              ? 'opacity-20 cursor-not-allowed text-gray-400 dark:text-gray-500'
-              : 'opacity-0 group-hover:opacity-60 hover:!opacity-100 cursor-grab active:cursor-grabbing text-gray-500 dark:text-gray-400 bg-white/70 dark:bg-gray-900/70 backdrop-blur'
-          }`}
-          style={{ touchAction: 'none' }}
-        >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-            <circle cx="9" cy="6" r="1.5" />
-            <circle cx="15" cy="6" r="1.5" />
-            <circle cx="9" cy="12" r="1.5" />
-            <circle cx="15" cy="12" r="1.5" />
-            <circle cx="9" cy="18" r="1.5" />
-            <circle cx="15" cy="18" r="1.5" />
-          </svg>
-        </button>
-      )}
-      <div className="flex h-40">
-        {/* 左侧图片区域 */}
-        <CoverArea
-          task={task}
-          thumbSrc={thumbSrc}
-          coverRatio={coverRatio}
-          coverSize={coverSize}
-          duration={duration}
-        />
+        {isSelected && (
+          <div className="absolute top-2 right-2 z-10 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center shadow-sm">
+            <svg
+              className="w-3 h-3 text-white"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={3}
+                d="M5 13l4 4L19 7"
+              />
+            </svg>
+          </div>
+        )}
+        {/* 拖拽手柄（仅桌面端） */}
+        {dragActivatorRef && (
+          <button
+            type="button"
+            ref={dragActivatorRef}
+            {...(dragDisabled ? {} : dragAttributes)}
+            {...(dragDisabled ? {} : dragListeners)}
+            onClick={(e) => e.stopPropagation()}
+            title={dragDisabled ? '清除筛选后可调整顺序' : '拖动调整顺序'}
+            aria-label="拖动调整顺序"
+            className={`hidden sm:flex absolute top-2 z-10 w-5 h-5 items-center justify-center rounded-md transition-opacity ${
+              isSelected ? 'right-9' : 'right-2'
+            } ${
+              dragDisabled
+                ? 'opacity-20 cursor-not-allowed text-gray-400 dark:text-gray-500'
+                : 'opacity-0 group-hover:opacity-60 hover:!opacity-100 cursor-grab active:cursor-grabbing text-gray-500 dark:text-gray-400 bg-white/70 dark:bg-gray-900/70 backdrop-blur'
+            }`}
+            style={{ touchAction: 'none' }}
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="9" cy="6" r="1.5" />
+              <circle cx="15" cy="6" r="1.5" />
+              <circle cx="9" cy="12" r="1.5" />
+              <circle cx="15" cy="12" r="1.5" />
+              <circle cx="9" cy="18" r="1.5" />
+              <circle cx="15" cy="18" r="1.5" />
+            </svg>
+          </button>
+        )}
+        <div className="flex h-40">
+          {/* 左侧图片区域 */}
+          <CoverArea
+            task={task}
+            thumbSrc={thumbSrc}
+            coverRatio={coverRatio}
+            coverSize={coverSize}
+            duration={duration}
+          />
 
-        {/* 右侧信息区域 */}
-        <InfoArea
-          task={task}
-          favoriteCategory={favoriteCategory}
-          conversationTag={conversationTag}
-          onReuse={onReuse}
-          onEditOutputs={onEditOutputs}
-          onDelete={onDelete}
-        />
-      </div>
+          {/* 右侧信息区域 */}
+          <InfoArea
+            task={task}
+            favoriteCategory={favoriteCategory}
+            conversationTag={conversationTag}
+            onReuse={onReuse}
+            onEditOutputs={onEditOutputs}
+            onDelete={onDelete}
+          />
+        </div>
       </div>
     </div>
   )

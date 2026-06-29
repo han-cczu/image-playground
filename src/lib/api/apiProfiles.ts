@@ -13,13 +13,17 @@ import type {
 import { isOpenAIProfile } from '../../types'
 import { readRuntimeEnv } from './runtimeEnv'
 
-const DEFAULT_BASE_URL = readRuntimeEnv(import.meta.env.VITE_DEFAULT_API_URL) || 'https://api.openai.com/v1'
+const DEFAULT_BASE_URL =
+  readRuntimeEnv(import.meta.env.VITE_DEFAULT_API_URL) || 'https://api.openai.com/v1'
 export const DEFAULT_IMAGES_MODEL = 'gpt-image-2'
 export const DEFAULT_RESPONSES_MODEL = 'gpt-5.5'
 export const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
 export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-image'
 export const DEFAULT_OPENAI_PROFILE_ID = 'default-openai'
 export const DEFAULT_API_TIMEOUT = 600
+export const MAX_NAMED_PROFILES = 50
+export const MAX_PROFILE_NAME_LEN = 50
+export const MAX_CONFIG_FIELD_LEN = 4096
 
 /**
  * 批量调度并发上限的取值域。默认沿用原 taskRuntime 写死常量(3):批量场景叠加
@@ -35,6 +39,20 @@ export function clampBatchConcurrency(value: unknown): number {
   const n = Math.trunc(Number(value))
   if (!Number.isFinite(n)) return DEFAULT_BATCH_CONCURRENCY
   return Math.min(BATCH_CONCURRENCY_MAX, Math.max(BATCH_CONCURRENCY_MIN, n))
+}
+
+function clampConfigField(value: string): string {
+  return value.slice(0, MAX_CONFIG_FIELD_LEN)
+}
+
+function normalizeConfigString(
+  value: unknown,
+  fallback: string,
+  options: { requireTrimmed?: boolean } = {},
+): string {
+  if (typeof value !== 'string') return fallback
+  if (options.requireTrimmed && !value.trim()) return fallback
+  return clampConfigField(value)
 }
 
 export const DEFAULT_OPTIMIZER_MODEL = 'gpt-4o-mini'
@@ -81,25 +99,34 @@ export function createDefaultPromptOptimizer(
 
 export function normalizePromptOptimizer(input: unknown): PromptOptimizerConfig {
   const record = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
-  const defaults = createDefaultPromptOptimizer()
+  const provider = record.provider === 'gemini' ? 'gemini' : 'openai'
+  const defaults =
+    provider === 'gemini'
+      ? createDefaultPromptOptimizer({
+          baseUrl: DEFAULT_GEMINI_BASE_URL,
+          model: DEFAULT_GEMINI_CHAT_MODEL,
+          provider,
+        })
+      : createDefaultPromptOptimizer()
   return {
-    baseUrl:
-      typeof record.baseUrl === 'string' && record.baseUrl.trim()
-        ? record.baseUrl
-        : defaults.baseUrl,
-    apiKey: typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
-    model:
-      typeof record.model === 'string' && record.model.trim() ? record.model : defaults.model,
+    baseUrl: normalizeConfigString(record.baseUrl, defaults.baseUrl, { requireTrimmed: true }),
+    apiKey: normalizeConfigString(record.apiKey, defaults.apiKey),
+    model: normalizeConfigString(record.model, defaults.model, { requireTrimmed: true }),
     timeout:
       typeof record.timeout === 'number' && Number.isFinite(record.timeout) && record.timeout > 0
         ? record.timeout
         : defaults.timeout,
-    systemPrompt:
-      typeof record.systemPrompt === 'string' && record.systemPrompt.trim()
-        ? record.systemPrompt
-        : defaults.systemPrompt,
-    provider: record.provider === 'gemini' ? 'gemini' : 'openai',
+    systemPrompt: normalizeConfigString(record.systemPrompt, defaults.systemPrompt, {
+      requireTrimmed: true,
+    }),
+    provider,
   }
+}
+
+function normalizeProfileName(value: unknown, fallback = '新配置'): string {
+  return typeof value === 'string' && value.trim()
+    ? value.trim().slice(0, MAX_PROFILE_NAME_LEN)
+    : fallback
 }
 
 export function createDefaultOptimizerProfile(
@@ -118,9 +145,9 @@ export function normalizeOptimizerProfile(input: unknown): PromptOptimizerProfil
   const config = normalizePromptOptimizer(record)
   const id =
     typeof record.id === 'string' && record.id.trim()
-      ? record.id
+      ? clampConfigField(record.id)
       : `optimizer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-  const name = typeof record.name === 'string' && record.name.trim() ? record.name : '新配置'
+  const name = normalizeProfileName(record.name)
   return { ...config, id, name }
 }
 
@@ -151,23 +178,27 @@ export function createDefaultCaptioner(overrides: Partial<CaptionerConfig> = {})
 
 export function normalizeCaptioner(input: unknown): CaptionerConfig {
   const record = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
-  const defaults = createDefaultCaptioner()
+  const provider = record.provider === 'gemini' ? 'gemini' : 'openai'
+  const defaults =
+    provider === 'gemini'
+      ? createDefaultCaptioner({
+          baseUrl: DEFAULT_GEMINI_BASE_URL,
+          model: DEFAULT_GEMINI_CHAT_MODEL,
+          provider,
+        })
+      : createDefaultCaptioner()
   return {
-    baseUrl:
-      typeof record.baseUrl === 'string' && record.baseUrl.trim()
-        ? record.baseUrl
-        : defaults.baseUrl,
-    apiKey: typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
-    model: typeof record.model === 'string' && record.model.trim() ? record.model : defaults.model,
+    baseUrl: normalizeConfigString(record.baseUrl, defaults.baseUrl, { requireTrimmed: true }),
+    apiKey: normalizeConfigString(record.apiKey, defaults.apiKey),
+    model: normalizeConfigString(record.model, defaults.model, { requireTrimmed: true }),
     timeout:
       typeof record.timeout === 'number' && Number.isFinite(record.timeout) && record.timeout > 0
         ? record.timeout
         : defaults.timeout,
-    systemPrompt:
-      typeof record.systemPrompt === 'string' && record.systemPrompt.trim()
-        ? record.systemPrompt
-        : defaults.systemPrompt,
-    provider: record.provider === 'gemini' ? 'gemini' : 'openai',
+    systemPrompt: normalizeConfigString(record.systemPrompt, defaults.systemPrompt, {
+      requireTrimmed: true,
+    }),
+    provider,
   }
 }
 
@@ -187,10 +218,33 @@ export function normalizeCaptionerProfile(input: unknown): CaptionerProfile {
   const config = normalizeCaptioner(record)
   const id =
     typeof record.id === 'string' && record.id.trim()
-      ? record.id
+      ? clampConfigField(record.id)
       : `captioner-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-  const name = typeof record.name === 'string' && record.name.trim() ? record.name : '新配置'
+  const name = normalizeProfileName(record.name)
   return { ...config, id, name }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function makeUniqueProfileIds<T extends { id: string }>(
+  profiles: T[],
+  fallbackPrefix: string,
+): T[] {
+  const used = new Set<string>()
+  return profiles.map((profile, index) => {
+    const baseId = clampConfigField(profile.id.trim() || `${fallbackPrefix}-${index + 1}`)
+    let id = baseId
+    let suffix = 2
+    while (used.has(id)) {
+      const suffixText = `-${suffix}`
+      id = `${baseId.slice(0, MAX_CONFIG_FIELD_LEN - suffixText.length)}${suffixText}`
+      suffix += 1
+    }
+    used.add(id)
+    return id === profile.id ? profile : { ...profile, id }
+  })
 }
 
 /**
@@ -236,12 +290,12 @@ export function createDefaultGeminiProfile(overrides: Partial<GeminiProfile> = {
   }
 }
 
-/** 切换 provider：保留 id/name/apiKey/timeout，按目标 provider 重置其他字段 */
+/** 切换 provider：保留 id/name/timeout，重置端点/模型并清空 apiKey，避免把旧供应商密钥发往新端点。 */
 export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvider): ApiProfile {
   const common = {
     id: profile.id,
     name: profile.name,
-    apiKey: profile.apiKey,
+    apiKey: '',
     timeout: profile.timeout,
   }
   if (provider === 'gemini') {
@@ -267,13 +321,22 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
   const record = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
   const provider: ApiProvider = record.provider === 'gemini' ? 'gemini' : 'openai'
 
-  const id = typeof record.id === 'string' && record.id.trim() ? record.id : undefined
-  const name = typeof record.name === 'string' && record.name.trim() ? record.name : undefined
-  const baseUrl = typeof record.baseUrl === 'string' ? record.baseUrl : undefined
-  const apiKey = typeof record.apiKey === 'string' ? record.apiKey : undefined
-  const model = typeof record.model === 'string' && record.model.trim() ? record.model : undefined
+  const id =
+    typeof record.id === 'string' && record.id.trim() ? clampConfigField(record.id) : undefined
+  const name = normalizeProfileName(record.name, '').trim() || undefined
+  const baseUrl =
+    typeof record.baseUrl === 'string' && record.baseUrl.trim()
+      ? clampConfigField(record.baseUrl)
+      : undefined
+  const apiKey = typeof record.apiKey === 'string' ? clampConfigField(record.apiKey) : undefined
+  const model =
+    typeof record.model === 'string' && record.model.trim()
+      ? clampConfigField(record.model)
+      : undefined
   const timeout =
-    typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : undefined
+    typeof record.timeout === 'number' && Number.isFinite(record.timeout) && record.timeout > 0
+      ? record.timeout
+      : undefined
 
   if (provider === 'gemini') {
     const defaults = createDefaultGeminiProfile(fallback as Partial<GeminiProfile> | undefined)
@@ -307,36 +370,45 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
 export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSettings {
   const record = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
   const legacyProfile = createDefaultOpenAIProfile({
-    baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : DEFAULT_BASE_URL,
-    apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
-    model: typeof record.model === 'string' && record.model.trim() ? record.model : DEFAULT_IMAGES_MODEL,
+    baseUrl: normalizeConfigString(record.baseUrl, DEFAULT_BASE_URL),
+    apiKey: normalizeConfigString(record.apiKey, ''),
+    model: normalizeConfigString(record.model, DEFAULT_IMAGES_MODEL, { requireTrimmed: true }),
     timeout:
-      typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : DEFAULT_API_TIMEOUT,
+      typeof record.timeout === 'number' && Number.isFinite(record.timeout) && record.timeout > 0
+        ? record.timeout
+        : DEFAULT_API_TIMEOUT,
     apiMode: record.apiMode === 'responses' ? 'responses' : 'images',
     codexCli: Boolean(record.codexCli),
     apiProxy: Boolean(record.apiProxy),
   })
   const filteredRawProfiles = Array.isArray(record.profiles)
-    ? (record.profiles as unknown[]).filter((profile) => {
-        if (!profile || typeof profile !== 'object') return true
-        return (profile as Record<string, unknown>).provider !== 'fal'
+    ? (record.profiles as unknown[]).filter((profile): profile is Record<string, unknown> => {
+        if (!isPlainRecord(profile)) return false
+        return profile.provider !== 'fal'
       })
     : []
   const profiles = filteredRawProfiles.length
-    ? filteredRawProfiles.map((profile) => normalizeApiProfile(profile))
+    ? makeUniqueProfileIds(
+        filteredRawProfiles.map((profile) => normalizeApiProfile(profile)),
+        'profile',
+      ).slice(0, MAX_NAMED_PROFILES)
     : [legacyProfile]
   const activeProfileId =
-    typeof record.activeProfileId === 'string' && profiles.some((p) => p.id === record.activeProfileId)
-      ? record.activeProfileId
+    typeof record.activeProfileId === 'string' &&
+    profiles.some((p) => p.id === clampConfigField(record.activeProfileId as string))
+      ? clampConfigField(record.activeProfileId)
       : profiles[0].id
   const active = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
   const activeAsOpenAI = isOpenAIProfile(active) ? active : null
 
   const rawOptimizerProfiles = Array.isArray(record.optimizerProfiles)
-    ? (record.optimizerProfiles as unknown[])
+    ? (record.optimizerProfiles as unknown[]).filter(isPlainRecord)
     : []
   const optimizerProfiles = rawOptimizerProfiles.length
-    ? rawOptimizerProfiles.map((p) => normalizeOptimizerProfile(p))
+    ? makeUniqueProfileIds(
+        rawOptimizerProfiles.map((p) => normalizeOptimizerProfile(p)),
+        'optimizer',
+      ).slice(0, MAX_NAMED_PROFILES)
     : [
         createDefaultOptimizerProfile({
           ...normalizePromptOptimizer(record.promptOptimizer),
@@ -346,17 +418,22 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
       ]
   const activeOptimizerProfileId =
     typeof record.activeOptimizerProfileId === 'string' &&
-    optimizerProfiles.some((p) => p.id === record.activeOptimizerProfileId)
-      ? record.activeOptimizerProfileId
+    optimizerProfiles.some(
+      (p) => p.id === clampConfigField(record.activeOptimizerProfileId as string),
+    )
+      ? clampConfigField(record.activeOptimizerProfileId)
       : optimizerProfiles[0].id
   const activeOptimizer =
     optimizerProfiles.find((p) => p.id === activeOptimizerProfileId) ?? optimizerProfiles[0]
 
   const rawCaptionerProfiles = Array.isArray(record.captionerProfiles)
-    ? (record.captionerProfiles as unknown[])
+    ? (record.captionerProfiles as unknown[]).filter(isPlainRecord)
     : []
   const captionerProfiles = rawCaptionerProfiles.length
-    ? rawCaptionerProfiles.map((p) => normalizeCaptionerProfile(p))
+    ? makeUniqueProfileIds(
+        rawCaptionerProfiles.map((p) => normalizeCaptionerProfile(p)),
+        'captioner',
+      ).slice(0, MAX_NAMED_PROFILES)
     : [
         createDefaultCaptionerProfile({
           ...normalizeCaptioner(record.captioner),
@@ -366,8 +443,10 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
       ]
   const activeCaptionerProfileId =
     typeof record.activeCaptionerProfileId === 'string' &&
-    captionerProfiles.some((p) => p.id === record.activeCaptionerProfileId)
-      ? record.activeCaptionerProfileId
+    captionerProfiles.some(
+      (p) => p.id === clampConfigField(record.activeCaptionerProfileId as string),
+    )
+      ? clampConfigField(record.activeCaptionerProfileId)
       : captionerProfiles[0].id
   const activeCaptioner =
     captionerProfiles.find((p) => p.id === activeCaptionerProfileId) ?? captionerProfiles[0]
@@ -380,9 +459,13 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     apiMode: activeAsOpenAI?.apiMode ?? 'images',
     codexCli: activeAsOpenAI?.codexCli ?? false,
     apiProxy: activeAsOpenAI?.apiProxy ?? false,
-    clearInputAfterSubmit: typeof record.clearInputAfterSubmit === 'boolean' ? record.clearInputAfterSubmit : false,
+    clearInputAfterSubmit:
+      typeof record.clearInputAfterSubmit === 'boolean' ? record.clearInputAfterSubmit : false,
     batchConcurrency: clampBatchConcurrency(record.batchConcurrency),
-    theme: record.theme === 'light' || record.theme === 'dark' || record.theme === 'system' ? record.theme : 'light',
+    theme:
+      record.theme === 'light' || record.theme === 'dark' || record.theme === 'system'
+        ? record.theme
+        : 'light',
     profiles,
     activeProfileId,
     promptOptimizer: {
@@ -409,19 +492,27 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
 }
 
 export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): ApiProfile {
-  const record = settings && typeof settings === 'object' ? (settings as Record<string, unknown>) : {}
+  const record =
+    settings && typeof settings === 'object' ? (settings as Record<string, unknown>) : {}
   const normalized = normalizeSettings(settings)
   const profile =
     normalized.profiles.find((p) => p.id === normalized.activeProfileId) ??
     normalized.profiles[0] ??
     createDefaultOpenAIProfile()
 
+  // Legacy callers may pass `{ ...DEFAULT_SETTINGS, apiKey/baseUrl/... }` without updating
+  // `profiles`. Treat top-level mirrors as overrides only for the untouched default OpenAI
+  // profile; real configured profiles remain the source of truth.
+  if (!hasOnlyDefaultProfiles(normalized) && !isDefaultOpenAIProfile(profile)) return profile
+
   const baseOverrides = {
-    baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : profile.baseUrl,
-    apiKey: typeof record.apiKey === 'string' ? record.apiKey : profile.apiKey,
-    model: typeof record.model === 'string' && record.model.trim() ? record.model : profile.model,
+    baseUrl: normalizeConfigString(record.baseUrl, profile.baseUrl),
+    apiKey: normalizeConfigString(record.apiKey, profile.apiKey),
+    model: normalizeConfigString(record.model, profile.model, { requireTrimmed: true }),
     timeout:
-      typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : profile.timeout,
+      typeof record.timeout === 'number' && Number.isFinite(record.timeout) && record.timeout > 0
+        ? record.timeout
+        : profile.timeout,
   }
 
   if (isOpenAIProfile(profile)) {
@@ -429,7 +520,9 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
       ...profile,
       ...baseOverrides,
       apiMode:
-        record.apiMode === 'images' || record.apiMode === 'responses' ? record.apiMode : profile.apiMode,
+        record.apiMode === 'images' || record.apiMode === 'responses'
+          ? record.apiMode
+          : profile.apiMode,
       codexCli: typeof record.codexCli === 'boolean' ? record.codexCli : profile.codexCli,
       apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : profile.apiProxy,
     }
@@ -500,6 +593,7 @@ function dedupeApiProfiles(profiles: ApiProfile[]): ApiProfile[] {
 
 function getOptimizerProfileDedupKey(profile: PromptOptimizerProfile): string {
   return JSON.stringify([
+    profile.provider ?? 'openai',
     profile.baseUrl.trim().replace(/\/+$/, '').toLowerCase(),
     profile.apiKey.trim(),
     profile.model.trim(),
@@ -523,6 +617,7 @@ function isDefaultOptimizerProfile(profile: PromptOptimizerProfile): boolean {
   return (
     profile.id === DEFAULT_OPTIMIZER_PROFILE_ID &&
     profile.name === '默认' &&
+    (profile.provider ?? 'openai') === 'openai' &&
     profile.baseUrl === DEFAULT_BASE_URL &&
     profile.apiKey === '' &&
     profile.model === DEFAULT_OPTIMIZER_MODEL &&
@@ -550,6 +645,7 @@ function createImportedOptimizerProfileId(usedIds: Set<string>): string {
 
 function getCaptionerProfileDedupKey(profile: CaptionerProfile): string {
   return JSON.stringify([
+    profile.provider ?? 'openai',
     profile.baseUrl.trim().replace(/\/+$/, '').toLowerCase(),
     profile.apiKey.trim(),
     profile.model.trim(),
@@ -573,6 +669,7 @@ function isDefaultCaptionerProfile(profile: CaptionerProfile): boolean {
   return (
     profile.id === DEFAULT_CAPTIONER_PROFILE_ID &&
     profile.name === '默认' &&
+    (profile.provider ?? 'openai') === 'openai' &&
     profile.baseUrl === DEFAULT_BASE_URL &&
     profile.apiKey === '' &&
     profile.model === DEFAULT_CAPTIONER_MODEL &&
@@ -632,7 +729,9 @@ export function mergeImportedSettings(
     mergedActiveOptimizerProfileId = imported.activeOptimizerProfileId
   } else {
     const usedOptimizerIds = new Set(current.optimizerProfiles.map((p) => p.id))
-    const existingOptimizerKeys = new Set(current.optimizerProfiles.map(getOptimizerProfileDedupKey))
+    const existingOptimizerKeys = new Set(
+      current.optimizerProfiles.map(getOptimizerProfileDedupKey),
+    )
     const importedOptimizerProfiles = imported.optimizerProfiles
       .filter((p) => !existingOptimizerKeys.has(getOptimizerProfileDedupKey(p)))
       .map((p) => ({ ...p, id: createImportedOptimizerProfileId(usedOptimizerIds) }))
@@ -647,7 +746,9 @@ export function mergeImportedSettings(
     mergedActiveCaptionerProfileId = imported.activeCaptionerProfileId
   } else {
     const usedCaptionerIds = new Set(current.captionerProfiles.map((p) => p.id))
-    const existingCaptionerKeys = new Set(current.captionerProfiles.map(getCaptionerProfileDedupKey))
+    const existingCaptionerKeys = new Set(
+      current.captionerProfiles.map(getCaptionerProfileDedupKey),
+    )
     const importedCaptionerProfiles = imported.captionerProfiles
       .filter((p) => !existingCaptionerKeys.has(getCaptionerProfileDedupKey(p)))
       .map((p) => ({ ...p, id: createImportedCaptionerProfileId(usedCaptionerIds) }))

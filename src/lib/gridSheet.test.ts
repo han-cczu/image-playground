@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   computeSafeCellSize,
   computeSheetLayout,
+  MAX_BATCH_ID_LEN,
   MAX_BATCH_NOTE_LEN,
   MAX_BATCH_NOTES,
   mergeBatchNotes,
@@ -22,6 +23,7 @@ import type { TaskRecord } from '../types'
 
 /** 测试用:每字符 10px 的等宽近似 */
 const measure10 = (text: string) => Array.from(text).length * 10
+const EXPECTED_SHEET_MAX_PIXELS = 64 * 1024 * 1024
 
 function makeTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
@@ -142,6 +144,28 @@ describe('normalizeBatchNotes', () => {
     expect(result.b5.text).toHaveLength(MAX_BATCH_NOTE_LEN)
     expect(result.b5.updatedAt).toBe(999)
   })
+
+  it('drops dangerous keys from untrusted records', () => {
+    const result = normalizeBatchNotes(JSON.parse(`{
+      "__proto__": { "text": "polluted", "updatedAt": 1 },
+      "constructor": { "text": "bad", "updatedAt": 2 },
+      "prototype": { "text": "bad", "updatedAt": 3 },
+      "good": { "text": "ok", "updatedAt": 4 }
+    }`))
+
+    expect(result).toEqual({ good: { text: 'ok', updatedAt: 4 } })
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  it('caps untrusted batch note ids before storing them as object keys', () => {
+    const longId = 'batch-'.repeat(MAX_BATCH_ID_LEN + 10)
+
+    const result = normalizeBatchNotes({
+      [longId]: { text: 'ok', updatedAt: 1 },
+    })
+
+    expect(Object.keys(result)).toEqual([longId.slice(0, MAX_BATCH_ID_LEN)])
+  })
 })
 
 describe('computeSafeCellSize(审查修复:canvas 单边上限)', () => {
@@ -177,6 +201,17 @@ describe('computeSafeCellSize(审查修复:canvas 单边上限)', () => {
     })
     expect(layout.noteLines).toHaveLength(SHEET_NOTE_MAX_LINES)
     expect(layout.height).toBeLessThanOrEqual(SHEET_MAX_EDGE)
+  })
+
+  it('shrinks cell size so the sheet stays within the total canvas pixel budget', () => {
+    const cell = computeSafeCellSize(64, 64, true)
+    expect(cell).not.toBeNull()
+    const layout = computeSheetLayout({ cols: 64, rows: 64, hasY: true, measureWidth: measure10, cellSize: cell! })
+    expect(layout.width * layout.height).toBeLessThanOrEqual(EXPECTED_SHEET_MAX_PIXELS)
+  })
+
+  it('returns null when the pixel budget would require unreadably small cells', () => {
+    expect(computeSafeCellSize(100, 100, true)).toBeNull()
   })
 
   it('layout respects a custom cellSize in every rect', () => {

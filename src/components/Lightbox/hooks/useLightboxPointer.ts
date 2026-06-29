@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import {
   clamp,
   MIN_SCALE,
@@ -25,7 +25,16 @@ interface UseLightboxPointerArgs {
  * 监听注册位置保持原样:mousedown/touch* 挂容器节点(touch* passive: false),
  * mousemove/mouseup 挂 window(拖拽中移出容器不丢手势)。
  */
-export function useLightboxPointer({ containerRef, scaleRef, txRef, tyRef, apply, onClose }: UseLightboxPointerArgs) {
+export function useLightboxPointer({
+  containerRef,
+  scaleRef,
+  txRef,
+  tyRef,
+  apply,
+  onClose,
+}: UseLightboxPointerArgs) {
+  const [isDragging, setIsDragging] = useState(false)
+
   // 拖拽状态
   const dragRef = useRef({
     active: false,
@@ -48,6 +57,7 @@ export function useLightboxPointer({ containerRef, scaleRef, txRef, tyRef, apply
 
   // 双击检测（触控）
   const tapRef = useRef({ time: 0, x: 0, y: 0 })
+  const tapCloseTimerRef = useRef<number | null>(null)
   const hadMultiTouchRef = useRef(false)
   const touchStartedOnImageRef = useRef(false)
 
@@ -61,7 +71,8 @@ export function useLightboxPointer({ containerRef, scaleRef, txRef, tyRef, apply
     }
 
     window.addEventListener('image-context-menu-dismiss-lightbox-click', suppressClick)
-    return () => window.removeEventListener('image-context-menu-dismiss-lightbox-click', suppressClick)
+    return () =>
+      window.removeEventListener('image-context-menu-dismiss-lightbox-click', suppressClick)
   }, [])
 
   const getCenter = useCallback(() => {
@@ -87,6 +98,7 @@ export function useLightboxPointer({ containerRef, scaleRef, txRef, tyRef, apply
         baseTx: txRef.current,
         baseTy: tyRef.current,
       }
+      setIsDragging(true)
     }
 
     const onMove = (e: MouseEvent) => {
@@ -94,57 +106,80 @@ export function useLightboxPointer({ containerRef, scaleRef, txRef, tyRef, apply
       if (!d.active) return
       const dx = e.clientX - d.startX
       const dy = e.clientY - d.startY
-      if (Math.abs(dx) > DRAG_THRESHOLD_PX || Math.abs(dy) > DRAG_THRESHOLD_PX) didDragRef.current = true
+      if (Math.abs(dx) > DRAG_THRESHOLD_PX || Math.abs(dy) > DRAG_THRESHOLD_PX)
+        didDragRef.current = true
       apply(scaleRef.current, d.baseTx + dx, d.baseTy + dy)
     }
 
     const onUp = () => {
       dragRef.current.active = false
+      setIsDragging(pinchRef.current.active)
+    }
+
+    const onBlur = () => {
+      dragRef.current.active = false
+      setIsDragging(pinchRef.current.active)
     }
 
     el.addEventListener('mousedown', onDown)
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
+    window.addEventListener('blur', onBlur)
     return () => {
       el.removeEventListener('mousedown', onDown)
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('blur', onBlur)
     }
   }, [apply, containerRef, scaleRef, txRef, tyRef])
 
   // ====== 单击关闭（仅未缩放且非拖拽） ======
-  const onClick = useCallback((e: React.MouseEvent) => {
-    if (suppressNextClickRef.current) {
-      suppressNextClickRef.current = false
-      e.stopPropagation()
-      return
-    }
-    if (didDragRef.current) return
-    if (scaleRef.current > 1 && e.target instanceof HTMLImageElement) return
-    onClose()
-  }, [onClose, scaleRef])
+  const onClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (suppressNextClickRef.current) {
+        suppressNextClickRef.current = false
+        e.stopPropagation()
+        return
+      }
+      if (didDragRef.current) return
+      if (scaleRef.current > 1 && e.target instanceof HTMLImageElement) return
+      onClose()
+    },
+    [onClose, scaleRef],
+  )
 
   // ====== 鼠标双击缩放 ======
-  const onDoubleClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (scaleRef.current > 1) {
-      apply(1, 0, 0)
-    } else {
-      const { cx, cy } = getCenter()
-      const mx = e.clientX - cx
-      const my = e.clientY - cy
-      apply(DOUBLE_TAP_SCALE, -mx * (DOUBLE_TAP_SCALE - 1), -my * (DOUBLE_TAP_SCALE - 1))
-    }
-  }, [apply, getCenter, scaleRef])
+  const onDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (scaleRef.current > 1) {
+        apply(1, 0, 0)
+      } else {
+        const { cx, cy } = getCenter()
+        const mx = e.clientX - cx
+        const my = e.clientY - cy
+        apply(DOUBLE_TAP_SCALE, -mx * (DOUBLE_TAP_SCALE - 1), -my * (DOUBLE_TAP_SCALE - 1))
+      }
+    },
+    [apply, getCenter, scaleRef],
+  )
 
   // ====== 触控事件 ======
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
 
+    const clearTapCloseTimer = () => {
+      if (tapCloseTimerRef.current != null) {
+        window.clearTimeout(tapCloseTimerRef.current)
+        tapCloseTimerRef.current = null
+      }
+    }
+
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 2) {
         e.preventDefault()
+        clearTapCloseTimer()
         hadMultiTouchRef.current = true
         tapRef.current = { time: 0, x: 0, y: 0 }
         const [a, b] = [e.touches[0], e.touches[1]]
@@ -160,6 +195,7 @@ export function useLightboxPointer({ containerRef, scaleRef, txRef, tyRef, apply
           midY: (a.clientY + b.clientY) / 2 - cy,
         }
         dragRef.current.active = false
+        setIsDragging(true)
       } else if (e.touches.length === 1) {
         const t = e.touches[0]
         const now = Date.now()
@@ -173,6 +209,7 @@ export function useLightboxPointer({ containerRef, scaleRef, txRef, tyRef, apply
           Math.abs(t.clientY - prev.y) < DOUBLE_TAP_SLOP_PX
         ) {
           e.preventDefault()
+          clearTapCloseTimer()
           if (scaleRef.current > 1) {
             apply(1, 0, 0)
           } else {
@@ -195,6 +232,7 @@ export function useLightboxPointer({ containerRef, scaleRef, txRef, tyRef, apply
             baseTx: txRef.current,
             baseTy: tyRef.current,
           }
+          setIsDragging(true)
         }
       }
     }
@@ -220,6 +258,7 @@ export function useLightboxPointer({ containerRef, scaleRef, txRef, tyRef, apply
       if (e.touches.length < 2) pinchRef.current.active = false
       if (e.touches.length === 0) {
         dragRef.current.active = false
+        setIsDragging(false)
         if (hadMultiTouchRef.current) {
           hadMultiTouchRef.current = false
           tapRef.current = { time: 0, x: 0, y: 0 }
@@ -229,28 +268,41 @@ export function useLightboxPointer({ containerRef, scaleRef, txRef, tyRef, apply
         if (scaleRef.current <= 1 || !touchStartedOnImageRef.current) {
           const prev = tapRef.current
           if (prev.time > 0 && Date.now() - prev.time < DOUBLE_TAP_INTERVAL_MS) {
-            setTimeout(() => {
+            clearTapCloseTimer()
+            tapCloseTimerRef.current = window.setTimeout(() => {
+              tapCloseTimerRef.current = null
               if (tapRef.current.time === prev.time) {
                 onClose()
               }
             }, TAP_CLOSE_DELAY_MS)
           }
         }
+      } else {
+        setIsDragging(dragRef.current.active || pinchRef.current.active)
       }
+    }
+
+    const onTouchCancel = () => {
+      pinchRef.current.active = false
+      dragRef.current.active = false
+      hadMultiTouchRef.current = false
+      tapRef.current = { time: 0, x: 0, y: 0 }
+      clearTapCloseTimer()
+      setIsDragging(false)
     }
 
     el.addEventListener('touchstart', onTouchStart, { passive: false })
     el.addEventListener('touchmove', onTouchMove, { passive: false })
     el.addEventListener('touchend', onTouchEnd)
+    el.addEventListener('touchcancel', onTouchCancel)
     return () => {
       el.removeEventListener('touchstart', onTouchStart)
       el.removeEventListener('touchmove', onTouchMove)
       el.removeEventListener('touchend', onTouchEnd)
+      el.removeEventListener('touchcancel', onTouchCancel)
+      clearTapCloseTimer()
     }
   }, [apply, getCenter, onClose, containerRef, scaleRef, txRef, tyRef])
-
-  // 渲染期读取拖拽/捏合状态(与原实现一致:仅 apply 触发的渲染会刷新该值)
-  const isDragging = dragRef.current.active || pinchRef.current.active
 
   return { onClick, onDoubleClick, isDragging }
 }

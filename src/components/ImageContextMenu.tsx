@@ -2,10 +2,126 @@ import React, { useEffect, useState, useRef } from 'react'
 import { useStore, addImageFromUrl, ensureImageCached } from '../store'
 import { copyBlobToClipboard, getClipboardFailureMessage } from '../lib/image/clipboard'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { assertImagePixelLimit, MAX_INPUT_IMAGE_BYTES } from '../lib/taskRuntime'
+import { MAX_INPUT_IMAGES_PER_SUBMISSION } from '../lib/tasks'
+
+const MENU_IMAGE_FETCH_TIMEOUT_MS = 60_000
+
+function assertMenuImageSize(bytes: number) {
+  if (bytes > MAX_INPUT_IMAGE_BYTES) {
+    throw new Error(`图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
+  }
+}
+
+function assertResponseImageSize(res: Response) {
+  const contentLength = Number(res.headers.get('Content-Length'))
+  if (Number.isFinite(contentLength)) assertMenuImageSize(contentLength)
+}
+
+function createAbortError(): DOMException {
+  return new DOMException('aborted', 'AbortError')
+}
+
+function readBlobWithAbort(response: Response, signal: AbortSignal): Promise<Blob> {
+  if (signal.aborted) throw createAbortError()
+  if (!response.body) {
+    return new Promise((resolve, reject) => {
+      const onAbort = () => reject(createAbortError())
+      signal.addEventListener('abort', onAbort, { once: true })
+      try {
+        response.blob().then(resolve, reject).finally(() => {
+          signal.removeEventListener('abort', onAbort)
+        })
+      } catch (err) {
+        signal.removeEventListener('abort', onAbort)
+        reject(err)
+      }
+    })
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = response.body!.getReader()
+    const chunks: Uint8Array[] = []
+    let bytes = 0
+    let settled = false
+    const cleanup = () => {
+      signal.removeEventListener('abort', onAbort)
+      try {
+        reader.releaseLock()
+      } catch {
+        /* Ignore cleanup errors; abort/read failures carry the useful signal. */
+      }
+    }
+    const finish = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      fn()
+    }
+    const onAbort = () => {
+      void reader.cancel().catch(() => undefined)
+      finish(() => reject(createAbortError()))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+
+    const pump = (): void => {
+      try {
+        reader.read().then(({ done, value }) => {
+          if (done) {
+            finish(() =>
+              resolve(
+                new Blob(
+                  chunks.map((chunk) => new Uint8Array(chunk)),
+                  { type: response.headers.get('Content-Type') || 'application/octet-stream' },
+                ),
+              ),
+            )
+            return
+          }
+          if (value) {
+            bytes += value.byteLength
+            if (bytes > MAX_INPUT_IMAGE_BYTES) {
+              void reader.cancel().catch(() => undefined)
+              finish(() =>
+                reject(
+                  new Error(`图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`),
+                ),
+              )
+              return
+            }
+            chunks.push(value)
+          }
+          pump()
+        }, (err) => finish(() => reject(err)))
+      } catch (err) {
+        finish(() => reject(err))
+      }
+    }
+    pump()
+  })
+}
+
+async function fetchImageBlobForMenu(src: string): Promise<Blob> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), MENU_IMAGE_FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(src, { signal: controller.signal })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    assertResponseImageSize(res)
+    const blob = await readBlobWithAbort(res, controller.signal)
+    if (!blob.type.startsWith('image/')) throw new Error('不是有效的图片文件')
+    assertMenuImageSize(blob.size)
+    return blob
+  } catch (err) {
+    if (controller.signal.aborted) throw new Error('图片读取超时', { cause: err })
+    throw err
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
 
 export default function ImageContextMenu() {
   const [menuInfo, setMenuInfo] = useState<{ src: string; imageId?: string; x: number; y: number } | null>(null)
-  const showToast = useStore((s) => s.showToast)
   const inputImages = useStore((s) => s.inputImages)
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
@@ -99,13 +215,12 @@ export default function ImageContextMenu() {
     e.stopPropagation()
     setMenuInfo(null)
     try {
-      const res = await fetch(await resolveMenuImageUrl())
-      const blob = await res.blob()
+      const blob = await fetchImageBlobForMenu(await resolveMenuImageUrl())
       await copyBlobToClipboard(blob)
-      showToast('图片已复制', 'success')
+      useStore.getState().showToast('图片已复制', 'success')
     } catch (err) {
       console.error(err)
-      showToast(getClipboardFailureMessage('复制失败', err), 'error')
+      useStore.getState().showToast(getClipboardFailureMessage('复制失败', err), 'error')
     }
   }
 
@@ -113,29 +228,36 @@ export default function ImageContextMenu() {
     e.stopPropagation()
     setMenuInfo(null)
     try {
-      const res = await fetch(await resolveMenuImageUrl())
-      const blob = await res.blob()
+      const blob = await fetchImageBlobForMenu(await resolveMenuImageUrl())
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url
-      const ext = blob.type.split('/')[1] || 'png'
-      a.download = `image-${Date.now()}.${ext}`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      showToast('开始下载', 'success')
+      let appended = false
+      try {
+        a.href = url
+        const ext = blob.type.split('/')[1] || 'png'
+        a.download = `image-${Date.now()}.${ext}`
+        document.body.appendChild(a)
+        appended = true
+        a.click()
+      } finally {
+        if (appended) document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }
+      useStore.getState().showToast('开始下载', 'success')
     } catch (err) {
       console.error(err)
-      showToast('下载失败', 'error')
+      useStore.getState().showToast('下载失败', 'error')
     }
   }
 
   const handleEdit = async (e: React.MouseEvent) => {
     e.stopPropagation()
     setMenuInfo(null)
-    if (inputImages.length >= 16) {
-      showToast('参考图数量已达上限（16 张），无法继续添加', 'error')
+    if (inputImages.length >= MAX_INPUT_IMAGES_PER_SUBMISSION) {
+      useStore.getState().showToast(
+        `参考图数量已达上限（${MAX_INPUT_IMAGES_PER_SUBMISSION} 张），无法继续添加`,
+        'error',
+      )
       return
     }
 
@@ -144,10 +266,10 @@ export default function ImageContextMenu() {
       setDetailTaskId(null)
       setLightboxImageId(null)
       setMaskEditorImageId(null)
-      showToast('已加入参考图', 'success')
+      useStore.getState().showToast('已加入参考图', 'success')
     } catch (err) {
       console.error(err)
-      showToast(`加入参考图失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+      useStore.getState().showToast(`加入参考图失败：${err instanceof Error ? err.message : String(err)}`, 'error')
     }
   }
 
@@ -155,27 +277,25 @@ export default function ImageContextMenu() {
     e.stopPropagation()
     setMenuInfo(null)
     if (!captionerKeyConfigured) {
-      showToast('反推提示词 API 尚未配置，请在设置中配置后再试', 'error')
+      useStore.getState().showToast('反推提示词 API 尚未配置，请在设置中配置后再试', 'error')
       return
     }
     try {
-      const res = await fetch(await resolveMenuImageUrl())
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const blob = await res.blob()
-      if (!blob.type.startsWith('image/')) throw new Error('不是有效的图片文件')
+      const blob = await fetchImageBlobForMenu(await resolveMenuImageUrl())
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader()
         reader.onload = () => resolve(reader.result as string)
         reader.onerror = () => reject(reader.error)
         reader.readAsDataURL(blob)
       })
+      await assertImagePixelLimit(dataUrl)
       setDetailTaskId(null)
       setLightboxImageId(null)
       setMaskEditorImageId(null)
       setCaptionSource(dataUrl)
     } catch (err) {
       console.error(err)
-      showToast(`反推失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+      useStore.getState().showToast(`反推失败：${err instanceof Error ? err.message : String(err)}`, 'error')
     }
   }
 

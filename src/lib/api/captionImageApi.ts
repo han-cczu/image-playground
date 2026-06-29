@@ -1,9 +1,15 @@
 import type { CaptionerConfig } from '../../types'
 import {
+  appendCappedStreamRaw,
+  appendCappedStreamText,
   buildChatCompletionsUrl,
   extractStreamErrorMessage,
+  isTimeoutAbort,
   parseSseLine,
+  readChatErrorBody,
+  readStreamChunkWithAbort,
   resolveChatTimeoutMs,
+  wrapCause,
 } from './chatCompletionsShared'
 import { streamGeminiChat } from './geminiChatShared'
 import { dataUrlToInlinePart } from './geminiImageApi'
@@ -35,18 +41,26 @@ export async function captionImageStream(
   if (!config.apiKey.trim()) {
     throw new Error('未配置 API Key')
   }
-  if (!imageDataUrl.trim()) {
+  const trimmedImageDataUrl = imageDataUrl.trim()
+  if (!trimmedImageDataUrl) {
     throw new Error('未选择图片')
+  }
+  if (options.signal?.aborted) {
+    throw wrapCause('已取消', options.signal.reason)
   }
 
   // provider 分流(缺省/undefined 走 OpenAI,守住现有测试)
   if (config.provider === 'gemini') {
     return streamGeminiChat(
       config,
-      [{ text: USER_GUIDE_TEXT }, dataUrlToInlinePart(imageDataUrl)],
+      [{ text: USER_GUIDE_TEXT }, dataUrlToInlinePart(trimmedImageDataUrl)],
       '反推结果为空',
       options,
     )
+  }
+
+  if (trimmedImageDataUrl.slice(0, 'data:'.length).toLowerCase() === 'data:') {
+    dataUrlToInlinePart(trimmedImageDataUrl)
   }
 
   const url = buildChatCompletionsUrl(config.baseUrl)
@@ -79,7 +93,7 @@ export async function captionImageStream(
             role: 'user',
             content: [
               { type: 'text', text: USER_GUIDE_TEXT },
-              { type: 'image_url', image_url: { url: imageDataUrl } },
+              { type: 'image_url', image_url: { url: trimmedImageDataUrl } },
             ],
           },
         ],
@@ -89,19 +103,20 @@ export async function captionImageStream(
   } catch (err) {
     clearTimeout(timeoutTimer)
     externalSignal?.removeEventListener('abort', onExternalAbort)
-    if (externalSignal?.aborted) throw new Error('已取消')
-    if ((err as { name?: string }).name === 'AbortError') throw new Error('请求超时')
-    throw new Error(`网络错误：${err instanceof Error ? err.message : String(err)}`)
+    if (externalSignal?.aborted) throw wrapCause('已取消', err)
+    if (isTimeoutAbort(err, timeoutController.signal)) throw wrapCause('请求超时', err)
+    throw wrapCause(`网络错误：${err instanceof Error ? err.message : String(err)}`, err)
   }
 
   if (!response.ok) {
     // 先读错误体、后解除超时/取消接线:顺序反了的话,错误体悬挂时 text() 永久挂起且无法取消
-    const text = await response.text().catch(() => '')
-    clearTimeout(timeoutTimer)
-    externalSignal?.removeEventListener('abort', onExternalAbort)
-    // 读错误体期间用户点了取消:与本函数其余路径同口径归一化为「已取消」,不转写成 HTTP 错误
-    if (externalSignal?.aborted) throw new Error('已取消')
-    throw new Error(`HTTP ${response.status}${text ? ` - ${text.slice(0, 300)}` : ''}`)
+    try {
+      const text = await readChatErrorBody(response, timeoutController.signal, externalSignal)
+      throw new Error(`HTTP ${response.status}${text ? ` - ${text.slice(0, 300)}` : ''}`)
+    } finally {
+      clearTimeout(timeoutTimer)
+      externalSignal?.removeEventListener('abort', onExternalAbort)
+    }
   }
 
   const body = response.body
@@ -118,19 +133,22 @@ export async function captionImageStream(
   let raw = ''
   try {
     while (true) {
-      const { value, done } = await reader.read()
+      const { value, done } = await readStreamChunkWithAbort(
+        reader,
+        timeoutController.signal,
+        externalSignal,
+      )
       if (done) break
       const text = decoder.decode(value, { stream: true })
       buffer += text
-      raw += text
+      raw = appendCappedStreamRaw(raw, text)
       let newlineIdx = buffer.indexOf('\n')
       while (newlineIdx !== -1) {
         const line = buffer.slice(0, newlineIdx).replace(/\r$/, '')
         buffer = buffer.slice(newlineIdx + 1)
         const delta = parseSseLine(line)
         if (delta) {
-          full += delta
-          options.onDelta?.(delta)
+          full = appendCappedStreamText(full, delta, options.onDelta)
         }
         newlineIdx = buffer.indexOf('\n')
       }
@@ -138,18 +156,21 @@ export async function captionImageStream(
     if (buffer.trim()) {
       const delta = parseSseLine(buffer.trim())
       if (delta) {
-        full += delta
-        options.onDelta?.(delta)
+        full = appendCappedStreamText(full, delta, options.onDelta)
       }
     }
   } catch (err) {
-    if (externalSignal?.aborted) throw new Error('已取消')
-    if ((err as { name?: string }).name === 'AbortError') throw new Error('请求超时')
+    if (externalSignal?.aborted) throw wrapCause('已取消', err)
+    if (isTimeoutAbort(err, timeoutController.signal)) throw wrapCause('请求超时', err)
     throw err
   } finally {
     clearTimeout(timeoutTimer)
     externalSignal?.removeEventListener('abort', onExternalAbort)
-    reader.releaseLock()
+    try {
+      reader.releaseLock()
+    } catch {
+      /* Ignore cleanup errors so they do not mask the request failure. */
+    }
   }
 
   const trimmed = full.trim()

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useStore } from '../../store'
 import Modal, { ModalCloseButton } from '../Modal'
 import { findChildTasks, findParentTasks } from '../../lib/lineage'
@@ -12,8 +12,6 @@ export default function DetailModal() {
   const detailTaskId = useStore((s) => s.detailTaskId)
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
 
-  const [imageIndex, setImageIndex] = useState(0)
-
   const task = useMemo(
     () => tasks.find((t) => t.id === detailTaskId) ?? null,
     [tasks, detailTaskId],
@@ -23,10 +21,31 @@ export default function DetailModal() {
   const parentLinks = useMemo(() => (task ? findParentTasks(task, tasks) : []), [task, tasks])
   const childLinks = useMemo(() => (task ? findChildTasks(task, tasks) : []), [task, tasks])
 
-  // Reset index when task changes
-  useEffect(() => {
-    setImageIndex(0)
-  }, [detailTaskId])
+  if (!task) return null
+
+  return (
+    <DetailModalPanel
+      key={task.id}
+      task={task}
+      parentLinks={parentLinks}
+      childLinks={childLinks}
+      onClose={() => setDetailTaskId(null)}
+    />
+  )
+}
+
+function DetailModalPanel({
+  task,
+  parentLinks,
+  childLinks,
+  onClose,
+}: {
+  task: NonNullable<ReturnType<typeof useStore.getState>['tasks'][number]>
+  parentLinks: ReturnType<typeof findParentTasks>
+  childLinks: ReturnType<typeof findChildTasks>
+  onClose: () => void
+}) {
+  const [imageIndex, setImageIndex] = useState(0)
 
   const now = useRunningNow(task?.status)
 
@@ -37,8 +56,6 @@ export default function DetailModal() {
   const maskTargetSrc = maskTargetId ? imageSrcs[maskTargetId] || '' : ''
   const maskSrc = task?.maskImageId ? imageSrcs[task.maskImageId] || '' : ''
   const maskPreviewSrc = useMaskPreview(maskTargetSrc, maskSrc)
-
-  if (!task) return null
 
   const currentImageRatio = currentOutputImageId ? imageRatios[currentOutputImageId] : ''
   const currentImageSize = currentOutputImageId ? imageSizes[currentOutputImageId] : ''
@@ -61,54 +78,56 @@ export default function DetailModal() {
 
   return (
     <Modal
-      onClose={() => setDetailTaskId(null)}
+      onClose={onClose}
       ariaLabel="记录详情"
       tone="deep"
       panelClassName="w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row"
     >
-        <div className="flex h-14 items-center justify-end px-4 md:hidden">
-          <ModalCloseButton
-            onClick={() => setDetailTaskId(null)}
-            iconClassName="w-6 h-6"
-          />
-        </div>
+      <div className="flex h-14 items-center justify-end px-4 md:hidden">
+        <ModalCloseButton onClick={onClose} iconClassName="w-6 h-6" />
+      </div>
 
-        {/* 左侧：图片 */}
-        <ImagePanel
+      {/* 左侧：图片 */}
+      <ImagePanel
+        task={task}
+        imageIndex={imageIndex}
+        setImageIndex={setImageIndex}
+        currentOutputImageSrc={currentOutputImageSrc}
+        currentImageRatio={currentImageRatio}
+        currentImageSize={currentImageSize}
+        durationText={durationText}
+      />
+
+      {/* 右侧：信息 */}
+      <div className="md:w-1/2 w-full p-5 overflow-y-auto flex flex-col">
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 hidden p-1 rounded-full hover:bg-gray-100 dark:hover:bg-white/[0.06] transition text-gray-400 z-10 md:block"
+          aria-label="关闭"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+
+        <InfoPanel
           task={task}
-          imageIndex={imageIndex}
-          setImageIndex={setImageIndex}
-          currentOutputImageSrc={currentOutputImageSrc}
-          currentImageRatio={currentImageRatio}
-          currentImageSize={currentImageSize}
+          parentLinks={parentLinks}
+          childLinks={childLinks}
+          imageSrcs={imageSrcs}
+          maskPreviewSrc={maskPreviewSrc}
+          currentOutputImageId={currentOutputImageId}
           durationText={durationText}
         />
 
-        {/* 右侧：信息 */}
-        <div className="md:w-1/2 w-full p-5 overflow-y-auto flex flex-col">
-          <button
-            onClick={() => setDetailTaskId(null)}
-            className="absolute top-3 right-3 hidden p-1 rounded-full hover:bg-gray-100 dark:hover:bg-white/[0.06] transition text-gray-400 z-10 md:block"
-            aria-label="关闭"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-
-          <InfoPanel
-            task={task}
-            parentLinks={parentLinks}
-            childLinks={childLinks}
-            imageSrcs={imageSrcs}
-            maskPreviewSrc={maskPreviewSrc}
-            currentOutputImageId={currentOutputImageId}
-            durationText={durationText}
-          />
-
-          {/* 操作按钮 */}
-          <ActionBar task={task} />
-        </div>
+        {/* 操作按钮 */}
+        <ActionBar task={task} />
+      </div>
     </Modal>
   )
 }

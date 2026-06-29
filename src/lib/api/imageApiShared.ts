@@ -1,4 +1,10 @@
 import type { AppSettings, TaskParams } from '../../types'
+import {
+  MAX_TASK_PARAM_STRING_LEN,
+  normalizeOutputCompression,
+  normalizeOutputCount,
+} from './paramCompatibility'
+import { MAX_TASK_TEXT_LEN } from '../tasks'
 
 export const MIME_MAP: Record<string, string> = {
   png: 'image/png',
@@ -14,6 +20,8 @@ export const MAX_IMAGE_INPUT_PAYLOAD_BYTES = 512 * 1024 * 1024
  * 与入站单图上限(MAX_INPUT_IMAGE_BYTES = 50MB)同量级,留少量余量。
  */
 export const MAX_REMOTE_IMAGE_BYTES = 64 * 1024 * 1024
+const MAX_API_ERROR_BODY_BYTES = 64 * 1024
+const MAX_API_JSON_BODY_BYTES = 128 * 1024 * 1024
 
 export interface CallApiOptions {
   settings: AppSettings
@@ -81,12 +89,64 @@ export function isHttpUrl(value: unknown): value is string {
   return typeof value === 'string' && /^https?:\/\//i.test(value)
 }
 
-export function isDataUrl(value: unknown): value is string {
-  return typeof value === 'string' && value.startsWith('data:')
+function hasDataUrlScheme(value: string): boolean {
+  return value.slice(0, 'data:'.length).toLowerCase() === 'data:'
 }
 
-export function normalizeBase64Image(value: string, fallbackMime: string): string {
-  return value.startsWith('data:') ? value : `data:${fallbackMime};base64,${value}`
+export function isDataUrl(value: unknown): value is string {
+  return typeof value === 'string' && hasDataUrlScheme(value)
+}
+
+function isImageMime(mime: string): boolean {
+  return mime.toLowerCase().startsWith('image/')
+}
+
+export function normalizeBase64Image(
+  value: string,
+  fallbackMime: string,
+  maxBytes = MAX_REMOTE_IMAGE_BYTES,
+): string {
+  const trimmed = value.trim()
+  if (!trimmed) throw new Error('接口未返回可用图片数据')
+  const dataUrl = hasDataUrlScheme(trimmed) ? trimmed : `data:${fallbackMime};base64,${trimmed}`
+  const commaIndex = dataUrl.indexOf(',')
+  if (commaIndex >= 0 && !dataUrl.slice(commaIndex + 1).trim()) {
+    throw new Error('接口未返回可用图片数据')
+  }
+  const contentType = getDataUrlMime(dataUrl, fallbackMime)
+  if (!isImageMime(contentType)) {
+    throw new Error(`生成图片返回的不是图片内容(Content-Type: ${contentType || '未知'})`)
+  }
+  assertMaxBytes('生成图片', getDataUrlDecodedByteSize(dataUrl), maxBytes)
+  return dataUrl
+}
+
+export function assertImageDataUrl(dataUrl: string): { mime: string; data: string } {
+  const commaIndex = dataUrl.indexOf(',')
+  if (!hasDataUrlScheme(dataUrl) || commaIndex < 0) {
+    throw new Error('输入图片格式无效')
+  }
+  const metaParts = dataUrl.slice('data:'.length, commaIndex).split(';').filter(Boolean)
+  const mime = metaParts[0] || 'application/octet-stream'
+  if (!metaParts.some((part) => part.toLowerCase() === 'base64')) {
+    throw new Error('输入图片格式无效')
+  }
+  if (!isImageMime(mime)) {
+    throw new Error(`输入图片不是图片内容(Content-Type: ${mime || '未知'})`)
+  }
+  const data = dataUrl.slice(commaIndex + 1)
+  if (!data.trim()) {
+    throw new Error('输入图片数据为空')
+  }
+  return { mime, data }
+}
+
+export function normalizeRevisedPrompt(value: unknown): string | undefined {
+  return typeof value === 'string' ? value.slice(0, MAX_TASK_TEXT_LEN) : undefined
+}
+
+function clampTaskParamString(value: string): string {
+  return value.slice(0, MAX_TASK_PARAM_STRING_LEN)
 }
 
 /**
@@ -119,7 +179,13 @@ export function getDataUrlDecodedByteSize(dataUrl: string): number {
 
   const meta = dataUrl.slice(0, commaIndex)
   const payload = dataUrl.slice(commaIndex + 1)
-  if (!/;base64/i.test(meta)) return decodeURIComponent(payload).length
+  if (!/;base64/i.test(meta)) {
+    try {
+      return decodeURIComponent(payload).length
+    } catch {
+      return payload.length
+    }
+  }
 
   const normalized = payload.replace(/\s/g, '')
   const padding = normalized.endsWith('==') ? 2 : normalized.endsWith('=') ? 1 : 0
@@ -130,6 +196,12 @@ function assertMaxBytes(label: string, bytes: number, maxBytes: number) {
   if (bytes > maxBytes) {
     throw new Error(`${label}过大：${formatMiB(bytes)}，上限为 ${formatMiB(maxBytes)}`)
   }
+}
+
+function getDataUrlMime(dataUrl: string, fallbackMime: string): string {
+  const commaIndex = dataUrl.indexOf(',')
+  if (!hasDataUrlScheme(dataUrl) || commaIndex < 0) return fallbackMime
+  return dataUrl.slice('data:'.length, commaIndex).split(';')[0] || fallbackMime
 }
 
 export function assertImageInputPayloadSize(bytes: number) {
@@ -152,8 +224,83 @@ async function blobToDataUrl(blob: Blob, fallbackMime: string): Promise<string> 
   return `data:${blob.type || fallbackMime};base64,${btoa(binary)}`
 }
 
-export async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, signal?: AbortSignal): Promise<string> {
-  if (isDataUrl(url)) return url
+function createAbortError(): DOMException {
+  return new DOMException('aborted', 'AbortError')
+}
+
+function readBodyWithAbort<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return read()
+  if (signal.aborted) throw createAbortError()
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(createAbortError())
+    signal.addEventListener('abort', onAbort, { once: true })
+    try {
+      read()
+        .then(resolve, reject)
+        .finally(() => {
+          signal.removeEventListener('abort', onAbort)
+        })
+    } catch (err) {
+      signal.removeEventListener('abort', onAbort)
+      reject(err)
+    }
+  })
+}
+
+async function readBlobWithAbort(
+  response: Response,
+  signal: AbortSignal | undefined,
+  maxBytes: number,
+  label: string,
+): Promise<Blob> {
+  if (!response.body) {
+    return readBodyWithAbort(() => response.blob(), signal)
+  }
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let bytes = 0
+
+  try {
+    while (true) {
+      const { done, value } = await readStreamChunkWithAbort(reader, signal)
+      if (done) break
+      if (!value?.byteLength) continue
+
+      bytes += value.byteLength
+      if (bytes > maxBytes) {
+        await reader.cancel().catch(() => undefined)
+        assertMaxBytes(label, bytes, maxBytes)
+      }
+      chunks.push(value)
+    }
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch {
+      /* Ignore cleanup errors so they do not mask abort/read failures. */
+    }
+  }
+
+  return new Blob(
+    chunks.map((chunk) => new Uint8Array(chunk)),
+    { type: response.headers.get('Content-Type') || undefined },
+  )
+}
+
+export async function fetchImageUrlAsDataUrl(
+  url: string,
+  fallbackMime: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (isDataUrl(url)) {
+    assertMaxBytes('图片 URL 响应', getDataUrlDecodedByteSize(url), MAX_REMOTE_IMAGE_BYTES)
+    const contentType = getDataUrlMime(url, fallbackMime)
+    if (!isImageMime(contentType)) {
+      throw new Error(`图片 URL 返回的不是图片内容(Content-Type: ${contentType || '未知'})`)
+    }
+    return url
+  }
 
   const response = await fetch(url, {
     cache: 'no-store',
@@ -164,34 +311,188 @@ export async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, 
     throw new Error(`图片 URL 下载失败：HTTP ${response.status}`)
   }
 
-  const blob = await response.blob()
+  const contentLength = Number(response.headers.get('Content-Length'))
+  if (Number.isFinite(contentLength)) {
+    assertMaxBytes('图片 URL 响应', contentLength, MAX_REMOTE_IMAGE_BYTES)
+  }
+
+  const blob = await readBlobWithAbort(response, signal, MAX_REMOTE_IMAGE_BYTES, '图片 URL 响应')
   // 上游(可能是用户可配/被注入的半信任主机)返回的图片 URL:按单图上限设防并校验确为图片,
   // 避免把任意/超大响应体整块读入内存(arrayBuffer + binary 串 + btoa 三重放大)导致内存暴涨 / 页面卡死。
   assertMaxBytes('图片 URL 响应', blob.size, MAX_REMOTE_IMAGE_BYTES)
   const contentType = blob.type || fallbackMime
-  if (!contentType.startsWith('image/')) {
+  if (!isImageMime(contentType)) {
     throw new Error(`图片 URL 返回的不是图片内容(Content-Type: ${contentType || '未知'})`)
   }
   return blobToDataUrl(blob, fallbackMime)
 }
 
-export async function getApiErrorMessage(response: Response): Promise<string> {
-  let errorMsg = `HTTP ${response.status}`
+function readTextWithAbort(response: Response, signal?: AbortSignal): Promise<string> {
+  return readBodyWithAbort(() => response.text(), signal)
+}
+
+function clampApiErrorMessage(message: string): string {
+  return message.slice(0, MAX_TASK_TEXT_LEN)
+}
+
+function readStreamChunkWithAbort(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal?: AbortSignal,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (!signal) return reader.read()
+  if (signal.aborted) throw createAbortError()
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      void reader.cancel().catch(() => undefined)
+      reject(createAbortError())
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    try {
+      reader
+        .read()
+        .then(resolve, reject)
+        .finally(() => {
+          signal.removeEventListener('abort', onAbort)
+        })
+    } catch (err) {
+      signal.removeEventListener('abort', onAbort)
+      reject(err)
+    }
+  })
+}
+
+async function readCappedTextWithAbort(
+  response: Response,
+  signal: AbortSignal | undefined,
+  maxBytes: number,
+  label: string,
+): Promise<string> {
+  const contentLength = Number(response.headers.get('Content-Length'))
+  if (Number.isFinite(contentLength)) {
+    assertMaxBytes(label, contentLength, maxBytes)
+  }
+
+  const body = response.body
+  if (!body) {
+    const text = await readTextWithAbort(response, signal)
+    assertMaxBytes(label, new TextEncoder().encode(text).byteLength, maxBytes)
+    return text
+  }
+
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  let bytesRead = 0
+
   try {
-    const errJson = await response.json()
+    while (true) {
+      const { done, value } = await readStreamChunkWithAbort(reader, signal)
+      if (done) break
+      if (!value?.byteLength) continue
+
+      bytesRead += value.byteLength
+      if (bytesRead > maxBytes) {
+        await reader.cancel().catch(() => undefined)
+        assertMaxBytes(label, bytesRead, maxBytes)
+      }
+      text += decoder.decode(value, { stream: true })
+    }
+
+    text += decoder.decode()
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch {
+      /* Ignore cleanup errors so they do not mask abort/read failures. */
+    }
+  }
+
+  return text
+}
+
+async function readLimitedTextWithAbort(response: Response, signal?: AbortSignal): Promise<string> {
+  if (signal?.aborted) throw createAbortError()
+
+  const contentLength = Number(response.headers?.get('Content-Length'))
+  if (Number.isFinite(contentLength) && contentLength > MAX_API_ERROR_BODY_BYTES) return ''
+
+  const body = response.body
+  if (!body) {
+    return (await readTextWithAbort(response, signal)).slice(0, MAX_API_ERROR_BODY_BYTES)
+  }
+
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  let bytesRead = 0
+
+  try {
+    while (bytesRead < MAX_API_ERROR_BODY_BYTES) {
+      const { done, value } = await readStreamChunkWithAbort(reader, signal)
+      if (done) break
+      if (!value?.byteLength) continue
+
+      const remaining = MAX_API_ERROR_BODY_BYTES - bytesRead
+      const chunk = value.byteLength > remaining ? value.slice(0, remaining) : value
+      bytesRead += chunk.byteLength
+      text += decoder.decode(chunk, { stream: bytesRead < MAX_API_ERROR_BODY_BYTES })
+
+      if (value.byteLength > remaining) break
+    }
+
+    text += decoder.decode()
+    if (bytesRead >= MAX_API_ERROR_BODY_BYTES) {
+      await reader.cancel().catch(() => undefined)
+    }
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch {
+      /* Ignore cleanup errors so they do not mask abort/read failures. */
+    }
+  }
+
+  return text
+}
+
+export function readJsonWithAbort<T = unknown>(
+  response: Response,
+  signal?: AbortSignal,
+  maxBytes = MAX_API_JSON_BODY_BYTES,
+): Promise<T> {
+  return readCappedTextWithAbort(response, signal, maxBytes, 'API JSON 响应').then(
+    (text) => JSON.parse(text) as T,
+  )
+}
+
+export async function getApiErrorMessage(
+  response: Response,
+  signal?: AbortSignal,
+): Promise<string> {
+  let errorMsg = `HTTP ${response.status}`
+  let text = ''
+  try {
+    text = await readLimitedTextWithAbort(response, signal)
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === 'AbortError') throw err
+  }
+
+  if (!text) return errorMsg
+
+  try {
+    const errJson = JSON.parse(text)
     if (errJson.error?.message) errorMsg = errJson.error.message
     else if (typeof errJson.detail === 'string') errorMsg = errJson.detail
-    else if (Array.isArray(errJson.detail)) errorMsg = errJson.detail.map((item: unknown) => typeof item === 'string' ? item : JSON.stringify(item)).join('\n')
+    else if (Array.isArray(errJson.detail))
+      errorMsg = errJson.detail
+        .map((item: unknown) => (typeof item === 'string' ? item : JSON.stringify(item)))
+        .join('\n')
     else if (typeof errJson.error === 'string') errorMsg = errJson.error
     else if (errJson.message) errorMsg = errJson.message
   } catch {
-    try {
-      errorMsg = await response.text()
-    } catch {
-      /* ignore */
-    }
+    errorMsg = text
   }
-  return errorMsg
+  return clampApiErrorMessage(errorMsg)
 }
 
 export function pickActualParams(source: unknown): Partial<TaskParams> {
@@ -199,22 +500,40 @@ export function pickActualParams(source: unknown): Partial<TaskParams> {
   const record = source as Record<string, unknown>
   const actualParams: Partial<TaskParams> = {}
 
-  if (typeof record.size === 'string') actualParams.size = record.size
-  if (record.quality === 'auto' || record.quality === 'low' || record.quality === 'medium' || record.quality === 'high') {
+  if (typeof record.size === 'string') actualParams.size = clampTaskParamString(record.size)
+  if (
+    record.quality === 'auto' ||
+    record.quality === 'low' ||
+    record.quality === 'medium' ||
+    record.quality === 'high'
+  ) {
     actualParams.quality = record.quality
   }
-  if (record.output_format === 'png' || record.output_format === 'jpeg' || record.output_format === 'webp') {
+  if (
+    record.output_format === 'png' ||
+    record.output_format === 'jpeg' ||
+    record.output_format === 'webp'
+  ) {
     actualParams.output_format = record.output_format
   }
-  if (typeof record.output_compression === 'number') actualParams.output_compression = record.output_compression
-  if (record.moderation === 'auto' || record.moderation === 'low') actualParams.moderation = record.moderation
-  if (typeof record.n === 'number') actualParams.n = record.n
+  if (typeof record.output_compression === 'number')
+    actualParams.output_compression = normalizeOutputCompression(record.output_compression)
+  if (record.moderation === 'auto' || record.moderation === 'low')
+    actualParams.moderation = record.moderation
+  if (typeof record.n === 'number') actualParams.n = normalizeOutputCount(record.n)
+  if (typeof record.stylePreset === 'string')
+    actualParams.stylePreset = clampTaskParamString(record.stylePreset)
 
   return actualParams
 }
 
-export function mergeActualParams(...sources: Array<Partial<TaskParams> | undefined>): Partial<TaskParams> | undefined {
-  const merged = Object.assign({}, ...sources.filter((source) => source && Object.keys(source).length))
+export function mergeActualParams(
+  ...sources: Array<Partial<TaskParams> | undefined>
+): Partial<TaskParams> | undefined {
+  const merged = Object.assign(
+    {},
+    ...sources.filter((source) => source && Object.keys(source).length),
+  )
   return Object.keys(merged).length ? merged : undefined
 }
 
@@ -228,6 +547,12 @@ export function summarizeConcurrentFailures(results: PromiseSettledResult<CallAp
     .map((r) => r.value)
   const failedResults = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
   if (!failedResults.length) return { successfulResults }
+
+  const cancellationFailure = failedResults.find((result) => {
+    const message = getErrorMessage(result.reason)
+    return message === '已取消'
+  })
+  if (cancellationFailure) throw cancellationFailure.reason
 
   return {
     successfulResults,

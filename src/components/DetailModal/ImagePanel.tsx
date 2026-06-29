@@ -28,7 +28,6 @@ export default function ImagePanel({
 }: ImagePanelProps) {
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
-  const showToast = useStore((s) => s.showToast)
 
   const imagePanelRef = useRef<HTMLDivElement>(null)
   const mainImageRef = useRef<HTMLImageElement>(null)
@@ -64,14 +63,16 @@ export default function ImagePanel({
     const errorText = task.error || '生成失败'
     try {
       await copyTextToClipboard(errorText)
-      showToast('完整报错已复制', 'success')
+      useStore.getState().showToast('完整报错已复制', 'success')
     } catch (err) {
-      showToast(getClipboardFailureMessage('复制报错失败', err), 'error')
+      useStore.getState().showToast(getClipboardFailureMessage('复制报错失败', err), 'error')
     }
   }
 
   const handleRetry = () => {
-    retryTask(task)
+    void retryTask(task).catch(() => {
+      /* retryTask surfaces recoverable errors via toast */
+    })
     setDetailTaskId(null)
   }
 

@@ -5,6 +5,7 @@ import type { TaskRecord } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import {
   __resetDbCacheForTests,
+  IDB_CHANGE_STORAGE_KEY,
   dataUrlToImageBlob,
   deleteConversation,
   forEachImageMeta,
@@ -21,6 +22,24 @@ import {
 } from './db'
 import type { StoredImage } from '../types'
 import { ARCHIVE_CONVERSATION_ID, createArchiveConversation } from './conversations'
+
+function createLocalStorageStub(): Storage {
+  const values = new Map<string, string>()
+  return {
+    get length() {
+      return values.size
+    },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => Array.from(values.keys())[index] ?? null,
+    removeItem: (key) => {
+      values.delete(key)
+    },
+    setItem: (key, value) => {
+      values.set(key, value)
+    },
+  }
+}
 
 function createTask(id: string, conversationId?: string): TaskRecord {
   return {
@@ -40,9 +59,66 @@ function createTask(id: string, conversationId?: string): TaskRecord {
   }
 }
 
+describe('IndexedDB cross-tab change notifications', () => {
+  beforeEach(() => {
+    globalThis.indexedDB = new IDBFactory()
+    __resetDbCacheForTests()
+    globalThis.localStorage = createLocalStorageStub()
+    localStorage.clear()
+  })
+
+  afterEach(() => {
+    globalThis.indexedDB = new IDBFactory()
+    __resetDbCacheForTests()
+    localStorage.clear()
+    Reflect.deleteProperty(globalThis, 'localStorage')
+  })
+
+  it('bumps a localStorage change token after a write transaction completes', async () => {
+    expect(localStorage.getItem(IDB_CHANGE_STORAGE_KEY)).toBeNull()
+
+    await putTask(createTask('notified-task'))
+
+    expect(localStorage.getItem(IDB_CHANGE_STORAGE_KEY)).toEqual(expect.any(String))
+  })
+
+  it('does not bump the change token for readonly queries', async () => {
+    await getAllTasks()
+
+    expect(localStorage.getItem(IDB_CHANGE_STORAGE_KEY)).toBeNull()
+  })
+})
+
 describe('stored image conversions', () => {
   it('converts base64 data URLs to image blobs', async () => {
     const result = dataUrlToImageBlob('data:image/png;base64,AQID')
+
+    expect(result.mime).toBe('image/png')
+    expect(result.blob.type).toBe('image/png')
+    expect(Array.from(new Uint8Array(await result.blob.arrayBuffer()))).toEqual([1, 2, 3])
+  })
+
+  it('rejects malformed data URLs with domain errors', () => {
+    expect(() => dataUrlToImageBlob('not-a-data-url')).toThrow('图片 data URL 格式无效')
+    expect(() => dataUrlToImageBlob('data:image/png;base64,%%%%')).toThrow('图片 data URL 解码失败')
+  })
+
+  it('rejects data URLs whose MIME type is not an image', () => {
+    expect(() => dataUrlToImageBlob('data:text/plain;base64,SGk=')).toThrow(
+      '图片 data URL 不是图片内容',
+    )
+  })
+
+  it('accepts image data URLs whose MIME type uses uppercase letters', async () => {
+    const result = dataUrlToImageBlob('data:IMAGE/PNG;base64,AQID')
+
+    expect(result.mime).toBe('IMAGE/PNG')
+    expect(result.blob.type).toBe('image/png')
+    expect(Array.from(new Uint8Array(await result.blob.arrayBuffer()))).toEqual([1, 2, 3])
+  })
+
+  it('accepts image data URLs whose scheme uses uppercase letters', async () => {
+    const result = dataUrlToImageBlob('DATA:image/png;base64,AQID')
 
     expect(result.mime).toBe('image/png')
     expect(result.blob.type).toBe('image/png')
@@ -59,16 +135,144 @@ describe('stored image conversions', () => {
     })
   })
 
+  it('does not expose legacy data URL records whose MIME type is not an image', async () => {
+    const record = { id: 'legacy-text', dataUrl: 'data:text/plain;base64,SGk=' }
+
+    await expect(storedImageToDataUrl(record)).rejects.toThrow('图片 data URL 不是图片内容')
+  })
+
+  it('does not expose blob records whose MIME type is not an image', async () => {
+    const record = {
+      id: 'text-blob',
+      blob: new Blob(['hello'], { type: 'text/plain' }),
+      mime: 'text/plain',
+    }
+
+    await expect(storedImageToDataUrl(record)).rejects.toThrow('图片 Blob 不是图片内容')
+    await expect(storedImageToBytes(record)).rejects.toThrow('图片 Blob 不是图片内容')
+  })
+
   it('converts blob records back to data URLs and bytes', async () => {
     const blob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/webp' })
 
     await expect(storedImageToDataUrl({ id: 'blob', blob, mime: 'image/webp' })).resolves.toBe(
       'data:image/webp;base64,AQID',
     )
-    await expect(storedImageToBytes({ id: 'blob', blob, mime: 'image/webp' })).resolves.toMatchObject({
+    await expect(
+      storedImageToBytes({ id: 'blob', blob, mime: 'image/webp' }),
+    ).resolves.toMatchObject({
       bytes: new Uint8Array([1, 2, 3]),
       mime: 'image/webp',
     })
+  })
+
+  it('drops invalid image source metadata before storing images', async () => {
+    globalThis.indexedDB = new IDBFactory()
+    __resetDbCacheForTests()
+
+    await putImage({
+      id: 'bad-source',
+      blob: new Blob(['image'], { type: 'image/png' }),
+      source: 'legacy-bad-source',
+    } as unknown as StoredImage)
+
+    const stored = await getAllImages()
+
+    expect(stored).toEqual([
+      expect.not.objectContaining({
+        source: 'legacy-bad-source',
+      }),
+    ])
+  })
+
+  it('drops invalid image timestamps before storing images', async () => {
+    globalThis.indexedDB = new IDBFactory()
+    __resetDbCacheForTests()
+
+    await putImage({
+      id: 'bad-created-at',
+      blob: new Blob(['image'], { type: 'image/png' }),
+      createdAt: Number.POSITIVE_INFINITY,
+    })
+
+    const stored = await getAllImages()
+
+    expect(stored).toEqual([
+      expect.not.objectContaining({
+        createdAt: Number.POSITIVE_INFINITY,
+      }),
+    ])
+  })
+
+  it('does not store blob records whose MIME type is not an image', async () => {
+    globalThis.indexedDB = new IDBFactory()
+    __resetDbCacheForTests()
+
+    await expect(
+      putImage({
+        id: 'text-blob',
+        blob: new Blob(['hello'], { type: 'text/plain' }),
+        mime: 'text/plain',
+      }),
+    ).rejects.toThrow('图片 Blob 不是图片内容')
+
+    await expect(getAllImages()).resolves.toEqual([])
+  })
+
+  it('does not store images whose legacy data URL cannot be decoded', async () => {
+    globalThis.indexedDB = new IDBFactory()
+    __resetDbCacheForTests()
+
+    await expect(
+      putImage({
+        id: 'broken-data-url',
+        dataUrl: 'data:image/png;base64,%%%%',
+      }),
+    ).rejects.toThrow('图片 data URL 解码失败')
+
+    await expect(getAllImages()).resolves.toEqual([])
+  })
+})
+
+describe('tasks object store', () => {
+  beforeEach(() => {
+    globalThis.indexedDB = new IDBFactory()
+    __resetDbCacheForTests()
+  })
+
+  afterEach(() => {
+    globalThis.indexedDB = new IDBFactory()
+    __resetDbCacheForTests()
+  })
+
+  it('normalizes task records read from IndexedDB', async () => {
+    await putTask({
+      id: 'dirty-task',
+      prompt: 42,
+      params: { n: 'not-a-number' },
+      inputImageIds: ['kept-input', 7],
+      outputImages: 'not-an-array',
+      status: 'weird',
+      gridAxes: {
+        x: { kind: 'quality', values: [{ key: 1, label: 'low' }] },
+      },
+      gridCoord: { x: 42 },
+    } as unknown as TaskRecord)
+
+    const tasks = await getAllTasks()
+
+    expect(tasks).toEqual([
+      expect.objectContaining({
+        id: 'dirty-task',
+        prompt: '',
+        params: expect.objectContaining({ n: 1 }),
+        inputImageIds: ['kept-input'],
+        outputImages: [],
+        status: 'done',
+        gridAxes: undefined,
+        gridCoord: undefined,
+      }),
+    ])
   })
 })
 
@@ -147,9 +351,7 @@ describe('conversations object store', () => {
     expect(remainingConversations.map((c) => c.id).sort()).toEqual(
       [archive.id, otherConv.id].sort(),
     )
-    expect(remainingTasks.map((t) => t.id).sort()).toEqual(
-      ['task-archive', 'task-keep'].sort(),
-    )
+    expect(remainingTasks.map((t) => t.id).sort()).toEqual(['task-archive', 'task-keep'].sort())
   })
 
   it('keeps tasks intact when cascadeTasks is false', async () => {
@@ -178,6 +380,31 @@ describe('conversations object store', () => {
     const list = await getAllConversations()
     expect(list.find((c) => c.id === 'conv-foo')).toMatchObject(conv)
   })
+
+  it('normalizes conversation records read from IndexedDB', async () => {
+    await putConversation({
+      id: 'dirty-conv',
+      title: 42,
+      createdAt: 'bad',
+      updatedAt: 'bad',
+      sortOrder: 'bad',
+      color: 7,
+    } as unknown as ReturnType<typeof createArchiveConversation>)
+
+    const list = await getAllConversations()
+    const dirty = list.find((c) => c.id === 'dirty-conv')
+
+    expect(dirty).toEqual(
+      expect.objectContaining({
+        id: 'dirty-conv',
+        title: '新对话',
+        createdAt: expect.any(Number),
+        updatedAt: expect.any(Number),
+        sortOrder: expect.any(Number),
+        color: undefined,
+      }),
+    )
+  })
 })
 
 describe('images cursor helpers (C1 游标统计)', () => {
@@ -193,6 +420,7 @@ describe('images cursor helpers (C1 游标统计)', () => {
   const img = (id: string, body: string, createdAt: number): StoredImage => ({
     id,
     blob: new Blob([body]),
+    mime: 'image/png',
     source: 'generated',
     createdAt,
   })
@@ -212,6 +440,16 @@ describe('images cursor helpers (C1 游标统计)', () => {
     const seen: string[] = []
     await expect(forEachImageMeta((image) => seen.push(image.id))).resolves.toBeUndefined()
     expect(seen).toEqual([])
+  })
+
+  it('forEachImageMeta rejects when the record callback throws', async () => {
+    await putImage(img('bad-callback', '1', 1))
+
+    await expect(
+      forEachImageMeta(() => {
+        throw new Error('callback failed')
+      }),
+    ).rejects.toThrow('callback failed')
   })
 
   it('pruneImagesViaCursor deletes only matched records in a single transaction', async () => {
@@ -242,5 +480,22 @@ describe('images cursor helpers (C1 游标统计)', () => {
 
     expect(deleted).toEqual([])
     expect((await getAllImages()).map((i) => i.id).sort()).toEqual(['x', 'y'])
+  })
+
+  it('pruneImagesViaCursor rejects and aborts when the delete predicate throws', async () => {
+    await putImage(img('a', '1', 1))
+    await putImage(img('b', '2', 1))
+
+    await expect(
+      pruneImagesViaCursor(
+        (image) => {
+          if (image.id === 'a') throw new Error('predicate failed')
+          return true
+        },
+        () => undefined,
+      ),
+    ).rejects.toThrow('predicate failed')
+
+    expect((await getAllImages()).map((i) => i.id).sort()).toEqual(['a', 'b'])
   })
 })

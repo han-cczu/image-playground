@@ -17,8 +17,10 @@ import {
 } from '../../lib/favoriteCategories'
 import {
   ARCHIVE_CONVERSATION_ID,
+  MAX_CONVERSATION_ID_LEN,
   genConversationId,
   isArchiveConversation,
+  normalizeConversationTitle,
 } from '../../lib/conversations'
 import {
   genSnippetId,
@@ -28,15 +30,22 @@ import {
   normalizeSnippets,
 } from '../../lib/promptSnippets'
 import { MAX_BATCH_NOTE_LEN, normalizeBatchNotes, type BatchNote } from '../../lib/gridSheet'
+import { MAX_INPUT_IMAGES_PER_SUBMISSION, MAX_TASK_TEXT_LEN } from '../../lib/tasks'
+import { normalizeParamsForSettings } from '../../lib/api/paramCompatibility'
+import { collectReferencedImageIds } from '../../lib/storageStats'
+import { deleteConversation as dbDeleteConversation, putConversation, putTask } from '../../lib/db'
 import {
-  deleteConversation as dbDeleteConversation,
-  putConversation,
-  putTask,
-} from '../../lib/db'
-import { rollbackStoredImages, terminateRunningTaskRuntimes } from '../../lib/taskRuntime'
+  clearTransientUiReferencesForDeletedTasks,
+  createCancelledTask,
+  rollbackStoredImages,
+  terminateRunningTaskRuntimes,
+} from '../../lib/taskRuntime'
 import type { AppState } from '../index'
 
-export function orderImagesWithMaskFirst(images: InputImage[], maskTargetImageId: string | null | undefined) {
+export function orderImagesWithMaskFirst(
+  images: InputImage[],
+  maskTargetImageId: string | null | undefined,
+) {
   if (!maskTargetImageId) return images
   const maskIdx = images.findIndex((img) => img.id === maskTargetImageId)
   if (maskIdx <= 0) return images
@@ -44,6 +53,62 @@ export function orderImagesWithMaskFirst(images: InputImage[], maskTargetImageId
   const [maskImage] = next.splice(maskIdx, 1)
   next.unshift(maskImage)
   return next
+}
+
+function dedupeInputImagesById(images: InputImage[]): InputImage[] {
+  const seen = new Set<string>()
+  const result: InputImage[] = []
+  for (const img of images) {
+    if (seen.has(img.id)) continue
+    seen.add(img.id)
+    result.push(img)
+    if (result.length >= MAX_INPUT_IMAGES_PER_SUBMISSION) break
+  }
+  return result
+}
+
+function sameStringList(a: string[] | null, b: string[] | null): boolean {
+  if (a === b) return true
+  if (!a || !b || a.length !== b.length) return false
+  return a.every((value, index) => value === b[index])
+}
+
+function restoreRemovedItemsByPreviousOrder<T extends { id: string }>(
+  latest: T[],
+  previousOrder: T[],
+  restoredById: Map<string, T>,
+): T[] {
+  let result = latest.map((item) => restoredById.get(item.id) ?? item)
+
+  for (const restored of restoredById.values()) {
+    if (result.some((item) => item.id === restored.id)) continue
+
+    const previousIndex = previousOrder.findIndex((item) => item.id === restored.id)
+    let insertAt = result.length
+
+    if (previousIndex >= 0) {
+      for (let i = previousIndex + 1; i < previousOrder.length; i += 1) {
+        const nextIndex = result.findIndex((item) => item.id === previousOrder[i].id)
+        if (nextIndex >= 0) {
+          insertAt = nextIndex
+          break
+        }
+      }
+      if (insertAt === result.length) {
+        for (let i = previousIndex - 1; i >= 0; i -= 1) {
+          const prevIndex = result.findIndex((item) => item.id === previousOrder[i].id)
+          if (prevIndex >= 0) {
+            insertAt = prevIndex + 1
+            break
+          }
+        }
+      }
+    }
+
+    result = [...result.slice(0, insertAt), restored, ...result.slice(insertAt)]
+  }
+
+  return result
 }
 
 let categoryUid = 0
@@ -74,9 +139,10 @@ function createCategoryStatePatch(
   const categoryIds = new Set(favoriteCategories.map((category) => category.id))
   return {
     favoriteCategories,
-    filterFavoriteCategoryId: filterFavoriteCategoryId && categoryIds.has(filterFavoriteCategoryId)
-      ? filterFavoriteCategoryId
-      : null,
+    filterFavoriteCategoryId:
+      filterFavoriteCategoryId && categoryIds.has(filterFavoriteCategoryId)
+        ? filterFavoriteCategoryId
+        : null,
   }
 }
 
@@ -110,7 +176,10 @@ export interface TasksSlice {
   setFavoriteCategories: (categories: FavoriteCategory[]) => void
   createFavoriteCategory: (input: { name: string; color?: string }) => string
   ensureDefaultFavoriteCategory: () => string
-  updateFavoriteCategory: (id: string, patch: Partial<Pick<FavoriteCategory, 'name' | 'color'>>) => void
+  updateFavoriteCategory: (
+    id: string,
+    patch: Partial<Pick<FavoriteCategory, 'name' | 'color'>>,
+  ) => void
   deleteFavoriteCategory: (id: string) => Promise<void>
   moveFavoriteCategory: (id: string, direction: -1 | 1) => void
 
@@ -141,11 +210,12 @@ export interface TasksSlice {
 export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set, get) => ({
   // Input
   prompt: '',
-  setPrompt: (prompt) => set({ prompt }),
+  setPrompt: (prompt) => set({ prompt: prompt.slice(0, MAX_TASK_TEXT_LEN) }),
   inputImages: [],
   addInputImage: (img) =>
     set((s) => {
       if (s.inputImages.find((i) => i.id === img.id)) return s
+      if (s.inputImages.length >= MAX_INPUT_IMAGES_PER_SUBMISSION) return s
       return { inputImages: [...s.inputImages, img] }
     }),
   removeInputImage: (idx) =>
@@ -161,7 +231,10 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
     set(() => ({ inputImages: [], maskDraft: null, maskEditorImageId: null })),
   setInputImages: (imgs) =>
     set((s) => {
-      const inputImages = orderImagesWithMaskFirst(imgs, s.maskDraft?.targetImageId)
+      const inputImages = orderImagesWithMaskFirst(
+        dedupeInputImagesById(imgs),
+        s.maskDraft?.targetImageId,
+      )
       const shouldClearMask =
         Boolean(s.maskDraft) && !inputImages.some((img) => img.id === s.maskDraft?.targetImageId)
       return {
@@ -188,11 +261,15 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
     }),
   clearMaskDraft: () => set({ maskDraft: null, maskEditorImageId: null }),
   maskEditorImageId: null,
-  setMaskEditorImageId: (id) => set({ maskEditorImageId: id }),
+  setMaskEditorImageId: (id) =>
+    set({ maskEditorImageId: id === null ? null : id.slice(0, MAX_TASK_TEXT_LEN) }),
 
   // Params
   params: { ...DEFAULT_PARAMS },
-  setParams: (p) => set((s) => ({ params: { ...s.params, ...p } })),
+  setParams: (p) =>
+    set((s) => ({
+      params: normalizeParamsForSettings({ ...s.params, ...p }, s.settings),
+    })),
 
   // Tasks
   tasks: [],
@@ -205,41 +282,58 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
     set((state) => createCategoryStatePatch(favoriteCategories, state.filterFavoriteCategoryId)),
   createFavoriteCategory: ({ name, color }) => {
     const id = genCategoryId()
-    set((state) => createCategoryStatePatch([
-      ...state.favoriteCategories,
-      {
-        id,
-        name: name.trim() || '未命名分类',
-        color: color || DEFAULT_FAVORITE_CATEGORY_COLOR,
-        sortOrder: state.favoriteCategories.length,
-        createdAt: Date.now(),
-      },
-    ], state.filterFavoriteCategoryId))
+    set((state) =>
+      createCategoryStatePatch(
+        [
+          ...state.favoriteCategories,
+          {
+            id,
+            name: name.trim() || '未命名分类',
+            color: color || DEFAULT_FAVORITE_CATEGORY_COLOR,
+            sortOrder: state.favoriteCategories.length,
+            createdAt: Date.now(),
+          },
+        ],
+        state.filterFavoriteCategoryId,
+      ),
+    )
     return id
   },
   ensureDefaultFavoriteCategory: () => {
-    const existing = get().favoriteCategories.find((category) => category.id === DEFAULT_FAVORITE_CATEGORY_ID)
+    const existing = get().favoriteCategories.find(
+      (category) => category.id === DEFAULT_FAVORITE_CATEGORY_ID,
+    )
     if (existing) return existing.id
 
-    set((state) => createCategoryStatePatch([
-      ...state.favoriteCategories,
-      {
-        ...createDefaultFavoriteCategory(Date.now()),
-        sortOrder: -1,
-      },
-    ], state.filterFavoriteCategoryId))
+    set((state) =>
+      createCategoryStatePatch(
+        [
+          ...state.favoriteCategories,
+          {
+            ...createDefaultFavoriteCategory(Date.now()),
+            sortOrder: -1,
+          },
+        ],
+        state.filterFavoriteCategoryId,
+      ),
+    )
     return DEFAULT_FAVORITE_CATEGORY_ID
   },
   updateFavoriteCategory: (id, patch) =>
-    set((state) => createCategoryStatePatch(state.favoriteCategories.map((category) =>
-      category.id === id
-        ? {
-            ...category,
-            ...(patch.name !== undefined ? { name: patch.name } : {}),
-            ...(patch.color !== undefined ? { color: patch.color } : {}),
-          }
-        : category,
-    ), state.filterFavoriteCategoryId)),
+    set((state) =>
+      createCategoryStatePatch(
+        state.favoriteCategories.map((category) =>
+          category.id === id
+            ? {
+                ...category,
+                ...(patch.name !== undefined ? { name: patch.name } : {}),
+                ...(patch.color !== undefined ? { color: patch.color } : {}),
+              }
+            : category,
+        ),
+        state.filterFavoriteCategoryId,
+      ),
+    ),
   deleteFavoriteCategory: async (id) => {
     const state = get()
 
@@ -272,7 +366,20 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
     const dirtyTasks = state.tasks
       .filter((task) => task.favoriteCategoryId === id)
       .map((task) => ({ ...task, favoriteCategoryId: null }))
-    await Promise.all(dirtyTasks.map((task) => putTask(task)))
+    try {
+      await Promise.all(dirtyTasks.map((task) => putTask(task)))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set((latest) => ({
+        tasks: latest.tasks.map((task) =>
+          dirtyTasks.some((dirty) => dirty.id === task.id)
+            ? { ...task, persistenceError: message }
+            : task,
+        ),
+      }))
+      get().showToast(`保存任务失败：${message}`, 'error')
+      throw err
+    }
   },
   moveFavoriteCategory: (id, direction) =>
     set((state) => {
@@ -379,13 +486,14 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
     const now = Date.now()
     const next: Conversation = {
       id,
-      title: seedTitle?.trim() || '新对话',
+      title: normalizeConversationTitle(seedTitle),
       createdAt: now,
       updatedAt: now,
     }
     set((state) => ({
       conversations: [next, ...state.conversations.filter((c) => c.id !== id)],
       activeConversationId: id,
+      selectedTaskIds: [],
     }))
     void putConversation(next).catch(() => {
       /* 持久化失败不阻塞 UI；后续可通过其他动作再次写入 */
@@ -393,8 +501,8 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
     return id
   },
   renameConversation: async (id, title) => {
-    const trimmed = title.trim()
-    if (!trimmed) return
+    if (!title.trim()) return
+    const normalizedTitle = normalizeConversationTitle(title)
     const state = get()
     if (isArchiveConversation(id)) {
       state.showToast('「历史记录」对话不可重命名', 'error')
@@ -402,11 +510,22 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
     }
     const target = state.conversations.find((c) => c.id === id)
     if (!target) return
-    const updated: Conversation = { ...target, title: trimmed, updatedAt: Date.now() }
+    const updated: Conversation = { ...target, title: normalizedTitle, updatedAt: Date.now() }
     set({
       conversations: state.conversations.map((c) => (c.id === id ? updated : c)),
     })
-    await putConversation(updated)
+    try {
+      await putConversation(updated)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set((latest) => ({
+        conversations: latest.conversations.map((conversation) =>
+          conversation.id === id && conversation === updated ? target : conversation,
+        ),
+      }))
+      get().showToast(`重命名对话失败：${message}`, 'error')
+      throw err
+    }
   },
   deleteConversationWithTasks: (id) => {
     const state = get()
@@ -428,56 +547,156 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
       tone: 'danger',
       // 连带删除整段对话+全部任务+图片且不可恢复,影响面远超单条删除:加冷静期防连点误触
       minConfirmDelayMs: 700,
-      action: () => {
-        void (async () => {
+      action: async () => {
+        try {
+          // terminate + 同步更新 store 必须在任何 await 之前(契约见 terminateRunningTaskRuntimes,
+          // 与 removeTask/removeMultipleTasks 的「先 setTasks 再 await db」安全模式一致):
+          // 否则在途任务的 abort 异常会赶在级联删除事务后把幽灵 error 记录写回 tasks 表
+          const latest = get()
+          const previousConversations = latest.conversations
+          const previousTasks = latest.tasks
+          const previousActiveConversationId = latest.activeConversationId
+          const previousSelectedTaskIds = latest.selectedTaskIds
+          const previousDetailTaskId = latest.detailTaskId
+          const previousLineageTaskId = latest.lineageTaskId
+          const previousCompareTaskIds = latest.compareTaskIds
+          const previousLightboxImageId = latest.lightboxImageId
+          const previousLightboxImageList = latest.lightboxImageList
+          const previousCaptionBatchImageIds = latest.captionBatchImageIds
+          const previousMaskEditorImageId = latest.maskEditorImageId
+          const deletedTasks = latest.tasks.filter((task) => task.conversationId === id)
+          const latestTargetConversation = latest.conversations.find((c) => c.id === id)
+          const deleteStartedAt = Date.now()
+          const cancelledDeletedTasks = deletedTasks
+            .filter((task) => task.status === 'running')
+            .map((task) => createCancelledTask(task, deleteStartedAt))
+          const cancelledTaskById = new Map(cancelledDeletedTasks.map((task) => [task.id, task]))
+          const previousTasksAfterAbort = previousTasks.map(
+            (task) => cancelledTaskById.get(task.id) ?? task,
+          )
+          const previousDeletedTaskById = new Map(
+            previousTasksAfterAbort
+              .filter((task) => task.conversationId === id)
+              .map((task) => [task.id, task]),
+          )
+          const previousTargetConversationById = latestTargetConversation
+            ? new Map([[id, latestTargetConversation]])
+            : new Map<string, Conversation>()
+          terminateRunningTaskRuntimes(deletedTasks)
+          const remainingConversations = latest.conversations.filter((c) => c.id !== id)
+          const remainingTasks = latest.tasks.filter((task) => task.conversationId !== id)
+          const nextActive =
+            latest.activeConversationId === id
+              ? (remainingConversations[0]?.id ?? ARCHIVE_CONVERSATION_ID)
+              : latest.activeConversationId
+          set({
+            conversations: remainingConversations,
+            tasks: remainingTasks,
+            activeConversationId: nextActive,
+          })
+          clearTransientUiReferencesForDeletedTasks(deletedTasks)
+          const optimisticUiAfterDelete = get()
           try {
-            // terminate + 同步更新 store 必须在任何 await 之前(契约见 terminateRunningTaskRuntimes,
-            // 与 removeTask/removeMultipleTasks 的「先 setTasks 再 await db」安全模式一致):
-            // 否则在途任务的 abort 异常会赶在级联删除事务后把幽灵 error 记录写回 tasks 表
-            const latest = get()
-            const deletedTasks = latest.tasks.filter((task) => task.conversationId === id)
-            terminateRunningTaskRuntimes(deletedTasks)
-            const remainingConversations = latest.conversations.filter((c) => c.id !== id)
-            const remainingTasks = latest.tasks.filter((task) => task.conversationId !== id)
-            const nextActive =
-              latest.activeConversationId === id
-                ? remainingConversations[0]?.id ?? ARCHIVE_CONVERSATION_ID
-                : latest.activeConversationId
-            set({
-              conversations: remainingConversations,
-              tasks: remainingTasks,
-              activeConversationId: nextActive,
-            })
             await dbDeleteConversation(id, true)
-            latest.showToast('对话已删除', 'success')
-            // 即时回收被删任务的孤儿图片(与 removeTask/removeMultipleTasks 行为对齐,
-            // 不再留给下次启动的 initStore GC):rollbackStoredImages 只删当前无引用的,不误删共享图。
-            // GC 失败是良性的(initStore 下次兜底),单独吞掉,不把已成功的删除误报成失败。
-            try {
-              const deletedImageIds = new Set<string>()
-              for (const task of deletedTasks) {
-                for (const imgId of task.inputImageIds || []) deletedImageIds.add(imgId)
-                if (task.maskImageId) deletedImageIds.add(task.maskImageId)
-                for (const imgId of task.outputImages || []) deletedImageIds.add(imgId)
-              }
-              await rollbackStoredImages([...deletedImageIds])
-            } catch {
-              /* 孤儿图留待 initStore GC 兜底 */
-            }
           } catch (err) {
-            const message = err instanceof Error ? err.message : String(err)
-            get().showToast(`删除对话失败：${message}`, 'error')
+            set((current) => ({
+              conversations: restoreRemovedItemsByPreviousOrder(
+                current.conversations,
+                previousConversations,
+                previousTargetConversationById,
+              ),
+              tasks: restoreRemovedItemsByPreviousOrder(
+                current.tasks,
+                previousTasks,
+                previousDeletedTaskById,
+              ),
+              activeConversationId:
+                current.activeConversationId === nextActive
+                  ? previousActiveConversationId
+                  : current.activeConversationId,
+              selectedTaskIds: sameStringList(
+                current.selectedTaskIds,
+                optimisticUiAfterDelete.selectedTaskIds,
+              )
+                ? previousSelectedTaskIds
+                : current.selectedTaskIds,
+              detailTaskId:
+                current.detailTaskId === optimisticUiAfterDelete.detailTaskId
+                  ? previousDetailTaskId
+                  : current.detailTaskId,
+              lineageTaskId:
+                current.lineageTaskId === optimisticUiAfterDelete.lineageTaskId
+                  ? previousLineageTaskId
+                  : current.lineageTaskId,
+              compareTaskIds: sameStringList(
+                current.compareTaskIds,
+                optimisticUiAfterDelete.compareTaskIds,
+              )
+                ? previousCompareTaskIds
+                : current.compareTaskIds,
+              lightboxImageId:
+                current.lightboxImageId === optimisticUiAfterDelete.lightboxImageId
+                  ? previousLightboxImageId
+                  : current.lightboxImageId,
+              lightboxImageList: sameStringList(
+                current.lightboxImageList,
+                optimisticUiAfterDelete.lightboxImageList,
+              )
+                ? previousLightboxImageList
+                : current.lightboxImageList,
+              captionBatchImageIds: sameStringList(
+                current.captionBatchImageIds,
+                optimisticUiAfterDelete.captionBatchImageIds,
+              )
+                ? previousCaptionBatchImageIds
+                : current.captionBatchImageIds,
+              maskEditorImageId:
+                current.maskEditorImageId === optimisticUiAfterDelete.maskEditorImageId
+                  ? previousMaskEditorImageId
+                  : current.maskEditorImageId,
+            }))
+            await Promise.all(
+              cancelledDeletedTasks.map(async (task) => {
+                try {
+                  await putTask(task)
+                } catch (persistErr) {
+                  const message =
+                    persistErr instanceof Error ? persistErr.message : String(persistErr)
+                  set((state) => ({
+                    tasks: state.tasks.map((item) =>
+                      item.id === task.id ? { ...item, persistenceError: message } : item,
+                    ),
+                  }))
+                  get().showToast(`保存任务失败：${message}`, 'error')
+                }
+              }),
+            )
+            throw err
           }
-        })()
+          get().showToast('对话已删除', 'success')
+          // 即时回收被删任务的孤儿图片(与 removeTask/removeMultipleTasks 行为对齐,
+          // 不再留给下次启动的 initStore GC):rollbackStoredImages 只删当前无引用的,不误删共享图。
+          // GC 失败是良性的(initStore 下次兜底),单独吞掉,不把已成功的删除误报成失败。
+          try {
+            const deletedImageIds = collectReferencedImageIds(deletedTasks, [])
+            await rollbackStoredImages([...deletedImageIds])
+          } catch {
+            /* 孤儿图留待 initStore GC 兜底 */
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          get().showToast(`删除对话失败：${message}`, 'error')
+        }
       },
     })
   },
   // 切换对话时清空多选:选中集合不随视图过滤收窄,残留的跨对话选择会让后续批量操作
   // 作用到当前视图看不到的任务上(与 InputBar「全选当前可见」的口径修复同属一个问题域)。
   setActiveConversation: (id) =>
-    set((state) =>
-      state.activeConversationId === id
-        ? { activeConversationId: id }
-        : { activeConversationId: id, selectedTaskIds: [] },
-    ),
+    set((state) => {
+      const activeConversationId = id === null ? null : id.slice(0, MAX_CONVERSATION_ID_LEN)
+      return state.activeConversationId === activeConversationId
+        ? { activeConversationId }
+        : { activeConversationId, selectedTaskIds: [] }
+    }),
 })

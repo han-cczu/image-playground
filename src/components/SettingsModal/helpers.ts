@@ -28,7 +28,9 @@ export function normalizeApiProfilesForSave(
 ): ApiProfile[] {
   return profiles.map((profile) => {
     const trimmedName = profile.name.trim() || (profile.id === DEFAULT_OPENAI_PROFILE_ID ? '默认' : '新配置')
-    const trimmedTimeout = Number(profile.timeout) || DEFAULT_SETTINGS.timeout
+    const numericTimeout = Number(profile.timeout)
+    const trimmedTimeout =
+      Number.isFinite(numericTimeout) && numericTimeout > 0 ? numericTimeout : DEFAULT_SETTINGS.timeout
     if (profile.provider === 'gemini') {
       return {
         ...profile,

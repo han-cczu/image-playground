@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
 import type { Point, ViewTransform } from '../../../lib/image/viewportTransform'
 import type { CanvasSize } from '../types'
 
@@ -42,69 +42,81 @@ export function useCursorOverlay(args: {
     getViewportCenterCanvasPoint,
   } = args
 
-  function updateCursor(point: Point | null) {
-    const cursorCanvas = cursorCanvasRef.current
-    const stage = stageRef.current
-    const frame = baseFrameRef.current
-    const maskCanvas = maskCanvasRef.current
-    const ctx = cursorCanvas?.getContext('2d')
-    if (!cursorCanvas || !ctx || !stage || !frame || !maskCanvas) return
+  const updateCursor = useCallback(
+    (point: Point | null) => {
+      const cursorCanvas = cursorCanvasRef.current
+      const stage = stageRef.current
+      const frame = baseFrameRef.current
+      const maskCanvas = maskCanvasRef.current
+      const ctx = cursorCanvas?.getContext('2d')
+      if (!cursorCanvas || !ctx || !stage || !frame || !maskCanvas) return
 
-    const dpr = window.devicePixelRatio || 1
-    const width = stage.clientWidth
-    const height = stage.clientHeight
-    if (cursorCanvas.width !== Math.round(width * dpr) || cursorCanvas.height !== Math.round(height * dpr)) {
-      cursorCanvas.width = Math.round(width * dpr)
-      cursorCanvas.height = Math.round(height * dpr)
-    }
+      const dpr = window.devicePixelRatio || 1
+      const width = stage.clientWidth
+      const height = stage.clientHeight
+      if (
+        cursorCanvas.width !== Math.round(width * dpr) ||
+        cursorCanvas.height !== Math.round(height * dpr)
+      ) {
+        cursorCanvas.width = Math.round(width * dpr)
+        cursorCanvas.height = Math.round(height * dpr)
+      }
 
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    ctx.clearRect(0, 0, width, height)
-    if (!point) return
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.clearRect(0, 0, width, height)
+      if (!point) return
 
-    const scale = viewTransformRef.current.scale
-    const stageRect = stage.getBoundingClientRect()
-    const frameRect = frame.getBoundingClientRect()
-    const frameLeft = frameRect.left - stageRect.left
-    const frameTop = frameRect.top - stageRect.top
-    const x = frameLeft + (point.x / maskCanvas.width) * frame.clientWidth * scale + viewTransformRef.current.x
-    const y = frameTop + (point.y / maskCanvas.height) * frame.clientHeight * scale + viewTransformRef.current.y
-    const radius = (brushSize / 2 / maskCanvas.width) * frame.clientWidth * scale
+      const scale = viewTransformRef.current.scale
+      const stageRect = stage.getBoundingClientRect()
+      const frameRect = frame.getBoundingClientRect()
+      const frameLeft = frameRect.left - stageRect.left
+      const frameTop = frameRect.top - stageRect.top
+      const x =
+        frameLeft +
+        (point.x / maskCanvas.width) * frame.clientWidth * scale +
+        viewTransformRef.current.x
+      const y =
+        frameTop +
+        (point.y / maskCanvas.height) * frame.clientHeight * scale +
+        viewTransformRef.current.y
+      const radius = (brushSize / 2 / maskCanvas.width) * frame.clientWidth * scale
 
-    ctx.save()
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.arc(x, y, radius, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'
-    ctx.stroke()
+      ctx.save()
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.arc(x, y, radius, 0, Math.PI * 2)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'
+      ctx.stroke()
 
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)'
-    ctx.beginPath()
-    ctx.arc(x, y, radius + 1, 0, Math.PI * 2)
-    ctx.stroke()
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)'
+      ctx.beginPath()
+      ctx.arc(x, y, radius + 1, 0, Math.PI * 2)
+      ctx.stroke()
 
-    ctx.beginPath()
-    ctx.arc(x, y, Math.max(0, radius - 1), 0, Math.PI * 2)
-    ctx.stroke()
+      ctx.beginPath()
+      ctx.arc(x, y, Math.max(0, radius - 1), 0, Math.PI * 2)
+      ctx.stroke()
 
-    const crosshairSize = 5
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)'
-    ctx.beginPath()
-    ctx.moveTo(x - crosshairSize, y)
-    ctx.lineTo(x + crosshairSize, y)
-    ctx.moveTo(x, y - crosshairSize)
-    ctx.lineTo(x, y + crosshairSize)
-    ctx.stroke()
+      const crosshairSize = 5
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)'
+      ctx.beginPath()
+      ctx.moveTo(x - crosshairSize, y)
+      ctx.lineTo(x + crosshairSize, y)
+      ctx.moveTo(x, y - crosshairSize)
+      ctx.lineTo(x, y + crosshairSize)
+      ctx.stroke()
 
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)'
-    ctx.beginPath()
-    ctx.moveTo(x - crosshairSize, y)
-    ctx.lineTo(x + crosshairSize, y)
-    ctx.moveTo(x, y - crosshairSize)
-    ctx.lineTo(x, y + crosshairSize)
-    ctx.stroke()
-    ctx.restore()
-  }
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)'
+      ctx.beginPath()
+      ctx.moveTo(x - crosshairSize, y)
+      ctx.lineTo(x + crosshairSize, y)
+      ctx.moveTo(x, y - crosshairSize)
+      ctx.lineTo(x, y + crosshairSize)
+      ctx.stroke()
+      ctx.restore()
+    },
+    [baseFrameRef, brushSize, cursorCanvasRef, maskCanvasRef, stageRef, viewTransformRef],
+  )
 
   useEffect(() => {
     if (isAltKeyPressed) {
@@ -114,7 +126,17 @@ export function useCursorOverlay(args: {
     } else {
       updateCursor(hoverPoint)
     }
-  }, [brushSize, viewTransform, hoverPoint, isPointerOverCanvas, showBrushControls, size, isAltKeyPressed])
+  }, [
+    brushSize,
+    getViewportCenterCanvasPoint,
+    hoverPoint,
+    isAltKeyPressed,
+    isPointerOverCanvas,
+    showBrushControls,
+    size,
+    updateCursor,
+    viewTransform,
+  ])
 
   return { updateCursor }
 }

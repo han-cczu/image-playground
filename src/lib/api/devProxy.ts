@@ -10,23 +10,26 @@ export interface DevProxyConfig {
 
 const DEFAULT_PROXY_PREFIX = '/api-proxy'
 
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value)
+}
+
 export function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim()
   if (!trimmed) return ''
 
-  const input = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed)
-    ? trimmed
-    : `https://${trimmed}`
+  const input = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`
 
   try {
     const url = new URL(input)
     const pathSegments = url.pathname.split('/').filter(Boolean)
     const v1Index = pathSegments.indexOf('v1')
-    const normalizedSegments = v1Index >= 0
-      ? pathSegments.slice(0, v1Index + 1)
-      : pathSegments.length
-        ? [...pathSegments, 'v1']
-        : []
+    const normalizedSegments =
+      v1Index >= 0
+        ? pathSegments.slice(0, v1Index + 1)
+        : pathSegments.length
+          ? [...pathSegments, 'v1']
+          : []
     const pathname = normalizedSegments.length ? `/${normalizedSegments.join('/')}` : ''
     return `${url.origin}${pathname}`
   } catch {
@@ -39,7 +42,7 @@ export function normalizeDevProxyConfig(input: unknown): DevProxyConfig | null {
 
   const record = input as Record<string, unknown>
   const target = normalizeBaseUrl(typeof record.target === 'string' ? record.target : '')
-  if (!target) return null
+  if (!target || !isHttpUrl(target)) return null
 
   const rawPrefix = typeof record.prefix === 'string' ? record.prefix : DEFAULT_PROXY_PREFIX
   const trimmedPrefix = rawPrefix.trim().replace(/^\/+/, '').replace(/\/+$/, '')
@@ -62,16 +65,14 @@ export function buildApiUrl(
 ): string {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl)
   const endpointPath = path.replace(/^\/+/, '')
-  const apiPath = normalizedBaseUrl.endsWith('/v1')
-    ? endpointPath
-    : ['v1', endpointPath].join('/')
+  const apiPath = normalizedBaseUrl.endsWith('/v1') ? endpointPath : ['v1', endpointPath].join('/')
 
   if (useApiProxy) {
     return `${proxyConfig?.prefix ?? DEFAULT_PROXY_PREFIX}/${apiPath}`
   }
 
   // 空 baseUrl 不再退化为同源相对路径(否则密钥会随请求发往应用部署源)。
-  if (!normalizedBaseUrl) throw new Error('未配置 API URL')
+  if (!normalizedBaseUrl || !isHttpUrl(normalizedBaseUrl)) throw new Error('未配置 API URL')
   return `${normalizedBaseUrl}/${apiPath}`
 }
 
@@ -87,6 +88,11 @@ export function readClientDevProxyConfig(): DevProxyConfig | null {
   )
 }
 
-export function isApiProxyAvailable(proxyConfig: DevProxyConfig | null = readClientDevProxyConfig()): boolean {
-  return readRuntimeEnv(import.meta.env.VITE_API_PROXY_AVAILABLE) === 'true' || Boolean(proxyConfig?.enabled)
+export function isApiProxyAvailable(
+  proxyConfig: DevProxyConfig | null = readClientDevProxyConfig(),
+): boolean {
+  return (
+    readRuntimeEnv(import.meta.env.VITE_API_PROXY_AVAILABLE) === 'true' ||
+    Boolean(proxyConfig?.enabled)
+  )
 }

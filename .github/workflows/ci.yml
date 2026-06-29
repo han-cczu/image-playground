@@ -28,7 +28,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # eslint 仅 error 失败(warning 基线 91 条,清零是独立的代码健康轮)
+      # eslint 所有配置规则均作为 error 门禁,不再保留 warning 基线。
       - run: npm run lint
       - run: npm test
       # tsc -b + vite build + inject-sw-build-id + verify-csp-hash

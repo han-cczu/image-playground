@@ -39,6 +39,19 @@ export function getClipboardFailureMessage(fallback: string, err: unknown) {
 }
 
 function copyTextWithExecCommand(text: string) {
+  const previousActiveElement = document.activeElement
+  const previousSelection =
+    previousActiveElement instanceof HTMLInputElement ||
+    previousActiveElement instanceof HTMLTextAreaElement
+      ? {
+          element: previousActiveElement,
+          start: previousActiveElement.selectionStart,
+          end: previousActiveElement.selectionEnd,
+          direction: previousActiveElement.selectionDirection,
+        }
+      : null
+  const previousRanges = previousSelection ? [] : saveDocumentSelectionRanges()
+
   const textarea = document.createElement('textarea')
   textarea.value = text
   textarea.setAttribute('readonly', '')
@@ -56,6 +69,54 @@ function copyTextWithExecCommand(text: string) {
     return false
   } finally {
     document.body.removeChild(textarea)
+    try {
+      restorePreviousSelection(previousSelection, previousRanges, previousActiveElement)
+    } catch {
+      // 复制已经完成;焦点/选区恢复失败不能反向污染复制结果。
+    }
+  }
+}
+
+function saveDocumentSelectionRanges(): Range[] {
+  const selection = window.getSelection?.()
+  if (!selection) return []
+  const ranges: Range[] = []
+  for (let i = 0; i < selection.rangeCount; i += 1) {
+    ranges.push(selection.getRangeAt(i).cloneRange())
+  }
+  return ranges
+}
+
+function restorePreviousSelection(
+  previousSelection: {
+    element: HTMLInputElement | HTMLTextAreaElement
+    start: number | null
+    end: number | null
+    direction: 'forward' | 'backward' | 'none' | null
+  } | null,
+  previousRanges: Range[],
+  previousActiveElement: Element | null,
+) {
+  if (previousSelection) {
+    previousSelection.element.focus()
+    if (previousSelection.start !== null && previousSelection.end !== null) {
+      previousSelection.element.setSelectionRange(
+        previousSelection.start,
+        previousSelection.end,
+        previousSelection.direction ?? 'none',
+      )
+    }
+    return
+  }
+
+  const selection = window.getSelection?.()
+  if (selection && previousRanges.length) {
+    selection.removeAllRanges()
+    for (const range of previousRanges) selection.addRange(range)
+  }
+
+  if (previousActiveElement instanceof HTMLElement || previousActiveElement instanceof SVGElement) {
+    previousActiveElement.focus()
   }
 }
 

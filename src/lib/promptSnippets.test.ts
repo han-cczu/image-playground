@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   genSnippetId,
   insertAtCursor,
+  MAX_SNIPPET_ID_LEN,
   MAX_SNIPPET_CONTENT_LEN,
   MAX_SNIPPET_NAME_LEN,
   MAX_SNIPPETS,
@@ -60,6 +61,13 @@ describe('normalizeSnippets', () => {
     expect(s.createdAt).toBe(999)
     expect(s.updatedAt).toBe(999)
     expect(s.sortOrder).toBe(0)
+  })
+
+  it('caps imported snippet ids so bounded arrays cannot carry unbounded strings', () => {
+    const longId = 'snip-'.repeat(MAX_SNIPPET_ID_LEN + 10)
+    const [s] = normalizeSnippets([{ id: longId, content: 'ok' }])
+
+    expect(s.id).toHaveLength(MAX_SNIPPET_ID_LEN)
   })
 
   it('falls back to 未命名片段 when name is blank', () => {

@@ -12,7 +12,7 @@ import { deleteCachedImage } from './imageCache'
 
 /**
  * 收集当前所有「在用」图片 id:tasks 的 inputImageIds / maskImageId / outputImages,
- * 外加输入栏暂存的 inputImages。纯函数,不读全局态、不碰 DB。
+ * 外加 maskTargetImageId 与输入栏暂存的 inputImages。纯函数,不读全局态、不碰 DB。
  *
  * 任何新增的图片引用字段都应只在此处补充,initStore 与孤儿清理会自动跟随。
  */
@@ -24,6 +24,7 @@ export function collectReferencedImageIds(
   for (const img of inputImages) ids.add(img.id)
   for (const t of tasks) {
     for (const id of t.inputImageIds || []) ids.add(id)
+    if (t.maskTargetImageId) ids.add(t.maskTargetImageId)
     if (t.maskImageId) ids.add(t.maskImageId)
     for (const id of t.outputImages || []) ids.add(id)
   }

@@ -41,9 +41,12 @@ describe('useLazyCoverImage 接线(H3)', () => {
 
   it('imageId 切换:旧引用归还、旧 URL 立即失配不再作为 src(防串图/防已 revoke URL 复用)', async () => {
     vi.mocked(acquireImageObjectUrl).mockImplementation(async (id: string) => `blob:${id}`)
-    const { result, rerender } = renderHook(({ id }: { id: string | undefined }) => useLazyCoverImage(id), {
-      initialProps: { id: 'img-a' as string | undefined },
-    })
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string | undefined }) => useLazyCoverImage(id),
+      {
+        initialProps: { id: 'img-a' as string | undefined },
+      },
+    )
     attachAndLoad(result)
     await waitFor(() => expect(result.current.src).toBe('blob:img-a'))
 
@@ -58,7 +61,10 @@ describe('useLazyCoverImage 接线(H3)', () => {
     vi.mocked(getCachedImage).mockReturnValue('data:image/png;base64,FIRSTFRAME')
     let resolveAcquire!: (url: string) => void
     vi.mocked(acquireImageObjectUrl).mockImplementation(
-      () => new Promise((resolve) => { resolveAcquire = resolve }),
+      () =>
+        new Promise((resolve) => {
+          resolveAcquire = resolve
+        }),
     )
     const { result } = renderHook(() => useLazyCoverImage('img-c'))
     attachAndLoad(result)
@@ -68,10 +74,58 @@ describe('useLazyCoverImage 接线(H3)', () => {
     await waitFor(() => expect(result.current.src).toBe('blob:img-c'))
   })
 
+  it('imageId cleared while objectURL is still pending releases the cached dataUrl frame from state', async () => {
+    vi.mocked(getCachedImage).mockReturnValue('data:image/png;base64,FIRSTFRAME')
+    vi.mocked(acquireImageObjectUrl).mockImplementation(() => new Promise(() => undefined))
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string | undefined }) => useLazyCoverImage(id),
+      {
+        initialProps: { id: 'img-c' as string | undefined },
+      },
+    )
+    attachAndLoad(result)
+    await waitFor(() => expect(result.current.src).toBe('data:image/png;base64,FIRSTFRAME'))
+
+    rerender({ id: undefined })
+    rerender({ id: 'img-c' })
+
+    expect(result.current.src).toBe('')
+  })
+
+  it('clears the cached dataUrl first frame when objectURL acquire returns null', async () => {
+    vi.mocked(getCachedImage).mockReturnValue('data:image/png;base64:STALE')
+    let resolveAcquire!: (url: string | null) => void
+    vi.mocked(acquireImageObjectUrl).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveAcquire = resolve
+        }),
+    )
+    const { result } = renderHook(() => useLazyCoverImage('img-deleted'))
+    attachAndLoad(result)
+
+    await waitFor(() => expect(result.current.src).toBe('data:image/png;base64:STALE'))
+    await act(async () => {
+      resolveAcquire(null)
+    })
+    await waitFor(() => expect(result.current.src).toBe(''))
+  })
+
   it('imageId 为 undefined 不加载且 src 为空', () => {
     const { result } = renderHook(() => useLazyCoverImage(undefined))
     attachAndLoad(result)
     expect(result.current.src).toBe('')
     expect(acquireImageObjectUrl).not.toHaveBeenCalled()
+  })
+
+  it('objectURL 加载失败不会产生未处理拒绝', async () => {
+    vi.mocked(acquireImageObjectUrl).mockRejectedValue(new Error('idb failed'))
+    const { result } = renderHook(() => useLazyCoverImage('img-fail'))
+
+    attachAndLoad(result)
+
+    await waitFor(() => expect(acquireImageObjectUrl).toHaveBeenCalledWith('img-fail'))
+    await Promise.resolve()
+    expect(result.current.src).toBe('')
   })
 })

@@ -30,10 +30,14 @@ export async function imageDataUrlToPngBlob(dataUrl: string): Promise<Blob> {
   const canvas = document.createElement('canvas')
   canvas.width = image.naturalWidth
   canvas.height = image.naturalHeight
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('当前浏览器不支持 Canvas')
-  ctx.drawImage(image, 0, 0)
-  return canvasToBlob(canvas, 'image/png')
+  try {
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('当前浏览器不支持 Canvas')
+    ctx.drawImage(image, 0, 0)
+    return await canvasToBlob(canvas, 'image/png')
+  } finally {
+    releaseCanvasBitmap(canvas)
+  }
 }
 
 /**
@@ -48,10 +52,14 @@ export async function toPngBlob(blob: Blob): Promise<Blob> {
     const canvas = document.createElement('canvas')
     canvas.width = image.naturalWidth
     canvas.height = image.naturalHeight
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('当前浏览器不支持 Canvas')
-    ctx.drawImage(image, 0, 0)
-    return await canvasToBlob(canvas, 'image/png')
+    try {
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('当前浏览器不支持 Canvas')
+      ctx.drawImage(image, 0, 0)
+      return await canvasToBlob(canvas, 'image/png')
+    } finally {
+      releaseCanvasBitmap(canvas)
+    }
   } finally {
     URL.revokeObjectURL(url)
   }
@@ -72,6 +80,11 @@ export async function canvasToBlob(canvas: HTMLCanvasElement, type = 'image/png'
       else resolve(blob)
     }, type, quality)
   })
+}
+
+function releaseCanvasBitmap(canvas: HTMLCanvasElement): void {
+  canvas.width = 0
+  canvas.height = 0
 }
 
 export async function validateMaskMatchesImage(maskDataUrl: string, imageDataUrl: string): Promise<MaskCoverage> {

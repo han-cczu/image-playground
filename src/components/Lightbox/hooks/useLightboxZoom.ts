@@ -6,33 +6,26 @@ import { clamp, MIN_SCALE, MAX_SCALE, WHEEL_ZOOM_FACTOR, ZOOM_BADGE_HIDE_MS } fr
  * apply 统一做边界 clamp、维护缩放徽标计时并触发渲染;滚轮缩放监听挂容器节点
  * (passive: false,需 preventDefault 阻止页面滚动)。
  */
-export function useLightboxZoom(containerRef: RefObject<HTMLDivElement | null>, src: string) {
+export function useLightboxZoom(containerRef: RefObject<HTMLDivElement | null>) {
   // 用 ref 追踪最新变换，避免闭包过期
   const scaleRef = useRef(1)
   const txRef = useRef(0)
   const tyRef = useRef(0)
 
-  // 仅用于触发渲染
-  const [, forceRender] = useState(0)
-  const rerender = useCallback(() => forceRender((n) => n + 1), [])
+  const [transform, setTransform] = useState({ scale: 1, tx: 0, ty: 0 })
 
   // 缩放倍率显示：2s 无操作后自动隐藏
   const [showZoomBadge, setShowZoomBadge] = useState(false)
   const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // 切换图片时重置缩放
-  useEffect(() => {
-    scaleRef.current = 1
-    txRef.current = 0
-    tyRef.current = 0
-    rerender()
-  }, [src, rerender])
-
   const apply = useCallback((s: number, tx: number, ty: number) => {
     const ns = clamp(s, MIN_SCALE, MAX_SCALE)
+    const nextTx = ns <= 1 ? 0 : tx
+    const nextTy = ns <= 1 ? 0 : ty
     scaleRef.current = ns
-    txRef.current = ns <= 1 ? 0 : tx
-    tyRef.current = ns <= 1 ? 0 : ty
+    txRef.current = nextTx
+    tyRef.current = nextTy
+    setTransform({ scale: ns, tx: nextTx, ty: nextTy })
 
     // 显示缩放倍率并重置自动隐藏计时器
     if (ns > 1) {
@@ -43,9 +36,14 @@ export function useLightboxZoom(containerRef: RefObject<HTMLDivElement | null>, 
       setShowZoomBadge(false)
       if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current)
     }
+  }, [])
 
-    rerender()
-  }, [rerender])
+  useEffect(
+    () => () => {
+      if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current)
+    },
+    [],
+  )
 
   // ====== 滚轮缩放 ======
   useEffect(() => {
@@ -71,5 +69,5 @@ export function useLightboxZoom(containerRef: RefObject<HTMLDivElement | null>, 
     return () => el.removeEventListener('wheel', onWheel)
   }, [apply, containerRef])
 
-  return { scaleRef, txRef, tyRef, apply, showZoomBadge }
+  return { scaleRef, txRef, tyRef, apply, showZoomBadge, ...transform }
 }

@@ -8,7 +8,11 @@ import type { AppSettings, GridAxis, GridAxisKey, GridAxisValue, TaskParams, Tas
 import { STYLE_PRESETS } from './stylePresets'
 import { calculateImageSize, detectRatioFromSize, type SizeTier } from './image/size'
 import { expandPromptTemplate } from './promptExpand'
-import { getOutputImageLimitForSettings } from './api/paramCompatibility'
+import {
+  getOutputImageLimitForSettings,
+  normalizeOutputCount,
+  normalizeParamsForSettings,
+} from './api/paramCompatibility'
 
 const QUALITY_VALUES = ['auto', 'low', 'medium', 'high'] as const
 const FORMAT_VALUES = ['png', 'jpeg', 'webp'] as const
@@ -127,7 +131,10 @@ function applyAxisValue(cell: GridCell, kind: GridAxisKey, value: GridAxisValue,
  * 笛卡尔积:对每个 (xVal, yVal) 从 base 克隆并按轴 override,产出 cell 列表。
  * size 轴的比例固定取 base.params.size 的比例(本期不做 tier×ratio 二级笛卡尔)。
  */
-export function buildGridCells(axes: { x: GridAxis; y?: GridAxis }, base: { params: TaskParams; prompt: string }): GridCell[] {
+export function buildGridCells(
+  axes: { x: GridAxis; y?: GridAxis },
+  base: { settings?: AppSettings; params: TaskParams; prompt: string },
+): GridCell[] {
   const cells: GridCell[] = []
   const yValues: (GridAxisValue | null)[] = axes.y ? axes.y.values : [null]
   for (const xVal of axes.x.values) {
@@ -139,6 +146,9 @@ export function buildGridCells(axes: { x: GridAxis; y?: GridAxis }, base: { para
       }
       applyAxisValue(cell, axes.x.kind, xVal, base.params.size)
       if (axes.y && yVal) applyAxisValue(cell, axes.y.kind, yVal, base.params.size)
+      if (base.settings) {
+        cell.params = normalizeParamsForSettings(cell.params, base.settings)
+      }
       cells.push(cell)
     }
   }
@@ -158,7 +168,7 @@ export function countGridImages(axes: { x: GridAxis; y?: GridAxis }, baseN: numb
   const nAxis = [axes.x, axes.y].find((a): a is GridAxis => a?.kind === 'n')
   if (!nAxis || nAxis.values.length === 0) return countGridCells(axes) * baseN
   const otherCellCount = countGridCells(axes) / nAxis.values.length
-  const sumN = nAxis.values.reduce((sum, v) => sum + (Number(v.key) || 0), 0)
+  const sumN = nAxis.values.reduce((sum, v) => sum + normalizeOutputCount(v.key), 0)
   return otherCellCount * sumN
 }
 

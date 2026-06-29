@@ -30,8 +30,9 @@ export function useMobileGestures(): {
       if (dy > 30) setMobileCollapsed(true)
       if (dy < -30) setMobileCollapsed(false)
     }
-    const onTouchEnd = () => {
+    const onTouchEnd = (e: TouchEvent) => {
       if (!dragTouchRef.current.moved) {
+        e.preventDefault()
         setMobileCollapsed((v) => !v)
       }
     }

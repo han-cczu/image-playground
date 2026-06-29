@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 interface ViewportTooltipProps {
   visible: boolean
@@ -6,16 +6,27 @@ interface ViewportTooltipProps {
   className?: string
 }
 
-export default function ViewportTooltip({ visible, children, className = '' }: ViewportTooltipProps) {
+export default function ViewportTooltip({
+  visible,
+  children,
+  className = '',
+}: ViewportTooltipProps) {
+  if (!visible) return null
+
+  return <ViewportTooltipContent className={className}>{children}</ViewportTooltipContent>
+}
+
+function ViewportTooltipContent({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className: string
+}) {
   const tooltipRef = useRef<HTMLDivElement>(null)
   const [offsetX, setOffsetX] = useState(0)
 
-  useEffect(() => {
-    if (!visible) {
-      setOffsetX(0)
-      return
-    }
-
+  useLayoutEffect(() => {
     const updatePosition = () => {
       const el = tooltipRef.current
       if (!el) return
@@ -35,9 +46,7 @@ export default function ViewportTooltip({ visible, children, className = '' }: V
     return () => window.removeEventListener('resize', updatePosition)
     // 不依赖 children:它每次父渲染都是新引用,会让本 effect 反复重订阅 resize + 强制重排。
     // tooltip 内容通常仅在 visible 切换时变化,resize 监听已覆盖窗口尺寸变化。
-  }, [visible])
-
-  if (!visible) return null
+  }, [])
 
   return (
     <div

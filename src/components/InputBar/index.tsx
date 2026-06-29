@@ -1,9 +1,12 @@
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { useStore, submitTask, addImageFromFile } from '../../store'
+import { assertImagePixelLimit, MAX_INPUT_IMAGE_BYTES } from '../../lib/taskRuntime'
+import { MAX_INPUT_IMAGES_PER_SUBMISSION } from '../../lib/tasks'
 import { getChangedParams, normalizeParamsForSettings } from '../../lib/api/paramCompatibility'
 import { createMaskPreviewDataUrl } from '../../lib/image/canvasImage'
 import { filterAndSortTasks } from '../../lib/taskFilters'
 import { normalizeImageSize, detectTier } from '../../lib/image/size'
+import { fileToImageDataUrl, isImageFile } from '../../lib/image/fileMime'
 import { insertAtCursor } from '../../lib/promptSnippets'
 import { DEFAULT_PARAMS } from '../../types'
 import SelectionActionBar from './SelectionActionBar'
@@ -12,13 +15,19 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { useAutoResizeTextarea } from './hooks/useAutoResizeTextarea'
 import { useDragDropFiles } from './hooks/useDragDropFiles'
 import { useMobileGestures } from './hooks/useMobileGestures'
+import { useLatestRef } from '../../hooks/useLatestRef'
 import ImageGrid from './ImageGrid'
 import PillRow from './PillRow'
 import TextareaInput from './TextareaInput'
 import SubmitButton from './SubmitButton'
 
 /** API 支持的最大参考图数量 */
-const API_MAX_IMAGES = 16
+const API_MAX_IMAGES = MAX_INPUT_IMAGES_PER_SUBMISSION
+
+interface MaskPreviewState {
+  key: string
+  url: string
+}
 
 /** 友好显示的比例标签（在底栏 pill 上显示） */
 function formatRatioLabel(size: string): string {
@@ -52,9 +61,7 @@ export default function InputBar() {
   const settings = useStore((s) => s.settings)
   const setShowSettings = useStore((s) => s.setShowSettings)
   const setShowPromptOptimizer = useStore((s) => s.setShowPromptOptimizer)
-  const setCaptionSource = useStore((s) => s.setCaptionSource)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
-  const showToast = useStore((s) => s.showToast)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const tasks = useStore((s) => s.tasks)
   const filterStatus = useStore((s) => s.filterStatus)
@@ -78,10 +85,19 @@ export default function InputBar() {
       filterFavoriteCategoryId,
       filterConversationId: galleryView ? null : activeConversationId,
     })
-  }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId, galleryView, activeConversationId])
+  }, [
+    tasks,
+    searchQuery,
+    filterStatus,
+    filterFavorite,
+    filterFavoriteCategoryId,
+    galleryView,
+    activeConversationId,
+  ])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const captionFileInputRef = useRef<HTMLInputElement>(null)
+  const captionPickSeqRef = useRef(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const imagesRef = useRef<HTMLDivElement>(null)
@@ -99,10 +115,17 @@ export default function InputBar() {
 
   const [submitHover, setSubmitHover] = useState(false)
   const [showSizePicker, setShowSizePicker] = useState(false)
-  const [maskPreviewUrl, setMaskPreviewUrl] = useState('')
+  const [maskPreview, setMaskPreview] = useState<MaskPreviewState>({ key: '', url: '' })
 
   const isMobile = useIsMobile()
   const { mobileCollapsed, setMobileCollapsed, dragHandleRef: handleRef } = useMobileGestures()
+  const atImageLimit = inputImages.length >= API_MAX_IMAGES
+  const maskTargetImage = maskDraft
+    ? (inputImages.find((img) => img.id === maskDraft.targetImageId) ?? null)
+    : null
+  const maskPreviewKey =
+    maskDraft && maskTargetImage ? `${maskTargetImage.id}:${maskDraft.maskDataUrl}` : ''
+  const maskPreviewUrl = maskPreview.key === maskPreviewKey ? maskPreview.url : ''
   const { adjustHeight: adjustTextareaHeight } = useAutoResizeTextarea({
     textareaRef,
     imagesRef,
@@ -122,10 +145,6 @@ export default function InputBar() {
   const captionTooltipText = !captionerKeyConfigured
     ? '反推提示词 API 尚未配置，点设置中"反推提示词 API"添加'
     : ''
-  const atImageLimit = inputImages.length >= API_MAX_IMAGES
-  const maskTargetImage = maskDraft
-    ? inputImages.find((img) => img.id === maskDraft.targetImageId) ?? null
-    : null
   const referenceImages = maskTargetImage
     ? inputImages.filter((img) => img.id !== maskTargetImage.id)
     : inputImages
@@ -144,60 +163,68 @@ export default function InputBar() {
 
   useEffect(() => {
     let cancelled = false
-    if (!maskDraft || !maskTargetImage) {
-      setMaskPreviewUrl('')
-      return
-    }
+    if (!maskDraft || !maskTargetImage) return
 
     createMaskPreviewDataUrl(maskTargetImage.dataUrl, maskDraft.maskDataUrl)
       .then((url) => {
-        if (!cancelled) setMaskPreviewUrl(url)
+        if (!cancelled) setMaskPreview({ key: maskPreviewKey, url })
       })
       .catch(() => {
-        if (!cancelled) setMaskPreviewUrl('')
+        if (!cancelled) setMaskPreview({ key: maskPreviewKey, url: '' })
       })
 
     return () => {
       cancelled = true
+      setMaskPreview((current) => (current.key === maskPreviewKey ? { key: '', url: '' } : current))
     }
-  }, [maskDraft, maskTargetImage?.id, maskTargetImage?.dataUrl])
+  }, [maskDraft, maskPreviewKey, maskTargetImage])
 
   const handleFiles = async (files: FileList | File[]) => {
     try {
       const currentCount = useStore.getState().inputImages.length
       if (currentCount >= API_MAX_IMAGES) {
-        useStore.getState().showToast(
-          `参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加`,
-          'error',
-        )
+        useStore
+          .getState()
+          .showToast(`参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加`, 'error')
         return
       }
 
-      const remaining = API_MAX_IMAGES - currentCount
-      const accepted = Array.from(files).filter((f) => f.type.startsWith('image/'))
-      const toAdd = accepted.slice(0, remaining)
-      const discarded = accepted.length - toAdd.length
+      const accepted = Array.from(files).filter(isImageFile)
+      let discarded = 0
 
-      for (const file of toAdd) {
-        await addImageFromFile(file)
+      for (const file of accepted) {
+        if (useStore.getState().inputImages.length >= API_MAX_IMAGES) {
+          discarded++
+          continue
+        }
+        try {
+          await addImageFromFile(file)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          if (message === '图片已在参考图中') {
+            continue
+          }
+          if (message.includes('参考图数量已达上限')) {
+            discarded++
+            continue
+          }
+          throw err
+        }
       }
 
       if (discarded > 0) {
-        useStore.getState().showToast(
-          `已达上限 ${API_MAX_IMAGES} 张，${discarded} 张图片被丢弃`,
-          'error',
-        )
+        useStore
+          .getState()
+          .showToast(`已达上限 ${API_MAX_IMAGES} 张，${discarded} 张图片被丢弃`, 'error')
       }
     } catch (err) {
-      useStore.getState().showToast(
-        `图片添加失败：${err instanceof Error ? err.message : String(err)}`,
-        'error',
-      )
+      useStore
+        .getState()
+        .showToast(`图片添加失败：${err instanceof Error ? err.message : String(err)}`, 'error')
     }
   }
 
-  const handleFilesRef = useRef(handleFiles)
-  handleFilesRef.current = handleFiles
+  const handleFilesRef = useLatestRef(handleFiles)
 
   const { isDragging } = useDragDropFiles({
     onFiles: (files) => handleFilesRef.current(files),
@@ -209,30 +236,36 @@ export default function InputBar() {
   }
 
   const handleCaptionFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const pickSeq = ++captionPickSeqRef.current
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    if (!file.type.startsWith('image/')) {
-      showToast('请选择图片文件', 'error')
+    if (!isImageFile(file)) {
+      useStore.getState().showToast('请选择图片文件', 'error')
+      return
+    }
+    if (file.size > MAX_INPUT_IMAGE_BYTES) {
+      useStore.getState().showToast(`图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`, 'error')
       return
     }
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(reader.result as string)
-        reader.onerror = () => reject(reader.error)
-        reader.readAsDataURL(file)
-      })
-      setCaptionSource(dataUrl)
+      const dataUrl = await fileToImageDataUrl(file)
+      if (pickSeq !== captionPickSeqRef.current) return
+      await assertImagePixelLimit(dataUrl)
+      if (pickSeq !== captionPickSeqRef.current) return
+      useStore.getState().setCaptionSource(dataUrl)
     } catch (err) {
-      showToast(`读取图片失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+      if (pickSeq !== captionPickSeqRef.current) return
+      useStore.getState().showToast(`读取图片失败：${err instanceof Error ? err.message : String(err)}`, 'error')
     }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault()
-      submitTask()
+      void submitTask().catch(() => {
+        /* submitTask surfaces recoverable errors via toast */
+      })
     }
   }
 
@@ -292,7 +325,7 @@ export default function InputBar() {
       onClickImage={setLightboxImageId}
       onEditMask={setMaskEditorImageId}
       onConfirmClearAll={setConfirmDialog}
-      onMaskConflictNotice={(message) => showToast(message, 'info')}
+      onMaskConflictNotice={(message) => useStore.getState().showToast(message, 'info')}
     />
   )
 
@@ -313,16 +346,40 @@ export default function InputBar() {
       {isDragging && (
         <div className="fixed inset-0 z-[100] bg-white/60 dark:bg-gray-900/60 backdrop-blur-md flex flex-col items-center justify-center pointer-events-none">
           <div className="flex flex-col items-center gap-4 p-8 rounded-3xl">
-            <div className={`w-20 h-20 rounded-full border-2 border-dashed flex items-center justify-center ${
-              atImageLimit ? 'bg-red-50 dark:bg-red-500/10 border-red-300' : 'bg-blue-50 dark:bg-blue-500/10 border-blue-400'
-            }`}>
+            <div
+              className={`w-20 h-20 rounded-full border-2 border-dashed flex items-center justify-center ${
+                atImageLimit
+                  ? 'bg-red-50 dark:bg-red-500/10 border-red-300'
+                  : 'bg-blue-50 dark:bg-blue-500/10 border-blue-400'
+              }`}
+            >
               {atImageLimit ? (
-                <svg className="w-10 h-10 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                <svg
+                  className="w-10 h-10 text-red-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                  />
                 </svg>
               ) : (
-                <svg className="w-10 h-10 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                <svg
+                  className="w-10 h-10 text-blue-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                  />
                 </svg>
               )}
             </div>
@@ -334,7 +391,9 @@ export default function InputBar() {
                 </>
               ) : (
                 <>
-                  <p className="text-lg font-semibold text-gray-700 dark:text-gray-200">释放以添加参考图</p>
+                  <p className="text-lg font-semibold text-gray-700 dark:text-gray-200">
+                    释放以添加参考图
+                  </p>
                   <p className="text-sm text-gray-400 mt-1">支持 JPG、PNG、WebP 等格式</p>
                 </>
               )}
@@ -357,14 +416,19 @@ export default function InputBar() {
         className={`app-enter-inputbar fixed bottom-4 sm:bottom-6 left-1/2 z-30 w-full max-w-4xl -translate-x-1/2 px-3 transition-[left] duration-200 sm:px-4 ${desktopOffsetClass}`}
       >
         <SelectionActionBar filteredTasks={filteredTasks} />
-        <div ref={cardRef} className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] rounded-2xl sm:rounded-3xl p-3 sm:p-4 ring-1 ring-black/5 dark:ring-white/10">
+        <div
+          ref={cardRef}
+          className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] rounded-2xl sm:rounded-3xl p-3 sm:p-4 ring-1 ring-black/5 dark:ring-white/10"
+        >
           {/* 移动端拖动条 */}
           <div
             ref={handleRef}
             className="sm:hidden flex justify-center pt-0.5 pb-2 -mt-1 cursor-pointer touch-none"
             onClick={() => setMobileCollapsed((v) => !v)}
           >
-            <div className={`w-10 h-1 rounded-full bg-gray-300 dark:bg-white/[0.06] transition-transform duration-200 ${mobileCollapsed ? 'scale-x-75' : ''}`} />
+            <div
+              className={`w-10 h-1 rounded-full bg-gray-300 dark:bg-white/[0.06] transition-transform duration-200 ${mobileCollapsed ? 'scale-x-75' : ''}`}
+            />
           </div>
 
           {/* Pill 行（参数 + 上传 + 高级）：移动端通过折叠面板隐藏 */}
@@ -379,24 +443,23 @@ export default function InputBar() {
           )}
 
           {/* 输入图片行（移动端可折叠） */}
-          {inputImages.length > 0 && (
-            isMobile ? (
+          {inputImages.length > 0 &&
+            (isMobile ? (
               <>
                 <div className={`collapse-section${mobileCollapsed ? ' collapsed' : ''}`}>
-                  <div className="collapse-inner">
-                    {imageGridElement}
-                  </div>
+                  <div className="collapse-inner">{imageGridElement}</div>
                 </div>
                 {mobileCollapsed && (
                   <div className="text-xs text-gray-500 dark:text-gray-400 mb-2 ml-1">
-                    {maskDraft ? `1 张遮罩主图 · ${referenceImages.length} 张参考图` : `${inputImages.length} 张参考图`}
+                    {maskDraft
+                      ? `1 张遮罩主图 · ${referenceImages.length} 张参考图`
+                      : `${inputImages.length} 张参考图`}
                   </div>
                 )}
               </>
             ) : (
               imageGridElement
-            )
-          )}
+            ))}
 
           {/* 输入框 + 发送 */}
           <div className="flex items-end gap-2">

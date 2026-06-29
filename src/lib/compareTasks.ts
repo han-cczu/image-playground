@@ -1,5 +1,5 @@
 import type { TaskRecord } from '../types'
-import { getParamDisplay } from './paramDisplay'
+import { getParamDisplay } from './paramDisplayLogic'
 import { isStylePresetKey, STYLE_PRESETS } from './stylePresets'
 
 /** 对比视图的一行:跨列对齐的参数维度 */
@@ -29,7 +29,7 @@ function sourceLabel(task: TaskRecord): string {
 
 function elapsedLabel(task: TaskRecord): string {
   if (typeof task.elapsed !== 'number' || !Number.isFinite(task.elapsed)) return '—'
-  return `${task.elapsed.toFixed(1)}s`
+  return `${(task.elapsed / 1000).toFixed(1)}s`
 }
 
 function allSame(values: string[]): boolean {
@@ -63,7 +63,13 @@ export function buildCompareRows(tasks: TaskRecord[]): CompareRow[] {
   const styles = tasks.map(styleLabel)
 
   const rows: CompareRow[] = [
-    { key: 'prompt', label: '提示词', values: prompts, differs: !allSame(prompts), multiline: true },
+    {
+      key: 'prompt',
+      label: '提示词',
+      values: prompts,
+      differs: !allSame(prompts),
+      multiline: true,
+    },
     { key: 'style', label: '风格', values: styles, differs: !allSame(styles) },
   ]
 
@@ -72,7 +78,11 @@ export function buildCompareRows(tasks: TaskRecord[]): CompareRow[] {
     rows.push({ key: 'source', label: '模型', values: sources, differs: !allSame(sources) })
   }
 
-  rows.push(paramRow('size', '尺寸'), paramRow('quality', '质量'), paramRow('output_format', '格式'))
+  rows.push(
+    paramRow('size', '尺寸'),
+    paramRow('quality', '质量'),
+    paramRow('output_format', '格式'),
+  )
 
   const anyNonPng = tasks.some(
     (task) => getParamDisplay(task, 'output_format').displayValue !== 'png',

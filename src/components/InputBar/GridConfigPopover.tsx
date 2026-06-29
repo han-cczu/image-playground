@@ -100,7 +100,9 @@ export default function GridConfigPopover({ anchorRef, onClose }: Props) {
     if (hasY && yKind) {
       config.y = { kind: yKind, values: yCandidates.filter((c) => yKeys.includes(c.key)) }
     }
-    void submitGridTask(config)
+    void submitGridTask(config).catch(() => {
+      /* submitGridTask surfaces recoverable errors via toast */
+    })
     onClose()
   }
 

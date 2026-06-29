@@ -70,32 +70,39 @@ export function useLazyCoverImage(imageId: string | undefined): {
     let cancelled = false
     let acquired = false
     void (async () => {
-      // 让出一个微任务:保证 setCover 不在 effect 体内同步执行(避免级联渲染)
-      await Promise.resolve()
-      if (cancelled) return
-      // LRU 命中作首帧立显(刚生成的图即时换封面),随后仍换成 objectURL 释放 base64
-      const cached = getCachedImage(imageId)
-      if (cached) setCover({ id: imageId, url: cached })
-      const url = await acquireImageObjectUrl(imageId)
-      if (cancelled) {
-        // 组件已卸载/换图:立刻归还引用,避免泄漏
-        if (url) releaseImageObjectUrl(imageId)
-        return
+      try {
+        // 让出一个微任务:保证 setCover 不在 effect 体内同步执行(避免级联渲染)
+        await Promise.resolve()
+        if (cancelled) return
+        // LRU 命中作首帧立显(刚生成的图即时换封面),随后仍换成 objectURL 释放 base64
+        const cached = getCachedImage(imageId)
+        if (cached) setCover({ id: imageId, url: cached })
+        const url = await acquireImageObjectUrl(imageId)
+        if (cancelled) {
+          // 组件已卸载/换图:立刻归还引用,避免泄漏
+          if (url) releaseImageObjectUrl(imageId)
+          return
+        }
+        if (url) {
+          acquired = true
+          setCover({ id: imageId, url })
+        } else {
+          setCover((current) => (current && current.id === imageId ? null : current))
+        }
+      } catch {
+        if (!cancelled) {
+          setCover((current) => (current && current.id === imageId ? null : current))
+        }
       }
-      if (url) {
-        acquired = true
-        setCover({ id: imageId, url })
-      }
-      // url 为 null(图已删)时保留 LRU 首帧(若有),不强行清空
     })()
     return () => {
       cancelled = true
       if (acquired) {
         releaseImageObjectUrl(imageId)
-        // 引用已归还、URL 可能随之 revoke:同步失效匹配的 cover,
-        // 防 imageId 回流到该值时把死 URL 渲染进 <img>
-        setCover((current) => (current && current.id === imageId ? null : current))
       }
+      // 清掉当前 imageId 的任意 cover:可能是已 release 的 objectURL,也可能是 objectURL
+      // 仍 pending 时写入的 LRU dataUrl 首帧,避免 imageId 回流后重新暴露旧大图字符串。
+      setCover((current) => (current && current.id === imageId ? null : current))
     }
   }, [imageId, visible])
 

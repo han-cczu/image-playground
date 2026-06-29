@@ -117,11 +117,11 @@ docker run -d --name image-playground -p 8080:80 image-playground
 
 ### URL 快速填充
 
-适合创建书签或外部系统集成。密钥请放在 hash 中一次性传入，应用读取后会立即从地址栏清除。
+适合创建书签或外部系统集成。`apiUrl` 与 `apiKey` 请放在 hash 中一次性传入，应用读取后会立即从地址栏清除；查询串中的同名参数会被清理但不会摄入。
 
 | 参数 | 示例 | 作用 |
 |---|---|---|
-| `apiUrl` | `?apiUrl=https://example.com/v1` | 覆盖当前激活 profile 的 API URL |
+| `apiUrl` | `#apiUrl=https://example.com/v1` | 覆盖当前激活 profile 的 API URL |
 | `apiKey` | `#apiKey=sk-xxxx` | 一次性写入当前激活 profile 的 API Key |
 | `apiMode` | `?apiMode=images` 或 `?apiMode=responses` | 切换 OpenAI 接口模式（默认 `images`） |
 | `codexCli` | `?codexCli=true` | 强制开启 Codex CLI 兼容模式 |
@@ -130,14 +130,14 @@ docker run -d --name image-playground -p 8080:80 image-playground
 集成示例（如 New API 等聊天系统中以 URL 形式跳转）：
 
 ```text
-https://image-playground.diaohan111.workers.dev/?apiUrl={address}#apiKey={key}
+https://image-playground.diaohan111.workers.dev/#apiUrl={address}&apiKey={key}
 ```
 
 ---
 
 ## 🚀 本地开发与构建
 
-**环境准备**：可选在项目根目录新建 `.env.local` 配置默认 API URL：
+**环境准备**：需要 Node.js 22 或更高版本。可选在项目根目录新建 `.env.local` 配置默认 API URL：
 
 ```bash
 VITE_DEFAULT_API_URL=https://api.openai.com/v1

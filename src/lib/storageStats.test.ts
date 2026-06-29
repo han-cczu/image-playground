@@ -42,12 +42,12 @@ beforeEach(() => {
 describe('collectReferencedImageIds', () => {
   it('unions input/mask/output ids across tasks, with dedup and null tolerance', () => {
     const tasks = [
-      { inputImageIds: ['a', 'b'], maskImageId: 'm', outputImages: ['o1'] } as TaskRecord,
+      { inputImageIds: ['a', 'b'], maskTargetImageId: 'target', maskImageId: 'm', outputImages: ['o1'] } as TaskRecord,
       { inputImageIds: ['b'], outputImages: ['o2'] } as TaskRecord, // b 重复
       {} as TaskRecord, // 缺字段:空值兜底,不抛
     ]
     const refs = collectReferencedImageIds(tasks, [{ id: 'in1' }])
-    expect([...refs].sort()).toEqual(['a', 'b', 'in1', 'm', 'o1', 'o2'])
+    expect([...refs].sort()).toEqual(['a', 'b', 'in1', 'm', 'o1', 'o2', 'target'])
   })
 })
 

@@ -2,6 +2,7 @@ import type { PromptSnippet } from '../types'
 
 /** 片段数量上限：防 localStorage 膨胀（200 × 5KB 最坏 ≈ 1MB） */
 export const MAX_SNIPPETS = 200
+export const MAX_SNIPPET_ID_LEN = 5000
 export const MAX_SNIPPET_NAME_LEN = 50
 export const MAX_SNIPPET_CONTENT_LEN = 5000
 
@@ -25,10 +26,11 @@ export function normalizeSnippets(value: unknown, now = Date.now()): PromptSnipp
     // content 是片段的本体：缺失/空串的记录没有意义，直接跳过
     if (typeof item.content !== 'string' || !item.content.trim()) return
 
+    const id = item.id.slice(0, MAX_SNIPPET_ID_LEN)
     const createdAt =
       typeof item.createdAt === 'number' && Number.isFinite(item.createdAt) ? item.createdAt : now
-    byId.set(item.id, {
-      id: item.id,
+    byId.set(id, {
+      id,
       name:
         typeof item.name === 'string' && item.name.trim()
           ? item.name.trim().slice(0, MAX_SNIPPET_NAME_LEN)

@@ -10,12 +10,16 @@ export default function ActionBar({ task }: { task: TaskRecord }) {
   const outputLen = task.outputImages?.length || 0
 
   const handleReuse = () => {
-    reuseConfig(task)
+    void reuseConfig(task).catch(() => {
+      /* reuseConfig surfaces recoverable errors via toast */
+    })
     setDetailTaskId(null)
   }
 
   const handleEdit = () => {
-    editOutputs(task)
+    void editOutputs(task).catch(() => {
+      /* editOutputs surfaces recoverable errors via toast */
+    })
     setDetailTaskId(null)
   }
 

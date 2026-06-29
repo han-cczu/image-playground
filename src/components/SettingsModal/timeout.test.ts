@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeTimeout } from './timeout'
+import { normalizeTimeout, normalizeTimeoutInput } from './timeout'
 
 describe('normalizeTimeout', () => {
   const fallback = 60
@@ -14,6 +14,10 @@ describe('normalizeTimeout', () => {
 
   it('returns fallback for non-numeric string', () => {
     expect(normalizeTimeout('abc', fallback)).toBe(fallback)
+  })
+
+  it('returns fallback for non-finite numbers', () => {
+    expect(normalizeTimeout('Infinity', fallback)).toBe(fallback)
   })
 
   it('returns fallback for zero', () => {
@@ -34,5 +38,18 @@ describe('normalizeTimeout', () => {
 
   it('preserves decimal (no truncation)', () => {
     expect(normalizeTimeout('30.9', fallback)).toBe(30.9)
+  })
+})
+
+describe('normalizeTimeoutInput', () => {
+  const fallback = 600
+
+  it('rejects non-positive values by default', () => {
+    expect(normalizeTimeoutInput('0', fallback)).toBe(fallback)
+    expect(normalizeTimeoutInput('-1', fallback)).toBe(fallback)
+  })
+
+  it('rejects non-finite values', () => {
+    expect(normalizeTimeoutInput('Infinity', fallback)).toBe(fallback)
   })
 })

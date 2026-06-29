@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import Modal, { ModalCloseButton, ModalTitle } from './Modal'
 import { captionImageStream } from '../lib/api/captionImageApi'
+import { useLatestRef } from '../hooks/useLatestRef'
 
 type Phase = 'idle' | 'streaming' | 'done' | 'error'
 
@@ -17,12 +18,9 @@ export default function ImageCaptionModal() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
-  const sourceRef = useRef<string | null>(null)
-  sourceRef.current = captionSource
-  const configRef = useRef(settings.captioner)
-  configRef.current = settings.captioner
-  const promptRef = useRef(prompt)
-  promptRef.current = prompt
+  const sourceRef = useLatestRef(captionSource)
+  const configRef = useLatestRef(settings.captioner)
+  const promptRef = useLatestRef(prompt)
 
   const runCaption = useCallback(() => {
     abortRef.current?.abort()
@@ -54,7 +52,7 @@ export default function ImageCaptionModal() {
         setPhase('error')
         setErrorMessage(err instanceof Error ? err.message : String(err))
       })
-  }, [])
+  }, [configRef, sourceRef])
 
   useEffect(() => {
     if (!captionSource) return
@@ -105,89 +103,115 @@ export default function ImageCaptionModal() {
       containerClassName="z-[80] items-center"
       panelClassName="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden p-5"
     >
-        <div className="mb-4 flex items-center justify-between gap-4">
-          <ModalTitle>
-            <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            反推提示词
-          </ModalTitle>
-          <ModalCloseButton onClick={handleClose} />
-        </div>
+      <div className="mb-4 flex items-center justify-between gap-4">
+        <ModalTitle>
+          <svg
+            className="w-5 h-5 text-blue-500"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+            />
+          </svg>
+          反推提示词
+        </ModalTitle>
+        <ModalCloseButton onClick={handleClose} />
+      </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1 min-h-0">
-          <div className="flex flex-col min-h-0">
-            <div className="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">源图</div>
-            <div className="flex-1 min-h-[200px] max-h-[50vh] overflow-hidden rounded-2xl border border-gray-200/70 bg-white/50 p-3 flex items-center justify-center dark:border-white/[0.08] dark:bg-white/[0.03]">
-              <img src={captionSource} alt="源图" className="max-h-full max-w-full object-contain rounded-lg" />
-            </div>
-          </div>
-
-          <div className="flex flex-col min-h-0">
-            <div className="mb-2 flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
-              <span>反推结果</span>
-              {isStreaming && (
-                <span className="flex items-center gap-1 text-blue-500 dark:text-blue-400">
-                  <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="10" strokeWidth={3} className="opacity-25" />
-                    <path strokeWidth={3} strokeLinecap="round" d="M22 12a10 10 0 00-10-10" />
-                  </svg>
-                  生成中…
-                </span>
-              )}
-            </div>
-            <div className="flex-1 min-h-[200px] max-h-[50vh] overflow-y-auto rounded-2xl border border-blue-200/70 bg-blue-50/30 p-3 text-sm text-gray-700 whitespace-pre-wrap break-words dark:border-blue-500/20 dark:bg-blue-500/[0.04] dark:text-gray-200 custom-scrollbar">
-              {isError ? (
-                <div className="text-red-500 dark:text-red-400 break-words">{errorMessage || '反推失败'}</div>
-              ) : (
-                <>
-                  {caption}
-                  {isStreaming && (
-                    <span className="inline-block w-[2px] h-[1em] -mb-[2px] bg-blue-500 dark:bg-blue-400 animate-pulse ml-0.5" aria-hidden>▍</span>
-                  )}
-                  {!caption && !isStreaming && !isError && (
-                    <span className="text-gray-400">（等待反推结果）</span>
-                  )}
-                </>
-              )}
-            </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1 min-h-0">
+        <div className="flex flex-col min-h-0">
+          <div className="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">源图</div>
+          <div className="flex-1 min-h-[200px] max-h-[50vh] overflow-hidden rounded-2xl border border-gray-200/70 bg-white/50 p-3 flex items-center justify-center dark:border-white/[0.08] dark:bg-white/[0.03]">
+            <img
+              src={captionSource}
+              alt="源图"
+              className="max-h-full max-w-full object-contain rounded-lg"
+            />
           </div>
         </div>
 
-        <div className="mt-5 flex items-center justify-end gap-2">
-          {isError && (
-            <button
-              type="button"
-              onClick={runCaption}
-              className="rounded-xl px-4 py-2.5 text-sm font-medium text-blue-600 transition hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10"
-            >
-              重试
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleClose}
-            className="rounded-xl px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06]"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={handleAppend}
-            disabled={!canAdopt}
-            className="rounded-xl px-4 py-2.5 text-sm font-medium text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-400 dark:hover:bg-blue-500/10"
-          >
-            追加
-          </button>
-          <button
-            type="button"
-            onClick={handleReplace}
-            disabled={!canAdopt}
-            className="rounded-xl bg-blue-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-blue-500 dark:hover:bg-blue-600"
-          >
-            采用
-          </button>
+        <div className="flex flex-col min-h-0">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+            <span>反推结果</span>
+            {isStreaming && (
+              <span className="flex items-center gap-1 text-blue-500 dark:text-blue-400">
+                <svg
+                  className="w-3 h-3 animate-spin"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <circle cx="12" cy="12" r="10" strokeWidth={3} className="opacity-25" />
+                  <path strokeWidth={3} strokeLinecap="round" d="M22 12a10 10 0 00-10-10" />
+                </svg>
+                生成中…
+              </span>
+            )}
+          </div>
+          <div className="flex-1 min-h-[200px] max-h-[50vh] overflow-y-auto rounded-2xl border border-blue-200/70 bg-blue-50/30 p-3 text-sm text-gray-700 whitespace-pre-wrap break-words dark:border-blue-500/20 dark:bg-blue-500/[0.04] dark:text-gray-200 custom-scrollbar">
+            {isError ? (
+              <div className="text-red-500 dark:text-red-400 break-words">
+                {errorMessage || '反推失败'}
+              </div>
+            ) : (
+              <>
+                {caption}
+                {isStreaming && (
+                  <span
+                    className="inline-block w-[2px] h-[1em] -mb-[2px] bg-blue-500 dark:bg-blue-400 animate-pulse ml-0.5"
+                    aria-hidden
+                  >
+                    ▍
+                  </span>
+                )}
+                {!caption && !isStreaming && !isError && (
+                  <span className="text-gray-400">（等待反推结果）</span>
+                )}
+              </>
+            )}
+          </div>
         </div>
+      </div>
+
+      <div className="mt-5 flex items-center justify-end gap-2">
+        {isError && (
+          <button
+            type="button"
+            onClick={runCaption}
+            className="rounded-xl px-4 py-2.5 text-sm font-medium text-blue-600 transition hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10"
+          >
+            重试
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={handleClose}
+          className="rounded-xl px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06]"
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          onClick={handleAppend}
+          disabled={!canAdopt}
+          className="rounded-xl px-4 py-2.5 text-sm font-medium text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-blue-400 dark:hover:bg-blue-500/10"
+        >
+          追加
+        </button>
+        <button
+          type="button"
+          onClick={handleReplace}
+          disabled={!canAdopt}
+          className="rounded-xl bg-blue-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-blue-500 dark:hover:bg-blue-600"
+        >
+          采用
+        </button>
+      </div>
     </Modal>
   )
 }

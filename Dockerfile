@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.6
-# 多阶段构建：node:20-alpine 编译产物 → nginx:alpine 托管静态文件。
+# 多阶段构建：node:22-alpine 编译产物 → nginx:alpine 托管静态文件。
 # 关键不变量：
 #  - npm ci 之前先 COPY package*.json，让依赖层在源码变更时仍能复用缓存。
 #  - 第二阶段不带任何 node 依赖，最终镜像 ≈ nginx:alpine 基础 (~25MB) + dist (~数 MB)。
@@ -7,7 +7,7 @@
 #    把 dist/sw.js 中的 __CACHE_NAME__ 占位符替换为 image-playground-<hash>-<ts>。
 
 # ---------- Stage 1: build ----------
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 

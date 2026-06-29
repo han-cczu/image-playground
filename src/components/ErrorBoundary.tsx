@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { useStore, clearAllData } from '../store'
+import { computeRetryState, hashString } from './ErrorBoundary.logic'
 
 /**
  * Region 决定回退 UI 形态。
@@ -9,12 +10,7 @@ import { useStore, clearAllData } from '../store'
  *   - header   极简一行
  *   - modal    Modal 内嵌入面板（不破坏关闭逻辑）
  */
-export type ErrorBoundaryRegion =
-  | 'main'
-  | 'sidebar'
-  | 'inputbar'
-  | 'header'
-  | 'modal'
+export type ErrorBoundaryRegion = 'main' | 'sidebar' | 'inputbar' | 'header' | 'modal'
 
 export interface ErrorBoundaryProps {
   children: ReactNode
@@ -38,60 +34,6 @@ interface ErrorBoundaryState {
 
 /** 连续 retry 失败上限，达到后禁用「重试」按钮。 */
 const MAX_RETRY_FAILED = 3
-
-/**
- * 简单 hash，用于 prod 模式给用户一个可反馈的错误 id。
- *
- * 故意不使用加密强度算法 —— 只需「同一 error message + stack」始终得到同一 6 字符 id，
- * 用户反馈时可由开发者反查 log。
- */
-export function hashString(input: string): string {
-  let h = 0
-  for (let i = 0; i < input.length; i++) {
-    h = ((h << 5) - h) + input.charCodeAt(i)
-    h |= 0
-  }
-  // toString(36) 在负数前面会加 '-'，先转无符号
-  const unsigned = h >>> 0
-  return unsigned.toString(36).padStart(6, '0').slice(-6)
-}
-
-export interface RetryStateInput {
-  retryFailedCount: number
-  retryPending: boolean
-}
-
-export interface RetryStateAction {
-  type: 'retry' | 'errorDuringRetry' | 'errorFresh' | 'recoverConfirmed'
-}
-
-/**
- * 纯函数 reducer：boundary 内 retry/error 状态机。
- *
- * 状态语义：
- *   - 处于 retryPending（刚点过重试）时再次接到 error  -> retryFailedCount + 1，仍 pending
- *   - 非 pending 时接到 error                          -> retryFailedCount 不变（首次错误）
- *   - 点击重试                                          -> 进入 pending（计数等下次错误才加）
- *   - 子树成功渲染（外部确认）                          -> 退出 pending，计数归零
- */
-export function computeRetryState(
-  prev: RetryStateInput,
-  action: RetryStateAction,
-): RetryStateInput {
-  switch (action.type) {
-    case 'retry':
-      return { retryFailedCount: prev.retryFailedCount, retryPending: true }
-    case 'errorDuringRetry':
-      return {
-        retryFailedCount: prev.retryFailedCount + 1,
-        retryPending: true,
-      }
-    case 'errorFresh':
-      return { retryFailedCount: prev.retryFailedCount, retryPending: false }
-    case 'recoverConfirmed':
-      return { retryFailedCount: 0, retryPending: false }
-  }
-}
 
 const REGION_LABEL: Record<ErrorBoundaryRegion, string> = {
   main: '主区域',
@@ -132,22 +74,32 @@ type ActionVariant = 'main' | 'compact' | 'header' | 'modal'
  */
 const ACTION_BUTTON_CLASS: Record<ActionVariant, Partial<Record<ActionButtonKind, string>>> = {
   main: {
-    retry: 'inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-4 py-1.5 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20',
-    reload: 'inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-4 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08]',
-    clear: 'inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-4 py-1.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20',
+    retry:
+      'inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-4 py-1.5 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20',
+    reload:
+      'inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-4 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08]',
+    clear:
+      'inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-4 py-1.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20',
   },
   compact: {
-    retry: 'rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20',
-    reload: 'rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08]',
-    clear: 'rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20',
+    retry:
+      'rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20',
+    reload:
+      'rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08]',
+    clear:
+      'rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20',
   },
   header: {
-    retry: 'rounded-full border border-red-300 px-2.5 py-0.5 text-[11px] font-medium hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/50 dark:hover:bg-red-500/20',
+    retry:
+      'rounded-full border border-red-300 px-2.5 py-0.5 text-[11px] font-medium hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/50 dark:hover:bg-red-500/20',
   },
   modal: {
-    retry: 'rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20',
-    reload: 'rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08]',
-    clear: 'rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20',
+    retry:
+      'rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20',
+    reload:
+      'rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08]',
+    clear:
+      'rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20',
   },
 }
 
@@ -182,12 +134,7 @@ function ErrorActionButtons(props: ErrorActionButtonsProps) {
         </button>
       )}
       {buttons.includes('reload') && (
-        <button
-          type="button"
-          onClick={onReload}
-          aria-label="刷新页面"
-          className={cls.reload}
-        >
+        <button type="button" onClick={onReload} aria-label="刷新页面" className={cls.reload}>
           刷新页面
         </button>
       )}
@@ -224,8 +171,10 @@ function ErrorIdBadge({ hash, size }: { hash: string; size: keyof typeof ERROR_I
 /** DEV 堆栈预览的容器样式（main 宽幅大字号；compact / modal 紧凑小字号）。 */
 const DEV_STACK_CLASS = {
   main: 'mt-6 max-h-64 w-full max-w-3xl overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3 text-left font-mono text-xs leading-relaxed text-gray-700 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300',
-  compact: 'max-h-40 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 text-left font-mono text-[11px] leading-snug text-gray-700 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300',
-  modal: 'mt-4 max-h-48 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 text-left font-mono text-[11px] leading-snug text-gray-700 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300',
+  compact:
+    'max-h-40 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 text-left font-mono text-[11px] leading-snug text-gray-700 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300',
+  modal:
+    'mt-4 max-h-48 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 text-left font-mono text-[11px] leading-snug text-gray-700 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300',
 } as const
 
 interface DevStackProps {
@@ -239,8 +188,8 @@ function DevStack({ variant, error, componentStack }: DevStackProps) {
   if (!import.meta.env.DEV) return null
   return (
     <pre className={DEV_STACK_CLASS[variant]}>
-{error.stack || error.message}
-{componentStack ? `\n\n--- componentStack ---${componentStack}` : ''}
+      {error.stack || error.message}
+      {componentStack ? `\n\n--- componentStack ---${componentStack}` : ''}
     </pre>
   )
 }
@@ -254,10 +203,10 @@ function FallbackMain(props: FallbackActions) {
       role="alert"
       className="flex min-h-[60vh] flex-col items-center justify-center px-4 py-10 text-center"
     >
-      <div className="mb-4 text-6xl" aria-hidden="true">🛠️</div>
-      <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-100">
-        这个区域出错了
-      </h2>
+      <div className="mb-4 text-6xl" aria-hidden="true">
+        🛠️
+      </div>
+      <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-100">这个区域出错了</h2>
       <p className="mt-2 max-w-md text-sm text-gray-500 dark:text-gray-400">
         {REGION_LABEL[region]} 渲染失败，可以尝试重试或刷新页面。
       </p>
@@ -290,7 +239,9 @@ function FallbackCompact(props: FallbackActions) {
   return (
     <div role="alert" className={wrapperClass}>
       <div className="flex items-center gap-2">
-        <span aria-hidden="true" className="text-red-500 dark:text-red-400">⚠️</span>
+        <span aria-hidden="true" className="text-red-500 dark:text-red-400">
+          ⚠️
+        </span>
         <span className="flex-1 truncate text-gray-700 dark:text-gray-200">
           {REGION_LABEL[region]}出错（{brief.hash}）
         </span>
@@ -307,9 +258,7 @@ function FallbackCompact(props: FallbackActions) {
       </div>
       {detailOpen && (
         <div className="mt-2 space-y-2">
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            {brief.message}
-          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{brief.message}</p>
           <div className="flex flex-wrap gap-1.5">
             <ErrorActionButtons variant="compact" buttons={['reload', 'clear']} {...props} />
           </div>
@@ -342,11 +291,11 @@ function FallbackModal(props: FallbackActions) {
   const brief = getErrorBrief(error)
 
   return (
-    <div
-      role="alert"
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
-    >
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-md dark:bg-black/50" aria-hidden="true" />
+    <div role="alert" className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-black/30 backdrop-blur-md dark:bg-black/50"
+        aria-hidden="true"
+      />
       <div className="relative z-10 w-full max-w-md">
         <div className="relative w-full max-w-md rounded-2xl border border-white/50 bg-white p-5 shadow-2xl ring-1 ring-black/5 dark:border-white/[0.08] dark:bg-gray-900 dark:ring-white/10">
           <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100">
@@ -392,10 +341,8 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
   componentDidCatch(error: Error, info: ErrorInfo): void {
     // 控制台留痕：方便 dev 排查，prod 也保留 message + componentStack
     if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
       console.error('[ErrorBoundary]', this.props.region, error, info.componentStack)
     } else {
-      // eslint-disable-next-line no-console
       console.error('[ErrorBoundary]', this.props.region, error.message)
     }
 
@@ -416,6 +363,24 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
     // 外部 resetKey 变化：等同于 retry
     if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
       this.handleRetry()
+      return
+    }
+
+    if (!this.state.error && (this.state.retryPending || this.state.retryFailedCount > 0)) {
+      this.setState((prev) => {
+        if (prev.error) return null
+        const next = computeRetryState(
+          { retryFailedCount: prev.retryFailedCount, retryPending: prev.retryPending },
+          { type: 'recoverConfirmed' },
+        )
+        if (
+          next.retryFailedCount === prev.retryFailedCount &&
+          next.retryPending === prev.retryPending
+        ) {
+          return null
+        }
+        return next
+      })
     }
   }
 
@@ -448,13 +413,7 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
       tone: 'danger',
       confirmText: '清空并重载',
       action: () => {
-        void (async () => {
-          try {
-            await clearAllData()
-          } finally {
-            location.reload()
-          }
-        })()
+        return clearAllData().finally(() => location.reload())
       },
     })
   }
@@ -471,11 +430,7 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
       // 用 display:contents 包一层 div：保持 class component 的物理节点，
       // 但不影响 grid/flex 子选择器和现有 data-* selector（如 data-home-main / data-drag-select-surface）。
       return (
-        <div
-          style={{ display: 'contents' }}
-          key={resetCounter}
-          data-error-boundary-region={region}
-        >
+        <div style={{ display: 'contents' }} key={resetCounter} data-error-boundary-region={region}>
           {this.props.children}
         </div>
       )

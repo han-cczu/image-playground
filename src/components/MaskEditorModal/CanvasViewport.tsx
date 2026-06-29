@@ -1,4 +1,4 @@
-import type { ReactNode, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react'
+import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react'
 import type { Point, ViewTransform } from '../../lib/image/viewportTransform'
 import type { CanvasSize } from './types'
 
@@ -20,7 +20,6 @@ interface CanvasViewportProps {
     onPointerMove: (e: ReactPointerEvent<HTMLCanvasElement>) => void
     onPointerUp: (e: ReactPointerEvent<HTMLCanvasElement>) => void
     onPointerLeave: (e: ReactPointerEvent<HTMLCanvasElement>) => void
-    onWheel: (e: ReactWheelEvent<HTMLDivElement>) => void
   }
   children?: ReactNode
 }
@@ -51,7 +50,6 @@ export default function CanvasViewport({
       <div
         ref={baseFrameRef}
         className="relative max-h-full max-w-full sm:rounded-xl shadow-inner sm:ring-1 ring-black/5 touch-none dark:bg-black/50 dark:ring-white/5"
-        onWheel={handlers.onWheel}
         style={{
           aspectRatio: size ? `${size.width} / ${size.height}` : '1 / 1',
           width: size ? `min(100%, 100cqh * ${size.width / size.height})` : '520px',

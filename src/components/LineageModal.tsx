@@ -18,6 +18,15 @@ function statusColor(status: TaskRecord['status']): string {
   return status === 'done' ? 'bg-green-400' : status === 'error' ? 'bg-red-400' : 'bg-blue-400'
 }
 
+function getCachedImageSrcs(imageIds: string[]): Record<string, string> {
+  const initial: Record<string, string> = {}
+  for (const id of imageIds) {
+    const cached = getCachedImage(id)
+    if (cached) initial[id] = cached
+  }
+  return initial
+}
+
 /**
  * 创作谱系树:独立全屏视图(照搬 CompareModal 骨架)。展示中心 task 的祖先链 + 后代树多跳 DAG。
  * 外层只负责开关与解析:中心 task 被删则自动关闭;key 绑 lineageTaskId,换中心整体重置。
@@ -62,22 +71,25 @@ function LineagePanel({ centerId, close }: { centerId: string; close: () => void
     return [...ids]
   }, [graph.nodes])
 
-  const [imageSrcs, setImageSrcs] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {}
-    for (const id of thumbIds) {
-      const cached = getCachedImage(id)
-      if (cached) initial[id] = cached
-    }
-    return initial
-  })
+  const [imageSrcs, setImageSrcs] = useState<Record<string, string>>(() => getCachedImageSrcs(thumbIds))
 
   useEffect(() => {
     let cancelled = false
-    for (const id of thumbIds) {
-      if (getCachedImage(id)) continue
-      ensureImageCached(id).then((url) => {
-        if (!cancelled && url) setImageSrcs((prev) => (prev[id] ? prev : { ...prev, [id]: url }))
+    const cached = getCachedImageSrcs(thumbIds)
+    if (Object.keys(cached).length > 0) {
+      queueMicrotask(() => {
+        if (!cancelled) setImageSrcs((prev) => ({ ...prev, ...cached }))
       })
+    }
+    for (const id of thumbIds) {
+      if (cached[id]) continue
+      ensureImageCached(id)
+        .then((url) => {
+          if (!cancelled && url) setImageSrcs((prev) => (prev[id] ? prev : { ...prev, [id]: url }))
+        })
+        .catch(() => {
+          /* Missing/corrupt images render as empty lineage thumbnails. */
+        })
     }
     return () => {
       cancelled = true

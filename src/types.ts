@@ -318,6 +318,12 @@ export interface ExportData {
   version: number
   exportedAt: string
   settings: AppSettings
+  /** 当前输入栏草稿（可选：旧备份无此字段） */
+  prompt?: string
+  /** 当前输入栏参数（可选：旧备份无此字段） */
+  params?: TaskParams
+  /** 当前输入栏参考图引用（可选：旧备份无此字段；图片字节仍在 imageFiles 中） */
+  inputImages?: Pick<InputImage, 'id' | 'dataUrl'>[]
   favoriteCategories?: FavoriteCategory[]
   conversations?: Conversation[]
   /** 提示词片段（可选：旧备份无此字段，导入回退空数组） */
@@ -328,6 +334,7 @@ export interface ExportData {
   /** imageId → 图片信息 */
   imageFiles: Record<string, {
     path: string
+    mime?: string
     createdAt?: number
     source?: 'upload' | 'generated' | 'mask'
   }>

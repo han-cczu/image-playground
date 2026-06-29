@@ -1,6 +1,12 @@
 import { useCallback } from 'react'
 import type { TaskRecord } from '../../types'
-import { cancelTask, clearTaskFavorite, removeMultipleTasks, setTaskFavoriteCategory, useStore } from '../../store'
+import {
+  cancelTask,
+  clearTaskFavorite,
+  removeMultipleTasks,
+  setTaskFavoriteCategory,
+  useStore,
+} from '../../store'
 import FavoriteCategoryMenu from '../FavoriteCategoryMenu'
 
 interface Props {
@@ -16,8 +22,11 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
   const setCompareTaskIds = useStore((s) => s.setCompareTaskIds)
   const setCaptionBatchImageIds = useStore((s) => s.setCaptionBatchImageIds)
 
+  const visibleTaskIds = new Set(filteredTasks.map((task) => task.id))
+  const actionableSelectedTaskIds = selectedTaskIds.filter((id) => visibleTaskIds.has(id))
+
   const allVisibleSelected =
-    selectedTaskIds.length === filteredTasks.length && filteredTasks.length > 0
+    actionableSelectedTaskIds.length === filteredTasks.length && filteredTasks.length > 0
 
   const handleSelectAllToggle = useCallback(() => {
     if (allVisibleSelected) {
@@ -27,65 +36,74 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
     }
   }, [allVisibleSelected, filteredTasks, clearSelection, setSelectedTaskIds])
 
-  const handleSetFavoriteCategory = useCallback((categoryId: string | null) => {
-    if (!categoryId) return
-    const selectedTasks = tasks.filter((t) => selectedTaskIds.includes(t.id))
-    const allInTarget =
-      selectedTasks.length > 0 &&
-      selectedTasks.every((t) => t.isFavorite && t.favoriteCategoryId === categoryId)
-    if (allInTarget) return
+  const handleSetFavoriteCategory = useCallback(
+    (categoryId: string | null) => {
+      if (!categoryId) return
+      const selectedTasks = tasks.filter((t) => actionableSelectedTaskIds.includes(t.id))
+      const allInTarget =
+        selectedTasks.length > 0 &&
+        selectedTasks.every((t) => t.isFavorite && t.favoriteCategoryId === categoryId)
+      if (allInTarget) return
 
-    setConfirmDialog({
-      title: '批量收藏',
-      message: `确定要把选中的 ${selectedTaskIds.length} 条记录收藏到此分类吗？`,
-      confirmText: '确认收藏',
-      action: () => {
-        void (async () => {
-          await Promise.allSettled(
-            selectedTaskIds.map((id) => setTaskFavoriteCategory(id, categoryId)),
-          )
-          clearSelection()
-        })()
-      },
-    })
-  }, [tasks, selectedTaskIds, clearSelection, setConfirmDialog])
+      setConfirmDialog({
+        title: '批量收藏',
+        message: `确定要把选中的 ${actionableSelectedTaskIds.length} 条记录收藏到此分类吗？`,
+        confirmText: '确认收藏',
+        action: () => {
+          return Promise.allSettled(
+            actionableSelectedTaskIds.map((id) => setTaskFavoriteCategory(id, categoryId)),
+          ).then((results) => {
+            const failed = results.filter((result) => result.status === 'rejected').length
+            if (failed > 0) {
+              useStore.getState().showToast(`批量收藏失败：${failed} 条未保存`, 'error')
+            }
+            clearSelection()
+          })
+        },
+      })
+    },
+    [tasks, actionableSelectedTaskIds, clearSelection, setConfirmDialog],
+  )
 
   const handleClearFavorite = useCallback(() => {
     setConfirmDialog({
       title: '批量取消收藏',
-      message: `确定要取消收藏选中的 ${selectedTaskIds.length} 条记录吗？`,
+      message: `确定要取消收藏选中的 ${actionableSelectedTaskIds.length} 条记录吗？`,
       confirmText: '确认取消',
       action: () => {
-        void (async () => {
-          await Promise.allSettled(
-            selectedTaskIds.map((id) => clearTaskFavorite(id)),
-          )
+        return Promise.allSettled(
+          actionableSelectedTaskIds.map((id) => clearTaskFavorite(id)),
+        ).then((results) => {
+          const failed = results.filter((result) => result.status === 'rejected').length
+          if (failed > 0) {
+            useStore.getState().showToast(`批量取消收藏失败：${failed} 条未保存`, 'error')
+          }
           clearSelection()
-        })()
+        })
       },
     })
-  }, [selectedTaskIds, clearSelection, setConfirmDialog])
+  }, [actionableSelectedTaskIds, clearSelection, setConfirmDialog])
 
   const handleDeleteSelected = useCallback(() => {
     setConfirmDialog({
       title: '批量删除',
-      message: `确定要删除选中的 ${selectedTaskIds.length} 条记录吗？`,
+      message: `确定要删除选中的 ${actionableSelectedTaskIds.length} 条记录吗？`,
       // 全选+秒点确认是误删风险最高点:短暂禁用确认键,强制看清数量再删
       minConfirmDelayMs: 700,
       action: () => {
-        removeMultipleTasks(selectedTaskIds)
+        return removeMultipleTasks(actionableSelectedTaskIds)
       },
     })
-  }, [selectedTaskIds, setConfirmDialog])
+  }, [actionableSelectedTaskIds, setConfirmDialog])
 
-  if (selectedTaskIds.length === 0) return null
+  if (actionableSelectedTaskIds.length === 0) return null
 
   const allSelectedFavorite =
-    selectedTaskIds.length > 0 &&
-    selectedTaskIds.every((id) => tasks.find((t) => t.id === id)?.isFavorite)
+    actionableSelectedTaskIds.length > 0 &&
+    actionableSelectedTaskIds.every((id) => tasks.find((t) => t.id === id)?.isFavorite)
 
   // 取消生成:选中集里的在途任务(通配批散卡多选取消的入口;取消≠删除,记录保留可重试/补跑)
-  const runningSelected = selectedTaskIds.filter(
+  const runningSelected = actionableSelectedTaskIds.filter(
     (id) => tasks.find((t) => t.id === id)?.status === 'running',
   )
   const handleCancelRunning = () => {
@@ -110,9 +128,9 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
 
   // 对比:2~4 条已完成且有输出图的任务
   const canCompare =
-    selectedTaskIds.length >= 2 &&
-    selectedTaskIds.length <= 4 &&
-    selectedTaskIds.every((id) => {
+    actionableSelectedTaskIds.length >= 2 &&
+    actionableSelectedTaskIds.length <= 4 &&
+    actionableSelectedTaskIds.every((id) => {
       const t = tasks.find((task) => task.id === id)
       return t?.status === 'done' && (t.outputImages?.length ?? 0) > 0
     })
@@ -121,7 +139,7 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
   // 去重:不同 task 可能共享同一首图 id(重试/复制),重复会让 modal 列表 key 撞 + 重复反推
   const batchCaptionImageIds = [
     ...new Set(
-      selectedTaskIds
+      actionableSelectedTaskIds
         .map((id) => tasks.find((t) => t.id === id))
         .filter((t): t is TaskRecord => t?.status === 'done' && (t.outputImages?.length ?? 0) > 0)
         .map((t) => t.outputImages[0]),
@@ -142,7 +160,12 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
           title="取消选择"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
           </svg>
         </button>
         <div className="w-px h-5 bg-white/20 mx-1"></div>
@@ -152,13 +175,32 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
           title={allVisibleSelected ? '取消全选' : '全选当前可见'}
         >
           {allVisibleSelected ? (
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              viewBox="0 0 24 24"
+            >
               <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
               <path d="M9 12l2 2 4-4" />
             </svg>
           ) : (
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-              <path strokeDasharray="4 4" d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z" />
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeDasharray="4 4"
+                d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"
+              />
             </svg>
           )}
         </button>
@@ -194,7 +236,7 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
         </div>
         <div className="w-px h-5 bg-white/20 mx-1"></div>
         <button
-          onClick={() => canCompare && setCompareTaskIds(selectedTaskIds)}
+          onClick={() => canCompare && setCompareTaskIds(actionableSelectedTaskIds)}
           disabled={!canCompare}
           className={`p-2 transition-colors ${
             canCompare
@@ -204,7 +246,15 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
           title={canCompare ? '并排对比选中任务' : '选择 2~4 条已完成任务进行对比'}
           aria-label="并排对比"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            viewBox="0 0 24 24"
+          >
             <rect x="3" y="4" width="8" height="16" rx="2" />
             <rect x="13" y="4" width="8" height="16" rx="2" />
           </svg>
@@ -217,10 +267,22 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
               ? 'text-purple-400 hover:text-purple-300'
               : 'text-gray-500 cursor-not-allowed'
           }`}
-          title={canBatchCaption ? `批量反推(${batchCaptionImageIds.length} 张图)` : '选择已完成任务批量反推提示词'}
+          title={
+            canBatchCaption
+              ? `批量反推(${batchCaptionImageIds.length} 张图)`
+              : '选择已完成任务批量反推提示词'
+          }
           aria-label="批量反推"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            viewBox="0 0 24 24"
+          >
             <rect x="3" y="3" width="18" height="14" rx="2" />
             <path d="M3 13l4-4 4 4 4-5 6 6" />
             <path d="M8 21h8" />
@@ -235,7 +297,15 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
               title={`取消生成(${runningSelected.length} 条在途)`}
               aria-label="取消选中的在途任务"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                viewBox="0 0 24 24"
+              >
                 <circle cx="12" cy="12" r="10" />
                 <rect x="9" y="9" width="6" height="6" />
               </svg>
@@ -249,7 +319,12 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
           title="删除选中"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+            />
           </svg>
         </button>
       </div>

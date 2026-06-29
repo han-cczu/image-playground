@@ -4,6 +4,9 @@ import { copyBlobToClipboard, copyTextToClipboard, getClipboardFailureMessage } 
 import type { LineageLink } from '../../lib/lineage'
 import FavoriteCategoryMenu from '../FavoriteCategoryMenu'
 import type { TaskRecord, TaskParams } from '../../types'
+import { MAX_INPUT_IMAGE_BYTES } from '../../lib/taskRuntime'
+
+const REFERENCE_IMAGE_FETCH_TIMEOUT_MS = 60_000
 
 interface InfoPanelProps {
   task: TaskRecord
@@ -36,6 +39,115 @@ function ParamCard({
       <DetailParamValue task={task} paramKey={paramKey} className="font-medium" actualParams={actualParams} />
     </div>
   )
+}
+
+function assertReferenceImageSize(bytes: number) {
+  if (bytes > MAX_INPUT_IMAGE_BYTES) {
+    throw new Error(`图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`)
+  }
+}
+
+function createAbortError(): DOMException {
+  return new DOMException('aborted', 'AbortError')
+}
+
+function readBlobWithAbort(response: Response, signal: AbortSignal): Promise<Blob> {
+  if (signal.aborted) throw createAbortError()
+  if (!response.body) {
+    return new Promise((resolve, reject) => {
+      const onAbort = () => reject(createAbortError())
+      signal.addEventListener('abort', onAbort, { once: true })
+      try {
+        response.blob().then(resolve, reject).finally(() => {
+          signal.removeEventListener('abort', onAbort)
+        })
+      } catch (err) {
+        signal.removeEventListener('abort', onAbort)
+        reject(err)
+      }
+    })
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = response.body!.getReader()
+    const chunks: Uint8Array[] = []
+    let bytes = 0
+    let settled = false
+    const cleanup = () => {
+      signal.removeEventListener('abort', onAbort)
+      try {
+        reader.releaseLock()
+      } catch {
+        /* Ignore cleanup errors; abort/read failures carry the useful signal. */
+      }
+    }
+    const finish = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      fn()
+    }
+    const onAbort = () => {
+      void reader.cancel().catch(() => undefined)
+      finish(() => reject(createAbortError()))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+
+    const pump = (): void => {
+      try {
+        reader.read().then(({ done, value }) => {
+          if (done) {
+            finish(() =>
+              resolve(
+                new Blob(
+                  chunks.map((chunk) => new Uint8Array(chunk)),
+                  { type: response.headers.get('Content-Type') || 'application/octet-stream' },
+                ),
+              ),
+            )
+            return
+          }
+          if (value) {
+            bytes += value.byteLength
+            if (bytes > MAX_INPUT_IMAGE_BYTES) {
+              void reader.cancel().catch(() => undefined)
+              finish(() =>
+                reject(
+                  new Error(`图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`),
+                ),
+              )
+              return
+            }
+            chunks.push(value)
+          }
+          pump()
+        }, (err) => finish(() => reject(err)))
+      } catch (err) {
+        finish(() => reject(err))
+      }
+    }
+    pump()
+  })
+}
+
+async function fetchReferenceImageBlob(src: string): Promise<Blob> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), REFERENCE_IMAGE_FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(src, { signal: controller.signal })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const contentLength = Number(res.headers.get('Content-Length'))
+    if (Number.isFinite(contentLength)) assertReferenceImageSize(contentLength)
+    const blob = await readBlobWithAbort(res, controller.signal)
+    if (!blob.type.startsWith('image/')) throw new Error('不是有效的图片文件')
+    assertReferenceImageSize(blob.size)
+    return blob
+  } catch (err) {
+    if (controller.signal.aborted) throw new Error('图片读取超时', { cause: err })
+    throw err
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 /** 血缘链接卡片:共享图缩略图 + 状态点 + 提示词,点击替换式跳到对应任务详情 */
@@ -86,7 +198,6 @@ export default function InfoPanel({
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const setLineageTaskId = useStore((s) => s.setLineageTaskId)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
-  const showToast = useStore((s) => s.showToast)
   const settings = useStore((s) => s.settings)
   const dismissedCodexCliPrompts = useStore((s) => s.dismissedCodexCliPrompts)
   const favoriteCategories = useStore((s) => s.favoriteCategories)
@@ -120,9 +231,9 @@ export default function InfoPanel({
     if (!task.prompt) return
     try {
       await copyTextToClipboard(task.prompt)
-      showToast('提示词已复制', 'success')
+      useStore.getState().showToast('提示词已复制', 'success')
     } catch (err) {
-      showToast(getClipboardFailureMessage('复制提示词失败', err), 'error')
+      useStore.getState().showToast(getClipboardFailureMessage('复制提示词失败', err), 'error')
     }
   }
 
@@ -138,13 +249,12 @@ export default function InfoPanel({
     const src = imgId ? imageSrcs[imgId] : ''
     if (!src) return
     try {
-      const res = await fetch(src)
-      const blob = await res.blob()
+      const blob = await fetchReferenceImageBlob(src)
       await copyBlobToClipboard(blob)
-      showToast('参考图已复制', 'success')
+      useStore.getState().showToast('参考图已复制', 'success')
     } catch (err) {
       console.error(err)
-      showToast(getClipboardFailureMessage('复制参考图失败', err), 'error')
+      useStore.getState().showToast(getClipboardFailureMessage('复制参考图失败', err), 'error')
     }
   }
 
@@ -219,11 +329,11 @@ export default function InfoPanel({
             </button>
           </div>
           <div className="flex gap-2 flex-wrap">
-            {allInputImageIds.map((imgId) => {
+            {allInputImageIds.map((imgId, index) => {
               const isMaskTarget = imgId === maskTargetId
               const displaySrc = (isMaskTarget && maskPreviewSrc) ? maskPreviewSrc : (imageSrcs[imgId] || '')
               return (
-                <div key={imgId} className="relative group inline-block">
+                <div key={`${imgId}-${index}`} className="relative group inline-block">
                   <button
                     type="button"
                     className={`relative block w-16 h-16 rounded-lg overflow-hidden border cursor-pointer hover:opacity-80 transition ${

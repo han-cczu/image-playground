@@ -166,4 +166,40 @@ describe('task filtering', () => {
     // 仅当前 conversation，按 createdAt 倒序
     expect(filtered.map((item) => item.id)).toEqual(['in-a-2', 'in-a-1'])
   })
+
+  it.each([
+    ['provider', 'gemini'],
+    ['profile name', '实验 Profile'],
+    ['model', 'gemini-2.5-flash-image'],
+  ])('matches task API metadata by %s', (_field, searchQuery) => {
+    const tasks = [
+      task({
+        id: 'metadata-match',
+        prompt: 'unrelated prompt',
+        params: { ...DEFAULT_PARAMS },
+        apiProvider: 'gemini',
+        apiProfileName: '实验 Profile',
+        apiModel: 'gemini-2.5-flash-image',
+        createdAt: 1,
+      }),
+      task({
+        id: 'metadata-miss',
+        prompt: 'another unrelated prompt',
+        params: { ...DEFAULT_PARAMS },
+        apiProvider: 'openai',
+        apiProfileName: '默认配置',
+        apiModel: 'gpt-image-1',
+        createdAt: 2,
+      }),
+    ]
+
+    const filtered = filterAndSortTasks(tasks, {
+      searchQuery,
+      filterStatus: 'all',
+      filterFavorite: false,
+      filterFavoriteCategoryId: null,
+    })
+
+    expect(filtered.map((item) => item.id)).toEqual(['metadata-match'])
+  })
 })

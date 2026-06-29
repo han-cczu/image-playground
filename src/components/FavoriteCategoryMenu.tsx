@@ -2,12 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { createPortal } from 'react-dom'
 import type { FavoriteCategory } from '../types'
 import { useStore } from '../store'
+import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePopoverPlacement } from '../hooks/usePopoverPlacement'
 import {
   DEFAULT_FAVORITE_CATEGORY_ID,
   FAVORITE_CATEGORY_COLORS,
   createDefaultFavoriteCategory,
 } from '../lib/favoriteCategories'
+
+interface CreateDraft {
+  name: string
+  color: string
+}
 
 interface TriggerArgs {
   isOpen: boolean
@@ -55,28 +61,30 @@ export default function FavoriteCategoryMenu({
   const createFavoriteCategory = useStore((s) => s.createFavoriteCategory)
   const ensureDefaultFavoriteCategory = useStore((s) => s.ensureDefaultFavoriteCategory)
   const [isOpen, setIsOpen] = useState(false)
-  const [isCreating, setIsCreating] = useState(false)
-  const [draftName, setDraftName] = useState('')
   const pickNextDefaultColor = useCallback(
     () => FAVORITE_CATEGORY_COLORS[favoriteCategories.length % FAVORITE_CATEGORY_COLORS.length],
     [favoriteCategories.length],
   )
-  const [draftColor, setDraftColor] = useState<string>(pickNextDefaultColor)
+  const [createDraft, setCreateDraft] = useState<CreateDraft | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const categories = useMemo(() => {
-    const hasDefault = favoriteCategories.some((category) => category.id === DEFAULT_FAVORITE_CATEGORY_ID)
+    const hasDefault = favoriteCategories.some(
+      (category) => category.id === DEFAULT_FAVORITE_CATEGORY_ID,
+    )
     if (!includeDefaultFallback || hasDefault) return favoriteCategories
     return [createDefaultFavoriteCategory(), ...favoriteCategories]
   }, [favoriteCategories, includeDefaultFallback])
 
   const selectedCategory = value
-    ? categories.find((category) => category.id === value) ?? null
+    ? (categories.find((category) => category.id === value) ?? null)
     : null
-  const label = selectedCategory?.name.trim() || (value ? '未命名分类' : includeUnassigned ? unassignedLabel : allLabel)
+  const label =
+    selectedCategory?.name.trim() ||
+    (value ? '未命名分类' : includeUnassigned ? unassignedLabel : allLabel)
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -94,7 +102,11 @@ export default function FavoriteCategoryMenu({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const { openUp, menuStyle, update: updateMenuPosition } = usePopoverPlacement(triggerRef, {
+  const {
+    openUp,
+    menuStyle,
+    update: updateMenuPosition,
+  } = usePopoverPlacement(triggerRef, {
     open: isOpen,
     estimatedHeight: Math.min((categories.length + 3) * 36 + 48, 280),
     fixed: true,
@@ -103,33 +115,27 @@ export default function FavoriteCategoryMenu({
   })
 
   useEffect(() => {
-    if (!isOpen) {
-      setIsCreating(false)
-      setDraftName('')
-      setDraftColor(pickNextDefaultColor())
-      return
-    }
-    if (isCreating) {
+    if (isOpen && createDraft) {
       window.setTimeout(() => inputRef.current?.focus(), 0)
     }
-  }, [isCreating, isOpen, pickNextDefaultColor])
+  }, [createDraft, isOpen])
 
-  useEffect(() => {
-    if (isCreating) {
-      setDraftColor(pickNextDefaultColor())
-    }
-  }, [isCreating, pickNextDefaultColor])
-
-  const closeMenu = () => {
+  const closeMenu = useCallback(() => {
     setIsOpen(false)
-  }
+    setCreateDraft(null)
+  }, [])
 
-  const toggle = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (!isOpen) updateMenuPosition()
-    setIsOpen((current) => !current)
-  }, [isOpen, updateMenuPosition])
+  useCloseOnEscape(isOpen, closeMenu)
+
+  const toggle = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!isOpen) updateMenuPosition()
+      setIsOpen((current) => !current)
+    },
+    [isOpen, updateMenuPosition],
+  )
 
   const selectCategory = (categoryId: string | null) => {
     if (!categoryId) {
@@ -137,186 +143,225 @@ export default function FavoriteCategoryMenu({
       closeMenu()
       return
     }
-    const nextCategoryId = categoryId === DEFAULT_FAVORITE_CATEGORY_ID
-      ? ensureDefaultFavoriteCategory()
-      : categoryId
+    const nextCategoryId =
+      categoryId === DEFAULT_FAVORITE_CATEGORY_ID ? ensureDefaultFavoriteCategory() : categoryId
     onSelect(nextCategoryId)
     closeMenu()
   }
 
   const createCategory = () => {
-    const name = draftName.trim()
+    const name = createDraft?.name.trim() ?? ''
     if (!name) return
-    const categoryId = createFavoriteCategory({ name, color: draftColor })
+    const categoryId = createFavoriteCategory({
+      name,
+      color: createDraft?.color ?? pickNextDefaultColor(),
+    })
     onSelect(categoryId)
     closeMenu()
   }
 
-  const menu = isOpen ? createPortal(
-    <div
-      ref={menuRef}
-      className={`fixed z-[90] ${menuClassName} max-h-72 overflow-y-auto rounded-xl border border-gray-200/60 bg-white/95 py-1 shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] dark:ring-white/10 ${
-        openUp ? 'animate-dropdown-up' : 'animate-dropdown-down'
-      }`}
-      style={menuStyle}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {includeClearFavorite && onClearFavorite && (
-        <>
-          <button
-            type="button"
-            onClick={() => {
-              onClearFavorite()
-              closeMenu()
-            }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
-          >
-            <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-              <line x1="4" y1="4" x2="20" y2="20" />
-            </svg>
-            <span className="min-w-0 truncate">{clearFavoriteLabel}</span>
-          </button>
-          <div className="my-1 h-px bg-gray-100 dark:bg-white/[0.08]" />
-        </>
-      )}
-
-      {includeAll && (
-        <button
-          type="button"
-          onClick={() => selectCategory(null)}
-          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
-            !value
-              ? 'bg-blue-50 font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400'
-              : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'
+  const menu = isOpen
+    ? createPortal(
+        <div
+          ref={menuRef}
+          className={`fixed z-[90] ${menuClassName} max-h-72 overflow-y-auto rounded-xl border border-gray-200/60 bg-white/95 py-1 shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] dark:ring-white/10 ${
+            openUp ? 'animate-dropdown-up' : 'animate-dropdown-down'
           }`}
+          style={menuStyle}
+          onClick={(e) => e.stopPropagation()}
         >
-          <span className="min-w-0 truncate">{allLabel}</span>
-        </button>
-      )}
-
-      {includeUnassigned && (
-        <button
-          type="button"
-          onClick={() => selectCategory(null)}
-          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
-            !value
-              ? 'bg-blue-50 font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400'
-              : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'
-          }`}
-        >
-          <span className="h-2 w-2 shrink-0 rounded-full border border-dashed border-gray-300 dark:border-gray-600" />
-          <span className="min-w-0 truncate">{unassignedLabel}</span>
-        </button>
-      )}
-
-      {categories.map((category) => {
-        const name = category.name.trim() || '未命名分类'
-        return (
-          <button
-            key={category.id}
-            type="button"
-            onClick={() => selectCategory(category.id)}
-            title={name}
-            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
-              category.id === value
-                ? 'bg-blue-50 font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400'
-                : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'
-            }`}
-          >
-            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: category.color }} />
-            <span className="min-w-0 truncate">{name}</span>
-          </button>
-        )
-      })}
-
-      <div className="my-1 h-px bg-gray-100 dark:bg-white/[0.08]" />
-
-      {isCreating ? (
-        <div className="px-2 py-1">
-          <div className="mb-1.5 flex flex-wrap items-center gap-1.5 px-0.5" role="radiogroup" aria-label="分类颜色">
-            {FAVORITE_CATEGORY_COLORS.map((color) => {
-              const selected = color === draftColor
-              // 圆点视觉保持 16px,命中区由外层按钮扩到 24×24(WCAG 2.5.8 最小目标)
-              return (
-                <button
-                  key={color}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  aria-label={`选择颜色 ${color}`}
-                  onClick={() => setDraftColor(color)}
-                  className="group flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+          {includeClearFavorite && onClearFavorite && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  onClearFavorite()
+                  closeMenu()
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
+              >
+                <svg
+                  className="h-3.5 w-3.5 shrink-0"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  viewBox="0 0 24 24"
                 >
-                  <span
-                    className={`h-4 w-4 rounded-full transition ${
-                      selected
-                        ? 'ring-2 ring-offset-2 ring-blue-500 ring-offset-white dark:ring-offset-gray-900'
-                        : 'ring-1 ring-black/5 group-hover:ring-black/20 dark:ring-white/10 dark:group-hover:ring-white/30'
-                    }`}
-                    style={{ backgroundColor: color }}
-                  />
-                </button>
-              )
-            })}
-          </div>
-          <div className="flex gap-1.5">
-            <input
-              ref={inputRef}
-              value={draftName}
-              onChange={(e) => setDraftName(e.target.value)}
-              onKeyDown={(e) => {
-                // IME 守卫:中文组字确认的 Enter/Esc 是输入法操作,不是提交/取消(与片段库输入框同款)
-                if (e.nativeEvent.isComposing || e.keyCode === 229) return
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  createCategory()
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault()
-                  setIsCreating(false)
-                  setDraftName('')
-                  setDraftColor(pickNextDefaultColor())
-                }
-              }}
-              placeholder={createPlaceholder}
-              className="min-w-0 flex-1 rounded-lg border border-gray-200/70 bg-white/70 px-2 py-1.5 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
-            />
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  <line x1="4" y1="4" x2="20" y2="20" />
+                </svg>
+                <span className="min-w-0 truncate">{clearFavoriteLabel}</span>
+              </button>
+              <div className="my-1 h-px bg-gray-100 dark:bg-white/[0.08]" />
+            </>
+          )}
+
+          {includeAll && (
             <button
               type="button"
-              onClick={createCategory}
-              disabled={!draftName.trim()}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-500 text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="确认新建分类"
-              title="确认"
+              onClick={() => selectCategory(null)}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
+                !value
+                  ? 'bg-blue-50 font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400'
+                  : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'
+              }`}
             >
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} d="M5 13l4 4L19 7" />
-              </svg>
+              <span className="min-w-0 truncate">{allLabel}</span>
             </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setIsCreating(true)}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10"
-        >
-          <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          <span className="min-w-0 truncate">新建分类</span>
-        </button>
-      )}
-    </div>,
-    document.body,
-  ) : null
+          )}
+
+          {includeUnassigned && (
+            <button
+              type="button"
+              onClick={() => selectCategory(null)}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
+                !value
+                  ? 'bg-blue-50 font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400'
+                  : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'
+              }`}
+            >
+              <span className="h-2 w-2 shrink-0 rounded-full border border-dashed border-gray-300 dark:border-gray-600" />
+              <span className="min-w-0 truncate">{unassignedLabel}</span>
+            </button>
+          )}
+
+          {categories.map((category) => {
+            const name = category.name.trim() || '未命名分类'
+            return (
+              <button
+                key={category.id}
+                type="button"
+                onClick={() => selectCategory(category.id)}
+                title={name}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
+                  category.id === value
+                    ? 'bg-blue-50 font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400'
+                    : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'
+                }`}
+              >
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: category.color }}
+                />
+                <span className="min-w-0 truncate">{name}</span>
+              </button>
+            )
+          })}
+
+          <div className="my-1 h-px bg-gray-100 dark:bg-white/[0.08]" />
+
+          {createDraft ? (
+            <div className="px-2 py-1">
+              <div
+                className="mb-1.5 flex flex-wrap items-center gap-1.5 px-0.5"
+                role="radiogroup"
+                aria-label="分类颜色"
+              >
+                {FAVORITE_CATEGORY_COLORS.map((color) => {
+                  const selected = color === createDraft.color
+                  // 圆点视觉保持 16px,命中区由外层按钮扩到 24×24(WCAG 2.5.8 最小目标)
+                  return (
+                    <button
+                      key={color}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      aria-label={`选择颜色 ${color}`}
+                      onClick={() =>
+                        setCreateDraft((draft) => (draft ? { ...draft, color } : draft))
+                      }
+                      className="group flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                    >
+                      <span
+                        className={`h-4 w-4 rounded-full transition ${
+                          selected
+                            ? 'ring-2 ring-offset-2 ring-blue-500 ring-offset-white dark:ring-offset-gray-900'
+                            : 'ring-1 ring-black/5 group-hover:ring-black/20 dark:ring-white/10 dark:group-hover:ring-white/30'
+                        }`}
+                        style={{ backgroundColor: color }}
+                      />
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  ref={inputRef}
+                  value={createDraft.name}
+                  onChange={(e) =>
+                    setCreateDraft((draft) => (draft ? { ...draft, name: e.target.value } : draft))
+                  }
+                  onKeyDown={(e) => {
+                    // IME 守卫:中文组字确认的 Enter/Esc 是输入法操作,不是提交/取消(与片段库输入框同款)
+                    if (e.nativeEvent.isComposing || e.keyCode === 229) return
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      createCategory()
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      setCreateDraft(null)
+                    }
+                  }}
+                  placeholder={createPlaceholder}
+                  className="min-w-0 flex-1 rounded-lg border border-gray-200/70 bg-white/70 px-2 py-1.5 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/50"
+                />
+                <button
+                  type="button"
+                  onClick={createCategory}
+                  disabled={!createDraft.name.trim()}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-500 text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="确认新建分类"
+                  title="确认"
+                >
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2.4}
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCreateDraft({ name: '', color: pickNextDefaultColor() })}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10"
+            >
+              <svg
+                className="h-3.5 w-3.5 shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+              <span className="min-w-0 truncate">新建分类</span>
+            </button>
+          )}
+        </div>,
+        document.body,
+      )
+    : null
 
   return (
     <div ref={containerRef} className="relative w-full" onClick={(e) => e.stopPropagation()}>
-      <div ref={triggerRef}>
-        {renderTrigger({ isOpen, label, selectedCategory, toggle })}
-      </div>
+      <div ref={triggerRef}>{renderTrigger({ isOpen, label, selectedCategory, toggle })}</div>
       {menu}
     </div>
   )

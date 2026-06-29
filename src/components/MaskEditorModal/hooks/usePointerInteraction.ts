@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import {
   clientPointToCanvasPoint,
   getPinchTransform,
@@ -51,12 +51,12 @@ export interface PointerInteraction {
   isPointerOverCanvas: boolean
   isPanning: boolean
   isAltKeyPressed: boolean
+  isStrokeActive: boolean
   handlers: {
     onPointerDown: (e: ReactPointerEvent<HTMLCanvasElement>) => void
     onPointerMove: (e: ReactPointerEvent<HTMLCanvasElement>) => void
     onPointerUp: (e: ReactPointerEvent<HTMLCanvasElement>) => void
     onPointerLeave: (e: ReactPointerEvent<HTMLCanvasElement>) => void
-    onWheel: (e: ReactWheelEvent<HTMLDivElement>) => void
   }
   // 暴露给 useMaskCanvasInit 用于切换 / 关闭图片时清理瞬态指针状态。
   resetGestures: () => void
@@ -98,7 +98,7 @@ export function usePointerInteraction(args: {
     setShowBrushControls,
     setSliderAnchor,
   } = args
-  const { viewTransformRef, commitViewTransform } = viewport
+  const { viewTransformRef, commitViewTransform, zoomAtPoint } = viewport
 
   const activePointerIdRef = useRef<number | null>(null)
   const lastPointRef = useRef<Point | null>(null)
@@ -110,6 +110,7 @@ export function usePointerInteraction(args: {
   const [isPointerOverCanvas, setIsPointerOverCanvas] = useState(false)
   const [isAltKeyPressed, setIsAltKeyPressed] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
+  const [isStrokeActive, setIsStrokeActive] = useState(false)
 
   function cancelActiveStroke() {
     if (activePointerIdRef.current == null) return
@@ -117,6 +118,7 @@ export function usePointerInteraction(args: {
     history.cancelActiveStroke()
     activePointerIdRef.current = null
     lastPointRef.current = null
+    setIsStrokeActive(false)
   }
 
   function beginPinchGesture() {
@@ -245,6 +247,7 @@ export function usePointerInteraction(args: {
     }
 
     activePointerIdRef.current = event.pointerId
+    setIsStrokeActive(true)
     history.pushSnapshot()
     const point = getCanvasPoint(canvas, event)
     lastPointRef.current = point
@@ -293,18 +296,23 @@ export function usePointerInteraction(args: {
     updateCursor(null)
   }
 
-  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
-    if (!event.altKey || !isReady || isSaving) return
-
+  useEffect(() => {
     const frame = baseFrameRef.current
-    if (!frame) return
+    if (!frame || !imageId) return
 
-    event.preventDefault()
-    viewport.zoomAtPoint(
-      { x: event.clientX, y: event.clientY },
-      Math.exp(-event.deltaY * 0.002),
-    )
-  }
+    const handleWheel = (event: WheelEvent) => {
+      if (!event.altKey || !isReady || isSaving) return
+
+      event.preventDefault()
+      zoomAtPoint(
+        { x: event.clientX, y: event.clientY },
+        Math.exp(-event.deltaY * 0.002),
+      )
+    }
+
+    frame.addEventListener('wheel', handleWheel, { passive: false })
+    return () => frame.removeEventListener('wheel', handleWheel)
+  }, [baseFrameRef, imageId, isReady, isSaving, zoomAtPoint])
 
   const finishStroke = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -325,6 +333,7 @@ export function usePointerInteraction(args: {
     if (activePointerIdRef.current === event.pointerId) {
       activePointerIdRef.current = null
       lastPointRef.current = null
+      setIsStrokeActive(false)
       if (hoverPoint) updateCursor(hoverPoint)
     }
   }
@@ -343,6 +352,7 @@ export function usePointerInteraction(args: {
     pinchGestureRef.current = null
     panGestureRef.current = null
     setIsPanning(false)
+    setIsStrokeActive(false)
   }
 
   return {
@@ -350,12 +360,12 @@ export function usePointerInteraction(args: {
     isPointerOverCanvas,
     isPanning,
     isAltKeyPressed,
+    isStrokeActive,
     handlers: {
       onPointerDown: handlePointerDown,
       onPointerMove: handlePointerMove,
       onPointerUp: finishStroke,
       onPointerLeave: handlePointerLeave,
-      onWheel: handleWheel,
     },
     resetGestures,
     resetActiveStroke,

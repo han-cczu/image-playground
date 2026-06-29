@@ -28,6 +28,7 @@ export default function Lightbox() {
 
   return (
     <LightboxInner
+      key={src}
       src={src}
       maskPreviewSrc={maskPreviewSrc}
       prompt={prompt}
@@ -55,13 +56,24 @@ interface LightboxInnerProps {
 }
 
 /** 内部组件：保证挂载时 DOM 已经存在，所有 ref / effect 都可靠 */
-function LightboxInner({ src, maskPreviewSrc, prompt, onClose, showNav, currentIndex, total, onPrev, onNext }: LightboxInnerProps) {
+function LightboxInner({
+  src,
+  maskPreviewSrc,
+  prompt,
+  onClose,
+  showNav,
+  currentIndex,
+  total,
+  onPrev,
+  onNext,
+}: LightboxInnerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // LightboxInner 仅在打开时挂载,焦点陷阱常驻 true;作用在 containerRef(根节点带 tabIndex={-1} 承接焦点)。
   useFocusTrap(true, containerRef)
 
   // 缩放:scale/tx/ty ref + apply(边界 clamp)+ 滚轮缩放 + 缩放徽标计时
-  const { scaleRef, txRef, tyRef, apply, showZoomBadge } = useLightboxZoom(containerRef, src)
+  const { scaleRef, txRef, tyRef, apply, showZoomBadge, scale, tx, ty } =
+    useLightboxZoom(containerRef)
 
   // 指针手势:鼠标拖拽 / 双指 pinch / 单击关闭 / 双击缩放 + 点击抑制
   const { onClick, onDoubleClick, isDragging } = useLightboxPointer({
@@ -73,11 +85,8 @@ function LightboxInner({ src, maskPreviewSrc, prompt, onClose, showNav, currentI
     onClose,
   })
 
-  const s = scaleRef.current
-  const tx = txRef.current
-  const ty = tyRef.current
-  const isZoomed = s > 1
-  const zoomPercent = Math.round(s * 100)
+  const isZoomed = scale > 1
+  const zoomPercent = Math.round(scale * 100)
 
   // 读屏命名:截断 prompt 作可访问名称(按码点截断,slice 按 code unit 会切裂 emoji 代理对);
   // 非生成图(参考图/输入图查不到任务 prompt)回退到中性的「图片」,不冒称生成结果
@@ -109,7 +118,7 @@ function LightboxInner({ src, maskPreviewSrc, prompt, onClose, showNav, currentI
         <div
           className="relative flex items-center justify-center"
           style={{
-            transform: `translate(${tx}px, ${ty}px) scale(${s})`,
+            transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
             transition: isDragging ? 'none' : 'transform 0.2s ease-out',
             willChange: 'transform',
           }}

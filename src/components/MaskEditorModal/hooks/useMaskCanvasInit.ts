@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { MaskDraft } from '../../../types'
 import { ensureImageCached } from '../../../store'
 import { loadImage } from '../../../lib/image/canvasImage'
@@ -76,6 +76,37 @@ export function useMaskCanvasInit(args: {
 
   const sessionIdRef = useRef(0)
   const activeSessionIdRef = useRef(0)
+  const latestActionsRef = useRef({
+    renderPreview,
+    showToast,
+    setSourceDataUrl,
+    setSize,
+    setIsLoading,
+    setMaskEditorImageId,
+    cancelPreviewFrame,
+    resetViewportToDefault,
+    resetViewTransform,
+    resetHistory,
+    resetGestures,
+    resetActiveStroke,
+  })
+
+  useLayoutEffect(() => {
+    latestActionsRef.current = {
+      renderPreview,
+      showToast,
+      setSourceDataUrl,
+      setSize,
+      setIsLoading,
+      setMaskEditorImageId,
+      cancelPreviewFrame,
+      resetViewportToDefault,
+      resetViewTransform,
+      resetHistory,
+      resetGestures,
+      resetActiveStroke,
+    }
+  })
 
   useEffect(() => {
     if (!imageId) {
@@ -96,30 +127,33 @@ export function useMaskCanvasInit(args: {
 
   useEffect(() => {
     if (!imageId) {
-      cancelPreviewFrame()
-      setSourceDataUrl('')
-      setSize(null)
-      setIsLoading(false)
-      resetGestures()
-      resetViewportToDefault()
-      resetHistory()
+      const actions = latestActionsRef.current
+      actions.cancelPreviewFrame()
+      actions.setSourceDataUrl('')
+      actions.setSize(null)
+      actions.setIsLoading(false)
+      actions.resetGestures()
+      actions.resetViewportToDefault()
+      actions.resetHistory()
       return
     }
 
     const targetImageId = imageId
     let cancelled = false
-    setIsLoading(true)
-    setSourceDataUrl('')
-    setSize(null)
-    resetHistory()
+    let resetViewFrame: number | null = null
+    latestActionsRef.current.setIsLoading(true)
+    latestActionsRef.current.setSourceDataUrl('')
+    latestActionsRef.current.setSize(null)
+    latestActionsRef.current.resetHistory()
 
     async function loadCanvases() {
       try {
         const dataUrl = await ensureImageCached(targetImageId)
+        const actions = latestActionsRef.current
         if (cancelled) return
         if (!dataUrl) {
-          showToast('图片已不存在，无法编辑遮罩', 'error')
-          setMaskEditorImageId(null)
+          actions.showToast('图片已不存在，无法编辑遮罩', 'error')
+          actions.setMaskEditorImageId(null)
           return
         }
 
@@ -152,30 +186,34 @@ export function useMaskCanvasInit(args: {
             drawMaskImageToCanvas(draftImage, maskCanvas)
           } catch (err) {
             fillWhiteMask(maskCanvas)
-            showToast(
+            latestActionsRef.current.showToast(
               `遮罩草稿加载失败，已重置为空白遮罩：${err instanceof Error ? err.message : String(err)}`,
               'error',
             )
           }
         }
 
-        renderPreview()
-        setSourceDataUrl(preparedTarget.dataUrl)
-        setSize(nextSize)
+        latestActionsRef.current.renderPreview()
+        latestActionsRef.current.setSourceDataUrl(preparedTarget.dataUrl)
+        latestActionsRef.current.setSize(nextSize)
         if (preparedTarget.wasResized) {
-          showToast(
+          latestActionsRef.current.showToast(
             `已为遮罩编辑按官方要求调整图片尺寸：\n${preparedTarget.originalWidth}×${preparedTarget.originalHeight} → ${preparedTarget.width}×${preparedTarget.height}`,
             'info',
           )
         }
-        requestAnimationFrame(() => resetViewTransform())
+        resetViewFrame = requestAnimationFrame(() => {
+          resetViewFrame = null
+          if (!cancelled) latestActionsRef.current.resetViewTransform()
+        })
       } catch (err) {
         if (!cancelled) {
-          showToast(err instanceof Error ? err.message : String(err), 'error')
-          setMaskEditorImageId(null)
+          const actions = latestActionsRef.current
+          actions.showToast(err instanceof Error ? err.message : String(err), 'error')
+          actions.setMaskEditorImageId(null)
         }
       } finally {
-        if (!cancelled) setIsLoading(false)
+        if (!cancelled) latestActionsRef.current.setIsLoading(false)
       }
     }
 
@@ -183,10 +221,20 @@ export function useMaskCanvasInit(args: {
 
     return () => {
       cancelled = true
-      cancelPreviewFrame()
-      resetActiveStroke()
+      if (resetViewFrame != null) {
+        cancelAnimationFrame(resetViewFrame)
+        resetViewFrame = null
+      }
+      latestActionsRef.current.cancelPreviewFrame()
+      latestActionsRef.current.resetActiveStroke()
     }
-  }, [imageId, maskDraft, setMaskEditorImageId, showToast])
+  }, [
+    imageCanvasRef,
+    imageId,
+    maskCanvasRef,
+    maskDraft,
+    previewCanvasRef,
+  ])
 
   return { activeSessionIdRef }
 }

@@ -99,10 +99,11 @@ export function useFocusTrap(
     document.addEventListener('keydown', onKeyDown, true)
     return () => {
       document.removeEventListener('keydown', onKeyDown, true)
+      const wasTopTrap = trapStack[trapStack.length - 1] === id
       const stackIdx = trapStack.indexOf(id)
       if (stackIdx !== -1) trapStack.splice(stackIdx, 1)
       // 还原焦点到打开弹窗前的元素(若仍在文档中)
-      previouslyFocused?.focus?.()
+      if (wasTopTrap) previouslyFocused?.focus?.()
     }
   }, [active, containerRef])
 }

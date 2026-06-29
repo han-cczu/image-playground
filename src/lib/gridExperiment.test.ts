@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_PARAMS, type GridAxis, type TaskRecord } from '../types'
+import { DEFAULT_SETTINGS } from './api/apiProfiles'
 import {
   buildGridCells,
   countGridCells,
@@ -63,6 +64,46 @@ describe('buildGridCells', () => {
     const cells = buildGridCells({ x: axisPrompt }, { params: { ...DEFAULT_PARAMS }, prompt: 'base ignored' })
     expect(cells.map((c) => c.prompt)).toEqual(['a cat', 'a dog'])
     expect(cells[0].gridCoord).toEqual({ x: 'a cat' })
+  })
+
+  it('normalizes params after grid axis overrides', () => {
+    const cells = buildGridCells(
+      { x: axisFmt },
+      {
+        settings: DEFAULT_SETTINGS,
+        params: { ...DEFAULT_PARAMS, output_format: 'jpeg', output_compression: 80 },
+        prompt: 'cat',
+      },
+    )
+
+    expect(cells[0].params).toMatchObject({ output_format: 'png', output_compression: null })
+    expect(cells[1].params).toMatchObject({ output_format: 'jpeg', output_compression: 80 })
+  })
+
+  it('normalizes malformed grid axis values before returning cells', () => {
+    const malformedFormatAxis: GridAxis = {
+      kind: 'output_format',
+      values: [{ key: 'gif', label: 'GIF' }],
+    }
+    const malformedNAxis: GridAxis = {
+      kind: 'n',
+      values: [{ key: '2.7', label: '2.7' }],
+    }
+
+    const [cell] = buildGridCells(
+      { x: malformedFormatAxis, y: malformedNAxis },
+      {
+        settings: DEFAULT_SETTINGS,
+        params: { ...DEFAULT_PARAMS, output_format: 'jpeg', output_compression: 80 },
+        prompt: 'cat',
+      },
+    )
+
+    expect(cell.params).toMatchObject({
+      output_format: DEFAULT_PARAMS.output_format,
+      output_compression: DEFAULT_PARAMS.output_compression,
+      n: 3,
+    })
   })
 })
 
@@ -139,6 +180,12 @@ describe('countGridImages', () => {
   it('sums per-cell n when n is an axis (baseN ignored)', () => {
     expect(countGridImages({ x: axisN }, 99)).toBe(7) // Σ(1+2+4)
     expect(countGridImages({ x: axisQuality, y: axisN }, 1)).toBe(14) // otherCount 2 × Σ7
+  })
+
+  it('uses the same n normalization as generated grid cells', () => {
+    const malformedNAxis = { kind: 'n' as const, values: [{ key: '2.7', label: '2.7' }, { key: 'bad', label: 'bad' }] }
+
+    expect(countGridImages({ x: malformedNAxis }, 99)).toBe(4)
   })
 })
 

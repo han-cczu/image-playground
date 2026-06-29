@@ -123,6 +123,7 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
     }
   }
   const startHintTouch = () => {
+    clearHintTimer()
     hintTimerRef.current = window.setTimeout(() => {
       setHintVisible(true)
       hintTimerRef.current = null

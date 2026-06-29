@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { InputImage, MaskDraft } from '../../types'
+import { useLockBodyScroll } from '../../hooks/useLockBodyScroll'
 import { useImageHintTimer } from './hooks/useImageHintTimer'
 import ImageThumb, { type ImageDragHandlers } from './ImageThumb'
 
@@ -18,7 +19,11 @@ export interface ImageGridProps {
   onClearAll: () => void
   onClickImage: (id: string, ids: string[]) => void
   onEditMask: (id: string) => void
-  onConfirmClearAll: (args: { title: string; message: string; action: () => void }) => void
+  onConfirmClearAll: (args: {
+    title: string
+    message: string
+    action: () => void | Promise<void>
+  }) => void
   onMaskConflictNotice: (message: string) => void
 }
 
@@ -40,10 +45,19 @@ export default function ImageGrid({
 }: ImageGridProps) {
   const [imageDragIndex, setImageDragIndex] = useState<number | null>(null)
   const [imageDragOverIndex, setImageDragOverIndex] = useState<number | null>(null)
-  const [touchDragPreview, setTouchDragPreview] = useState<{ src: string; x: number; y: number } | null>(null)
+  const [touchDragPreview, setTouchDragPreview] = useState<{
+    src: string
+    x: number
+    y: number
+  } | null>(null)
 
   const imageDragIndexRef = useRef<number | null>(null)
-  const imageTouchDragRef = useRef({ index: null as number | null, startX: 0, startY: 0, moved: false })
+  const imageTouchDragRef = useRef({
+    index: null as number | null,
+    startX: 0,
+    startY: 0,
+    moved: false,
+  })
   const imageDragOverIndexRef = useRef<number | null>(null)
   const imageDragPreviewRef = useRef<HTMLElement | null>(null)
   const suppressImageClickRef = useRef(false)
@@ -53,7 +67,12 @@ export default function ImageGrid({
     maskConflictNoticeShownRef.current = false
   }, [maskTargetImage?.id])
 
-  const { imageHintId, showHint: showImageHint, hideHint: hideImageHint, startHintTouch: startImageHintTouch } = useImageHintTimer()
+  const {
+    imageHintId,
+    showHint: showImageHint,
+    hideHint: hideImageHint,
+    startHintTouch: startImageHintTouch,
+  } = useImageHintTimer()
 
   const getTouchDropIndex = (touch: React.Touch) => {
     const target = document
@@ -91,14 +110,13 @@ export default function ImageGrid({
     hideImageHint()
   }
 
+  useLockBodyScroll(Boolean(touchDragPreview))
+
   useEffect(() => {
     if (!touchDragPreview) return
-    const previousOverflow = document.body.style.overflow
     const previousOverscroll = document.body.style.overscrollBehavior
-    document.body.style.overflow = 'hidden'
     document.body.style.overscrollBehavior = 'none'
     return () => {
-      document.body.style.overflow = previousOverflow
       document.body.style.overscrollBehavior = previousOverscroll
     }
   }, [touchDragPreview])
@@ -111,7 +129,11 @@ export default function ImageGrid({
 
   const setImageDragTarget = (idx: number | null, clientX?: number) => {
     const fromIdx = imageDragIndexRef.current
-    if (fromIdx !== null && maskTargetImage && (idx === 0 || (clientX != null && isBeforeMaskDropArea(clientX)))) {
+    if (
+      fromIdx !== null &&
+      maskTargetImage &&
+      (idx === 0 || (clientX != null && isBeforeMaskDropArea(clientX)))
+    ) {
       showImageHint(maskTargetImage.id)
       imageDragOverIndexRef.current = null
       setImageDragOverIndex(null)
@@ -120,17 +142,26 @@ export default function ImageGrid({
 
     if (fromIdx !== null) hideImageHint()
     const normalizedIdx = idx == null ? null : normalizeImageDropIndex(idx)
-    const isNoopTarget = fromIdx !== null && normalizedIdx !== null && (normalizedIdx === fromIdx || normalizedIdx === fromIdx + 1)
+    const isNoopTarget =
+      fromIdx !== null &&
+      normalizedIdx !== null &&
+      (normalizedIdx === fromIdx || normalizedIdx === fromIdx + 1)
     const nextIdx = isNoopTarget ? null : normalizedIdx
     imageDragOverIndexRef.current = nextIdx
     setImageDragOverIndex(nextIdx)
   }
 
-  const buildDragHandlers = (img: InputImage, idx: number, isMaskTarget: boolean, displaySrc: string): ImageDragHandlers => {
+  const buildDragHandlers = (
+    img: InputImage,
+    idx: number,
+    isMaskTarget: boolean,
+    displaySrc: string,
+  ): ImageDragHandlers => {
     const isImageDragging = imageDragIndex === idx
     const isLast = idx === inputImages.length - 1
     const showDropBefore = imageDragOverIndex === idx && imageDragIndex !== idx
-    const showDropAfter = imageDragOverIndex === inputImages.length && isLast && imageDragIndex !== idx
+    const showDropAfter =
+      imageDragOverIndex === inputImages.length && isLast && imageDragIndex !== idx
 
     const handleDragStart = (e: React.DragEvent) => {
       if (isMaskTarget) {
@@ -143,7 +174,8 @@ export default function ImageGrid({
       e.dataTransfer.effectAllowed = 'move'
       e.dataTransfer.setData('text/plain', String(idx))
       const preview = document.createElement('div')
-      preview.style.cssText = 'position:fixed;left:-1000px;top:-1000px;width:52px;height:52px;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.25);'
+      preview.style.cssText =
+        'position:fixed;left:-1000px;top:-1000px;width:52px;height:52px;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.25);'
       const previewImg = document.createElement('img')
       previewImg.src = displaySrc
       previewImg.style.cssText = 'width:52px;height:52px;object-fit:cover;display:block;'
@@ -179,7 +211,12 @@ export default function ImageGrid({
       }
       const touch = e.touches[0]
       imageDragIndexRef.current = idx
-      imageTouchDragRef.current = { index: idx, startX: touch.clientX, startY: touch.clientY, moved: false }
+      imageTouchDragRef.current = {
+        index: idx,
+        startX: touch.clientX,
+        startY: touch.clientY,
+        moved: false,
+      }
       setTouchDragPreview(null)
     }
 
@@ -201,12 +238,14 @@ export default function ImageGrid({
     const handleTouchEnd = (e: React.TouchEvent) => {
       const touchDrag = imageTouchDragRef.current
       hideImageHint()
-      if (touchDrag.index !== null && imageDragOverIndexRef.current !== null) {
-        e.preventDefault()
-        onMove(touchDrag.index, imageDragOverIndexRef.current)
+      if (touchDrag.index !== null && touchDrag.moved) {
         window.setTimeout(() => {
           suppressImageClickRef.current = false
         }, 0)
+      }
+      if (touchDrag.index !== null && imageDragOverIndexRef.current !== null) {
+        e.preventDefault()
+        onMove(touchDrag.index, imageDragOverIndexRef.current)
       }
       resetImageDrag()
     }
@@ -227,7 +266,10 @@ export default function ImageGrid({
         maskConflictNoticeShownRef.current = true
         onMaskConflictNotice('只能有一张遮罩图')
       }
-      onClickImage(img.id, inputImages.map((i) => i.id))
+      onClickImage(
+        img.id,
+        inputImages.map((i) => i.id),
+      )
     }
 
     return {
@@ -263,7 +305,12 @@ export default function ImageGrid({
       title={maskTargetImage ? '清空遮罩主图、参考图和遮罩' : '清空全部参考图'}
     >
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+        />
       </svg>
       <span className="text-[8px] leading-none">{maskTargetImage ? '清空全部' : '清空'}</span>
     </button>
@@ -289,12 +336,15 @@ export default function ImageGrid({
               isMaskTarget={isMaskTarget}
               maskPreviewUrl={maskPreviewUrl}
               hasMaskTarget={Boolean(maskTargetImage)}
-              hintVisible={imageHintId === img.id && Boolean(imageHintText) && (!isMobile || isMaskTarget)}
+              hintVisible={
+                imageHintId === img.id && Boolean(imageHintText) && (!isMobile || isMaskTarget)
+              }
               onRemove={onRemove}
               onEditMask={onEditMask}
               dragHandlers={dragHandlers}
               hintHandlers={{
-                onHintShow: () => imageHintText && (!isMobile || isMaskTarget) && showImageHint(img.id),
+                onHintShow: () =>
+                  imageHintText && (!isMobile || isMaskTarget) && showImageHint(img.id),
                 onHintHide: hideImageHint,
               }}
             />
@@ -302,15 +352,20 @@ export default function ImageGrid({
         })}
         {clearAllButton}
       </div>
-      {touchDragPreview?.src && createPortal(
-        <div
-          className="fixed z-[140] h-[52px] w-[52px] overflow-hidden rounded-xl shadow-xl pointer-events-none opacity-90"
-          style={{ left: touchDragPreview.x, top: touchDragPreview.y, transform: 'translate(-50%, -50%)' }}
-        >
-          <img src={touchDragPreview.src} className="h-full w-full object-cover" alt="" />
-        </div>,
-        document.body,
-      )}
+      {touchDragPreview?.src &&
+        createPortal(
+          <div
+            className="fixed z-[140] h-[52px] w-[52px] overflow-hidden rounded-xl shadow-xl pointer-events-none opacity-90"
+            style={{
+              left: touchDragPreview.x,
+              top: touchDragPreview.y,
+              transform: 'translate(-50%, -50%)',
+            }}
+          >
+            <img src={touchDragPreview.src} className="h-full w-full object-cover" alt="" />
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }

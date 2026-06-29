@@ -6,6 +6,15 @@ import type { TaskRecord } from '../types'
 
 const COLUMN_LETTERS = ['A', 'B', 'C', 'D']
 
+function getCachedImageSrcs(imageIds: string[]): Record<string, string> {
+  const initial: Record<string, string> = {}
+  for (const id of imageIds) {
+    const cached = getCachedImage(id)
+    if (cached) initial[id] = cached
+  }
+  return initial
+}
+
 /**
  * 列头副标题：网格坐标优先，否则创建时间。
  * 坐标存的是 GridAxisValue.key（稳定键），展示用成员自带的 gridAxes 反查 label——
@@ -70,23 +79,26 @@ function ComparePanel({ compareTasks, close }: { compareTasks: TaskRecord[]; clo
   )
 
   // cache-first：挂载时同步吃缓存（useState 初始化器，不进 effect）
-  const [imageSrcs, setImageSrcs] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {}
-    for (const id of imageIds) {
-      const cached = getCachedImage(id)
-      if (cached) initial[id] = cached
-    }
-    return initial
-  })
+  const [imageSrcs, setImageSrcs] = useState<Record<string, string>>(() => getCachedImageSrcs(imageIds))
 
   // 未命中缓存的异步补载（setState 仅在异步回调里）
   useEffect(() => {
     let cancelled = false
-    for (const id of imageIds) {
-      if (getCachedImage(id)) continue
-      ensureImageCached(id).then((url) => {
-        if (!cancelled && url) setImageSrcs((prev) => (prev[id] ? prev : { ...prev, [id]: url }))
+    const cached = getCachedImageSrcs(imageIds)
+    if (Object.keys(cached).length > 0) {
+      queueMicrotask(() => {
+        if (!cancelled) setImageSrcs((prev) => ({ ...prev, ...cached }))
       })
+    }
+    for (const id of imageIds) {
+      if (cached[id]) continue
+      ensureImageCached(id)
+        .then((url) => {
+          if (!cancelled && url) setImageSrcs((prev) => (prev[id] ? prev : { ...prev, [id]: url }))
+        })
+        .catch(() => {
+          /* Missing/corrupt images render as empty cells in compare view. */
+        })
     }
     return () => {
       cancelled = true

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { listModels } from '../../lib/api/listModels'
 import {
   DEFAULT_GEMINI_BASE_URL,
@@ -28,21 +28,28 @@ export function OptimizerSection({
 }: OptimizerSectionProps) {
   const [showOptimizerApiKey, setShowOptimizerApiKey] = useState(false)
   const [optimizerModelListOpen, setOptimizerModelListOpen] = useState(false)
-  const [optimizerModelListLoading, setOptimizerModelListLoading] = useState(false)
-  const [optimizerModelList, setOptimizerModelList] = useState<string[] | null>(null)
-  const [optimizerModelListError, setOptimizerModelListError] = useState<string | null>(null)
-
-  // Reset model list cache when key connection params change
-  useEffect(() => {
-    setOptimizerModelListOpen(false)
-    setOptimizerModelList(null)
-    setOptimizerModelListError(null)
-  }, [optimizer.id, optimizer.baseUrl, optimizer.apiKey])
+  const [optimizerModelListLoadingKey, setOptimizerModelListLoadingKey] = useState('')
+  const [optimizerModelListState, setOptimizerModelListState] = useState<{
+    key: string
+    list: string[] | null
+    error: string | null
+  }>({ key: '', list: null, error: null })
+  const optimizerModelListRequestSeqRef = useRef(0)
+  const latestOptimizerModelListRequestByKeyRef = useRef<Map<string, number>>(new Map())
+  const optimizerModelListKey = `${optimizer.id}:${optimizer.baseUrl}:${optimizer.apiKey}`
+  const optimizerModelListLoading = optimizerModelListLoadingKey === optimizerModelListKey
+  const optimizerModelList =
+    optimizerModelListState.key === optimizerModelListKey ? optimizerModelListState.list : null
+  const optimizerModelListError =
+    optimizerModelListState.key === optimizerModelListKey ? optimizerModelListState.error : null
 
   const fetchOptimizerModelList = useCallback(async () => {
+    const key = optimizerModelListKey
     setOptimizerModelListOpen(true)
-    setOptimizerModelListLoading(true)
-    setOptimizerModelListError(null)
+    setOptimizerModelListLoadingKey(key)
+    setOptimizerModelListState({ key, list: null, error: null })
+    const requestId = ++optimizerModelListRequestSeqRef.current
+    latestOptimizerModelListRequestByKeyRef.current.set(key, requestId)
     try {
       const tempProfile: OpenAIProfile = {
         id: 'optimizer-temp',
@@ -57,15 +64,29 @@ export function OptimizerSection({
         apiProxy: false,
       }
       const ids = await listModels(tempProfile)
-      setOptimizerModelList(ids)
-      if (ids.length === 0) setOptimizerModelListError('接口返回为空')
+      if (latestOptimizerModelListRequestByKeyRef.current.get(key) !== requestId) return
+      setOptimizerModelListState({
+        key,
+        list: ids,
+        error: ids.length === 0 ? '接口返回为空' : null,
+      })
     } catch (err) {
-      setOptimizerModelList(null)
-      setOptimizerModelListError(err instanceof Error ? err.message : String(err))
+      if (latestOptimizerModelListRequestByKeyRef.current.get(key) !== requestId) return
+      setOptimizerModelListState({
+        key,
+        list: null,
+        error: err instanceof Error ? err.message : String(err),
+      })
     } finally {
-      setOptimizerModelListLoading(false)
+      setOptimizerModelListLoadingKey((current) => (current === key ? '' : current))
     }
-  }, [optimizer.baseUrl, optimizer.apiKey, optimizer.model, optimizer.timeout])
+  }, [
+    optimizer.baseUrl,
+    optimizer.apiKey,
+    optimizer.model,
+    optimizer.timeout,
+    optimizerModelListKey,
+  ])
 
   const provider = optimizer.provider ?? 'openai'
 
@@ -73,9 +94,19 @@ export function OptimizerSection({
   const switchProvider = (p: 'openai' | 'gemini') => {
     if (p === provider) return
     if (p === 'gemini') {
-      onUpdate({ provider: 'gemini', baseUrl: DEFAULT_GEMINI_BASE_URL, model: DEFAULT_GEMINI_CHAT_MODEL })
+      onUpdate({
+        provider: 'gemini',
+        baseUrl: DEFAULT_GEMINI_BASE_URL,
+        apiKey: '',
+        model: DEFAULT_GEMINI_CHAT_MODEL,
+      })
     } else {
-      onUpdate({ provider: 'openai', baseUrl: DEFAULT_SETTINGS.baseUrl, model: DEFAULT_OPTIMIZER_MODEL })
+      onUpdate({
+        provider: 'openai',
+        baseUrl: DEFAULT_SETTINGS.baseUrl,
+        apiKey: '',
+        model: DEFAULT_OPTIMIZER_MODEL,
+      })
     }
   }
 

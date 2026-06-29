@@ -1,5 +1,16 @@
 import { isHttpUrl } from './imageApiShared'
 import { DEFAULT_GEMINI_BASE_URL } from './apiProfiles'
+import {
+  appendCappedStreamRaw,
+  appendCappedStreamText,
+  isTimeoutAbort,
+  readChatErrorBody,
+  readStreamChunkWithAbort,
+  resolveChatTimeoutMs,
+  wrapCause,
+} from './chatCompletionsShared'
+
+const DEFAULT_GEMINI_CHAT_TIMEOUT = 60
 
 /**
  * Gemini 原生 generateContent 流式调用(captioner/optimizer 共用)。
@@ -44,7 +55,11 @@ export function buildGeminiStreamUrl(baseUrl: string, model: string): string {
   const cleanBase = trimmed || DEFAULT_GEMINI_BASE_URL
   // 剥离官方全限定名的 models/ 前缀(与 geminiImageApi.buildGeminiUrl 同款清洗,两处需保持同步):
   // 用户从文档/列表接口粘贴 "models/gemini-..." 时,不剥会拼出 /models/models/... 404
-  const cleanModel = model.trim().replace(/^\/+/, '').replace(/\/+$/, '').replace(/^models\//, '')
+  const cleanModel = model
+    .trim()
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/^models\//, '')
   return `${cleanBase}/models/${cleanModel}:streamGenerateContent?alt=sse`
 }
 
@@ -76,7 +91,8 @@ export function extractGeminiStreamError(raw: string): string {
     if (!payload || payload === '[DONE]') continue
     try {
       const chunk = JSON.parse(payload) as GeminiSseChunk
-      if (chunk.promptFeedback?.blockReason) return `请求被拒绝：${chunk.promptFeedback.blockReason}`
+      if (chunk.promptFeedback?.blockReason)
+        return `请求被拒绝：${chunk.promptFeedback.blockReason}`
       const finish = chunk.candidates?.[0]?.finishReason
       if (finish && finish !== 'STOP' && finish !== 'MAX_TOKENS') return `生成中断：${finish}`
     } catch {
@@ -96,8 +112,12 @@ export async function streamGeminiChat(
   emptyError: string,
   options: GeminiChatOptions = {},
 ): Promise<string> {
+  if (options.signal?.aborted) {
+    throw wrapCause('已取消', options.signal.reason)
+  }
+
   const url = buildGeminiStreamUrl(config.baseUrl, config.model)
-  const timeoutMs = (config.timeout > 0 ? config.timeout : 60) * 1000
+  const timeoutMs = resolveChatTimeoutMs(config.timeout, DEFAULT_GEMINI_CHAT_TIMEOUT)
 
   const externalSignal = options.signal
   const timeoutController = new AbortController()
@@ -128,19 +148,20 @@ export async function streamGeminiChat(
   } catch (err) {
     clearTimeout(timeoutTimer)
     externalSignal?.removeEventListener('abort', onExternalAbort)
-    if (externalSignal?.aborted) throw new Error('已取消')
-    if ((err as { name?: string }).name === 'AbortError') throw new Error('请求超时')
-    throw new Error(`网络错误：${err instanceof Error ? err.message : String(err)}`)
+    if (externalSignal?.aborted) throw wrapCause('已取消', err)
+    if (isTimeoutAbort(err, timeoutController.signal)) throw wrapCause('请求超时', err)
+    throw wrapCause(`网络错误：${err instanceof Error ? err.message : String(err)}`, err)
   }
 
   if (!response.ok) {
     // 先读错误体、后解除超时/取消接线:顺序反了的话,错误体悬挂时 text() 永久挂起且无法取消
-    const text = await response.text().catch(() => '')
-    clearTimeout(timeoutTimer)
-    externalSignal?.removeEventListener('abort', onExternalAbort)
-    // 读错误体期间用户点了取消:与本函数其余路径同口径归一化为「已取消」,不转写成 HTTP 错误
-    if (externalSignal?.aborted) throw new Error('已取消')
-    throw new Error(`HTTP ${response.status}${text ? ` - ${text.slice(0, 300)}` : ''}`)
+    try {
+      const text = await readChatErrorBody(response, timeoutController.signal, externalSignal)
+      throw new Error(`HTTP ${response.status}${text ? ` - ${text.slice(0, 300)}` : ''}`)
+    } finally {
+      clearTimeout(timeoutTimer)
+      externalSignal?.removeEventListener('abort', onExternalAbort)
+    }
   }
 
   const stream = response.body
@@ -157,19 +178,22 @@ export async function streamGeminiChat(
   let raw = ''
   try {
     for (;;) {
-      const { value, done } = await reader.read()
+      const { value, done } = await readStreamChunkWithAbort(
+        reader,
+        timeoutController.signal,
+        externalSignal,
+      )
       if (done) break
       const text = decoder.decode(value, { stream: true })
       buffer += text
-      raw += text
+      raw = appendCappedStreamRaw(raw, text)
       let newlineIdx = buffer.indexOf('\n')
       while (newlineIdx !== -1) {
         const line = buffer.slice(0, newlineIdx).replace(/\r$/, '')
         buffer = buffer.slice(newlineIdx + 1)
         const delta = parseGeminiSseLine(line)
         if (delta) {
-          full += delta
-          options.onDelta?.(delta)
+          full = appendCappedStreamText(full, delta, options.onDelta)
         }
         newlineIdx = buffer.indexOf('\n')
       }
@@ -177,18 +201,21 @@ export async function streamGeminiChat(
     if (buffer.trim()) {
       const delta = parseGeminiSseLine(buffer.trim())
       if (delta) {
-        full += delta
-        options.onDelta?.(delta)
+        full = appendCappedStreamText(full, delta, options.onDelta)
       }
     }
   } catch (err) {
-    if (externalSignal?.aborted) throw new Error('已取消')
-    if ((err as { name?: string }).name === 'AbortError') throw new Error('请求超时')
+    if (externalSignal?.aborted) throw wrapCause('已取消', err)
+    if (isTimeoutAbort(err, timeoutController.signal)) throw wrapCause('请求超时', err)
     throw err
   } finally {
     clearTimeout(timeoutTimer)
     externalSignal?.removeEventListener('abort', onExternalAbort)
-    reader.releaseLock()
+    try {
+      reader.releaseLock()
+    } catch {
+      /* Ignore cleanup errors so they do not mask the request failure. */
+    }
   }
 
   const trimmed = full.trim()

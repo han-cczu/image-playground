@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import { readFileSync } from 'fs'
 import { normalizeDevProxyConfig } from './src/lib/api/devProxy'
 
-import { cloudflare } from "@cloudflare/vite-plugin";
+import { cloudflare } from '@cloudflare/vite-plugin'
 
 const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'))
 
@@ -31,21 +31,36 @@ export default defineConfig(({ command }) => {
     },
     server: {
       host: true,
-      proxy:
-        devProxyConfig?.enabled
-          ? {
-              [devProxyConfig.prefix]: {
-                target: devProxyConfig.target,
-                changeOrigin: devProxyConfig.changeOrigin,
-                secure: devProxyConfig.secure,
-                rewrite: (path) =>
-                  path.replace(
-                    new RegExp(`^${devProxyConfig.prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
-                    '',
-                  ),
-              },
-            }
-          : undefined,
+      proxy: devProxyConfig?.enabled
+        ? {
+            [devProxyConfig.prefix]: {
+              target: devProxyConfig.target,
+              changeOrigin: devProxyConfig.changeOrigin,
+              secure: devProxyConfig.secure,
+              rewrite: (path) =>
+                path.replace(
+                  new RegExp(`^${devProxyConfig.prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+                  '',
+                ),
+            },
+          }
+        : undefined,
     },
-  };
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            const normalized = id.replace(/\\/g, '/')
+            if (!normalized.includes('/node_modules/')) return
+            if (normalized.includes('/react/') || normalized.includes('/react-dom/'))
+              return 'vendor-react'
+            if (normalized.includes('/@dnd-kit/')) return 'vendor-dnd'
+            if (normalized.includes('/fflate/')) return 'vendor-fflate'
+            if (normalized.includes('/zustand/')) return 'vendor-state'
+            return 'vendor'
+          },
+        },
+      },
+    },
+  }
 })

@@ -2,6 +2,10 @@ import type { StateCreator } from 'zustand'
 import type { AppSettings } from '../../types'
 import { DEFAULT_SETTINGS, normalizeSettings } from '../../lib/api/apiProfiles'
 import type { AppState } from '../index'
+import {
+  MAX_DISMISSED_CODEX_CLI_PROMPT_KEY_LEN,
+  MAX_DISMISSED_CODEX_CLI_PROMPTS,
+} from '../persist'
 
 export interface SettingsSlice {
   // 设置
@@ -53,9 +57,14 @@ export const createSettingsSlice: StateCreator<AppState, [], [], SettingsSlice> 
     return { settings: normalizeSettings(merged) }
   }),
   dismissedCodexCliPrompts: [],
-  dismissCodexCliPrompt: (key) => set((st) => ({
-    dismissedCodexCliPrompts: st.dismissedCodexCliPrompts.includes(key)
-      ? st.dismissedCodexCliPrompts
-      : [...st.dismissedCodexCliPrompts, key],
-  })),
+  dismissCodexCliPrompt: (key) => set((st) => {
+    const normalized = key.trim().slice(0, MAX_DISMISSED_CODEX_CLI_PROMPT_KEY_LEN)
+    return {
+      dismissedCodexCliPrompts: st.dismissedCodexCliPrompts.includes(normalized)
+        ? st.dismissedCodexCliPrompts
+        : [...st.dismissedCodexCliPrompts, normalized]
+          .filter(Boolean)
+          .slice(-MAX_DISMISSED_CODEX_CLI_PROMPTS),
+    }
+  }),
 })

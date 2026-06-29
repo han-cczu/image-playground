@@ -38,7 +38,11 @@ export default function InfoArea({
         >
           {task.status === 'error' && (
             <button
-              onClick={() => retryTask(task)}
+              onClick={() => {
+                void retryTask(task).catch(() => {
+                  /* retryTask surfaces recoverable errors via toast */
+                })
+              }}
               className="p-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-gray-500 dark:text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition"
               title="重试失败任务"
             >

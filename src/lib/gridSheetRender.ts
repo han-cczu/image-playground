@@ -155,9 +155,12 @@ export async function exportGridSheet(args: {
   if (!blob) throw new Error('生成 PNG 失败')
 
   const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `grid-${args.batchId.slice(0, 8)}-${Date.now()}.png`
-  a.click()
-  URL.revokeObjectURL(url)
+  try {
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `grid-${args.batchId.slice(0, 8)}-${Date.now()}.png`
+    a.click()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
 }

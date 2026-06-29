@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeRetryState, hashString } from './ErrorBoundary'
+import { computeRetryState, hashString } from './ErrorBoundary.logic'
 
 describe('hashString', () => {
   it('produces a stable 6-character base36 id for a given input', () => {
@@ -25,10 +25,7 @@ describe('hashString', () => {
 
 describe('computeRetryState', () => {
   it('retry moves into pending without bumping the failure count', () => {
-    const next = computeRetryState(
-      { retryFailedCount: 0, retryPending: false },
-      { type: 'retry' },
-    )
+    const next = computeRetryState({ retryFailedCount: 0, retryPending: false }, { type: 'retry' })
     expect(next).toEqual({ retryFailedCount: 0, retryPending: true })
   })
 

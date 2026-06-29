@@ -1,5 +1,8 @@
 import type { GeminiProfile, TaskParams } from '../../types'
+import { DEFAULT_API_TIMEOUT } from './apiProfiles'
+import { isAbortError, resolveChatTimeoutMs, wrapCause } from './chatCompletionsShared'
 import {
+  assertImageDataUrl,
   assertImageInputPayloadSize,
   type CallApiOptions,
   type CallApiResult,
@@ -8,6 +11,8 @@ import {
   isHttpUrl,
   mergeActualParams,
   mergeAbortSignals,
+  normalizeBase64Image,
+  readJsonWithAbort,
   summarizeConcurrentFailures,
 } from './imageApiShared'
 
@@ -23,6 +28,12 @@ const ASPECT_RATIO_PRESETS: Array<{ ratio: string; value: number }> = [
   { ratio: '16:9', value: 16 / 9 },
   { ratio: '21:9', value: 21 / 9 },
 ]
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError')
+  }
+}
 
 function mapSizeToAspectRatio(size: string): string | undefined {
   const match = size.match(/^(\d+)x(\d+)$/i)
@@ -43,13 +54,14 @@ function mapSizeToAspectRatio(size: string): string | undefined {
   return best.ratio
 }
 
-export function dataUrlToInlinePart(dataUrl: string): { inline_data: { mime_type: string; data: string } } {
-  const match = dataUrl.match(/^data:([^;]+);base64,(.*)$/)
-  if (!match) throw new Error('输入图片格式无效')
+export function dataUrlToInlinePart(dataUrl: string): {
+  inline_data: { mime_type: string; data: string }
+} {
+  const { mime, data } = assertImageDataUrl(dataUrl)
   return {
     inline_data: {
-      mime_type: match[1],
-      data: match[2],
+      mime_type: mime,
+      data,
     },
   }
 }
@@ -83,7 +95,7 @@ function parseGeminiImages(payload: GeminiResponse): Array<{ image: string; mime
       const inline = part.inline_data ?? part.inlineData
       if (!inline?.data) continue
       const mime = inline.mime_type ?? inline.mimeType ?? 'image/png'
-      out.push({ image: `data:${mime};base64,${inline.data}`, mime })
+      out.push({ image: normalizeBase64Image(inline.data, mime), mime })
     }
   }
   return out
@@ -98,7 +110,11 @@ function buildGeminiUrl(baseUrl: string, model: string): string {
   const cleanBase = trimmed || 'https://generativelanguage.googleapis.com/v1beta'
   // 剥离官方全限定名的 models/ 前缀:用户从文档/列表接口粘贴 "models/gemini-..." 时,
   // 不剥会拼出 /models/models/... 路径 404
-  const cleanModel = model.trim().replace(/^\/+/, '').replace(/\/+$/, '').replace(/^models\//, '')
+  const cleanModel = model
+    .trim()
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/^models\//, '')
   return `${cleanBase}/models/${cleanModel}:generateContent`
 }
 
@@ -109,13 +125,35 @@ function pickOutputFormat(mime: string): TaskParams['output_format'] | undefined
   return undefined
 }
 
-async function callGeminiSingle(opts: CallApiOptions, profile: GeminiProfile): Promise<CallApiResult> {
+async function callGeminiSingle(
+  opts: CallApiOptions,
+  profile: GeminiProfile,
+): Promise<CallApiResult> {
+  try {
+    throwIfAborted(opts.signal)
+  } catch (err) {
+    throw wrapCause('已取消', err)
+  }
+
   if (opts.maskDataUrl) {
     throw new Error('Gemini provider 暂不支持遮罩编辑，请切换到 OpenAI 配置')
   }
 
-  const totalBytes = opts.inputImageDataUrls.reduce((sum, dataUrl) => sum + getDataUrlDecodedByteSize(dataUrl), 0)
+  const body = buildGeminiRequestBody(opts)
+
+  return callGeminiSingleWithBody(opts, profile, body)
+}
+
+function assertGeminiPayloadSize(opts: CallApiOptions) {
+  const totalBytes = opts.inputImageDataUrls.reduce(
+    (sum, dataUrl) => sum + getDataUrlDecodedByteSize(dataUrl),
+    0,
+  )
   assertImageInputPayloadSize(totalBytes)
+}
+
+function buildGeminiRequestBody(opts: CallApiOptions): string {
+  assertGeminiPayloadSize(opts)
 
   const parts: Array<Record<string, unknown>> = [{ text: opts.prompt }]
   for (const dataUrl of opts.inputImageDataUrls) {
@@ -135,29 +173,43 @@ async function callGeminiSingle(opts: CallApiOptions, profile: GeminiProfile): P
     generationConfig,
   }
 
+  return JSON.stringify(body)
+}
+
+async function callGeminiSingleWithBody(
+  opts: CallApiOptions,
+  profile: GeminiProfile,
+  body: string,
+): Promise<CallApiResult> {
   const controller = new AbortController()
-  const { signal: requestSignal, dispose: disposeSignals } = mergeAbortSignals(opts.signal, controller.signal)
-  const timeoutId = setTimeout(() => controller.abort(), profile.timeout * 1000)
+  const { signal: requestSignal, dispose: disposeSignals } = mergeAbortSignals(
+    opts.signal,
+    controller.signal,
+  )
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    resolveChatTimeoutMs(profile.timeout, DEFAULT_API_TIMEOUT),
+  )
 
   try {
     const response = await fetch(buildGeminiUrl(profile.baseUrl, profile.model), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-goog-api-key': profile.apiKey,
+        'x-goog-api-key': profile.apiKey.trim(),
         'Cache-Control': 'no-store, no-cache, max-age=0',
         Pragma: 'no-cache',
       },
       cache: 'no-store',
-      body: JSON.stringify(body),
+      body,
       signal: requestSignal,
     })
 
     if (!response.ok) {
-      throw new Error(await getApiErrorMessage(response))
+      throw new Error(await getApiErrorMessage(response, requestSignal))
     }
 
-    const payload = (await response.json()) as GeminiResponse
+    const payload = await readJsonWithAbort<GeminiResponse>(response, requestSignal)
     if (payload.promptFeedback?.blockReason) {
       throw new Error(`请求被拒绝：${payload.promptFeedback.blockReason}`)
     }
@@ -192,20 +244,37 @@ async function callGeminiSingle(opts: CallApiOptions, profile: GeminiProfile): P
       ),
       revisedPrompts: imageResults.map(() => undefined),
     }
+  } catch (err) {
+    if (opts.signal?.aborted) throw wrapCause('已取消', err)
+    if (controller.signal.aborted || isAbortError(err)) throw wrapCause('请求超时', err)
+    throw err
   } finally {
     clearTimeout(timeoutId)
     disposeSignals()
   }
 }
 
-export async function callGeminiImageApi(opts: CallApiOptions, profile: GeminiProfile): Promise<CallApiResult> {
+export async function callGeminiImageApi(
+  opts: CallApiOptions,
+  profile: GeminiProfile,
+): Promise<CallApiResult> {
   const n = opts.params.n > 0 ? opts.params.n : 1
   if (n === 1) return callGeminiSingle(opts, profile)
 
+  if (opts.maskDataUrl) {
+    throw new Error('Gemini provider 暂不支持遮罩编辑，请切换到 OpenAI 配置')
+  }
+  if (opts.signal?.aborted) throw wrapCause('已取消', opts.signal.reason)
+
+  const sharedBody = buildGeminiRequestBody(opts)
   const results = await Promise.allSettled(
-    Array.from({ length: n }).map(() => callGeminiSingle(opts, profile)),
+    Array.from({ length: n }).map(() => callGeminiSingleWithBody(opts, profile, sharedBody)),
   )
-  const { successfulResults: successful, partialFailureCount, partialFailureMessage } = summarizeConcurrentFailures(results)
+  const {
+    successfulResults: successful,
+    partialFailureCount,
+    partialFailureMessage,
+  } = summarizeConcurrentFailures(results)
 
   if (!successful.length) {
     const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
@@ -221,5 +290,12 @@ export async function callGeminiImageApi(opts: CallApiOptions, profile: GeminiPr
     r.revisedPrompts?.length ? r.revisedPrompts : r.images.map(() => undefined),
   )
   const actualParams = mergeActualParams(successful[0]?.actualParams ?? {}, { n: images.length })
-  return { images, actualParams, actualParamsList, revisedPrompts, partialFailureCount, partialFailureMessage }
+  return {
+    images,
+    actualParams,
+    actualParamsList,
+    revisedPrompts,
+    partialFailureCount,
+    partialFailureMessage,
+  }
 }

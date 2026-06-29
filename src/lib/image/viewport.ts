@@ -1,4 +1,5 @@
 const VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover'
+let guardsInstalled = false
 
 function isInsideLightbox(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest('[data-lightbox-root]'))
@@ -7,6 +8,9 @@ function isInsideLightbox(target: EventTarget | null) {
 export function installMobileViewportGuards() {
   const viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]')
   if (viewport) viewport.content = VIEWPORT_CONTENT
+
+  if (guardsInstalled) return
+  guardsInstalled = true
 
   const preventPageGesture = (event: Event) => {
     if (!isInsideLightbox(event.target)) event.preventDefault()

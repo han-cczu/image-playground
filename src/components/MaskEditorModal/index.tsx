@@ -89,7 +89,7 @@ export default function MaskEditorModal() {
     setShowBrushControls,
     setSliderAnchor,
   })
-  const { hoverPoint, isPointerOverCanvas, isAltKeyPressed, isPanning } = pointer
+  const { hoverPoint, isPointerOverCanvas, isAltKeyPressed, isPanning, isStrokeActive } = pointer
 
   const cursorOverlay = useCursorOverlay({
     cursorCanvasRef,
@@ -159,7 +159,7 @@ export default function MaskEditorModal() {
       action: () => {
         clearMaskDraft()
         setMaskEditorImageId(null)
-        showToast('已移除遮罩', 'success')
+        useStore.getState().showToast('已移除遮罩', 'success')
       },
     })
   }
@@ -220,22 +220,29 @@ export default function MaskEditorModal() {
 
   if (!imageId) return null
 
-  const canUndo = history.canUndo && isReady && !isSaving
-  const canRedo = history.canRedo && isReady && !isSaving
+  const canEditMaskHistory = isReady && !isSaving && !isStrokeActive
+  const canUndo = history.canUndo && canEditMaskHistory
+  const canRedo = history.canRedo && canEditMaskHistory
 
-  const handleUndo = () => history.undo()
+  const handleUndo = () => {
+    if (!canEditMaskHistory) return
+    history.undo()
+  }
 
-  const handleRedo = () => history.redo()
+  const handleRedo = () => {
+    if (!canEditMaskHistory) return
+    history.redo()
+  }
 
   const handleClear = () => {
-    if (!maskCanvasRef.current || !isReady || isSaving) return
+    if (!maskCanvasRef.current || !canEditMaskHistory) return
     history.clear()
   }
 
   const handleSave = async () => {
     const canvas = maskCanvasRef.current
     const savingSessionId = activeSessionIdRef.current
-    if (!canvas || !sourceDataUrl || !imageId || !isReady || isSaving || !savingSessionId) return
+    if (!canvas || !sourceDataUrl || !imageId || !canEditMaskHistory || !savingSessionId) return
 
     const token = ++saveTokenRef.current
     const savingImageId = imageId
@@ -267,14 +274,14 @@ export default function MaskEditorModal() {
         updatedAt: Date.now(),
       })
       setMaskEditorImageId(null)
-      showToast('遮罩已保存', 'success')
+      useStore.getState().showToast('遮罩已保存', 'success')
     } catch (err) {
       if (
         saveTokenRef.current !== token ||
         activeSessionIdRef.current !== savingSessionId ||
         useStore.getState().maskEditorImageId !== savingImageId
       ) return
-      showToast(err instanceof Error ? err.message : String(err), 'error')
+      useStore.getState().showToast(err instanceof Error ? err.message : String(err), 'error')
     } finally {
       if (saveTokenRef.current === token) setIsSaving(false)
     }
@@ -317,7 +324,7 @@ export default function MaskEditorModal() {
               移除遮罩
             </button>
           )}
-          <button onClick={handleSave} disabled={!isReady || isSaving} className="flex h-8 items-center gap-1.5 px-4 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg disabled:opacity-50 transition">
+          <button onClick={handleSave} disabled={!canEditMaskHistory} className="flex h-8 items-center gap-1.5 px-4 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg disabled:opacity-50 transition">
             {isSaving ? '保存中...' : '保存'}
           </button>
         </div>
@@ -354,7 +361,7 @@ export default function MaskEditorModal() {
           isZoomed={isZoomed}
           onResetView={resetViewTransform}
           onClear={handleClear}
-          isReady={isReady}
+          isReady={canEditMaskHistory}
           isSaving={isSaving}
         />
       </CanvasViewport>
@@ -364,7 +371,7 @@ export default function MaskEditorModal() {
         brushSize={brushSize}
         onChange={handleBrushSizeChange}
         anchor={sliderAnchor}
-        disabled={!isReady || isSaving}
+        disabled={!canEditMaskHistory}
         panelRef={brushSizePanelRef}
       />
     </>

@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import './index.css'
 import { installMobileViewportGuards } from './lib/image/viewport'
+import {
+  createServiceWorkerUpdateScheduler,
+  unregisterExistingServiceWorkers,
+} from './lib/serviceWorkerUpdate'
 
 installMobileViewportGuards()
 
@@ -12,13 +16,25 @@ installMobileViewportGuards()
 if ('serviceWorker' in navigator && window.isSecureContext) {
   if (import.meta.env.PROD) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch((error) => {
-        console.error('Service worker registration failed:', error)
-      })
+      navigator.serviceWorker
+        .register(`${import.meta.env.BASE_URL}sw.js`)
+        .then((registration) => {
+          const scheduler = createServiceWorkerUpdateScheduler(registration, {
+            onError: (error) => console.error('Service worker update check failed:', error),
+          })
+          scheduler.check()
+
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') scheduler.check()
+          })
+        })
+        .catch((error) => {
+          console.error('Service worker registration failed:', error)
+        })
     })
   } else {
-    navigator.serviceWorker.getRegistrations().then((registrations) => {
-      registrations.forEach((registration) => registration.unregister())
+    void unregisterExistingServiceWorkers(navigator.serviceWorker, {
+      onError: (error) => console.error('Service worker cleanup failed:', error),
     })
   }
 }

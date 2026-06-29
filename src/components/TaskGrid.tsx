@@ -74,7 +74,10 @@ const SortableTaskCard = memo(function SortableTaskCard({
   }
 
   // 内层闭包 useCallback 化:否则每次 SortableTaskCard 重渲染都新建,打穿内层 TaskCard 的 memo
-  const onClick = useCallback((e: React.MouseEvent | React.TouchEvent) => onCardClick(task, e), [onCardClick, task])
+  const onClick = useCallback(
+    (e: React.MouseEvent | React.TouchEvent) => onCardClick(task, e),
+    [onCardClick, task],
+  )
   const onReuseCb = useCallback(() => onReuse(task), [onReuse, task])
   const onEditCb = useCallback(() => onEditOutputs(task), [onEditOutputs, task])
   const onDeleteCb = useCallback(() => onDelete(task), [onDelete, task])
@@ -91,12 +94,10 @@ const SortableTaskCard = memo(function SortableTaskCard({
           task={task}
           isSelected={isSelected}
           conversationTag={conversationTag}
-          dragHandle={{
-            ref: setActivatorNodeRef,
-            listeners,
-            attributes,
-            disabled: dragDisabled,
-          }}
+          dragActivatorRef={setActivatorNodeRef}
+          dragListeners={listeners}
+          dragAttributes={attributes}
+          dragDisabled={dragDisabled}
           onClick={onClick}
           onReuse={onReuseCb}
           onEditOutputs={onEditCb}
@@ -130,7 +131,12 @@ export default function TaskGrid() {
   const selectedIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds])
   const rootRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
-  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null)
+  const [selectionBox, setSelectionBox] = useState<{
+    startX: number
+    startY: number
+    currentX: number
+    currentY: number
+  } | null>(null)
   const isDragging = useRef(false)
   const dragStart = useRef<{ x: number; y: number } | null>(null)
   const hasDragged = useRef(false)
@@ -152,7 +158,14 @@ export default function TaskGrid() {
       filterFavoriteCategoryId,
       filterConversationId,
     })
-  }, [tasks, searchQuery, filterStatus, filterFavorite, filterFavoriteCategoryId, filterConversationId])
+  }, [
+    tasks,
+    searchQuery,
+    filterStatus,
+    filterFavorite,
+    filterFavoriteCategoryId,
+    filterConversationId,
+  ])
 
   // 把扁平任务流分组成渲染项:同 batchId 的网格 task 聚合成矩阵块,其余为普通卡片。
   const renderItems = useMemo(() => groupIntoGridBlocks(filteredTasks), [filteredTasks])
@@ -229,101 +242,121 @@ export default function TaskGrid() {
 
   // 稳定回调(以 task 为参,deps 仅含稳定 setter):内联闭包会让每卡 props 每 render 变化,打穿 memo。
   // 选择态从 useStore.getState() 现取而非闭包捕获,避免 selectedTaskIds 变化时回调失稳。
-  const handleDelete = useCallback((task: TaskRecord) => {
-    setConfirmDialog({
-      title: '删除记录',
-      message: '确定要删除这条记录吗？关联的图片资源也会被清理（如果没有其他任务引用）。',
-      action: () => removeTask(task),
+  const handleDelete = useCallback(
+    (task: TaskRecord) => {
+      setConfirmDialog({
+        title: '删除记录',
+        message: '确定要删除这条记录吗？关联的图片资源也会被清理（如果没有其他任务引用）。',
+        action: () => removeTask(task),
+      })
+    },
+    [setConfirmDialog],
+  )
+
+  const handleCardClick = useCallback(
+    (task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => {
+      if (Date.now() < suppressClickUntil.current) {
+        e.preventDefault()
+        return
+      }
+      suppressClickUntil.current = 0
+      const isCtrl = isMac ? (e as React.MouseEvent).metaKey : (e as React.MouseEvent).ctrlKey
+      const state = useStore.getState()
+      if (isCtrl) {
+        state.toggleTaskSelection(task.id)
+      } else if (state.selectedTaskIds.length > 0) {
+        state.clearSelection()
+        state.setDetailTaskId(task.id)
+      } else {
+        state.setDetailTaskId(task.id)
+      }
+    },
+    [isMac],
+  )
+
+  const handleReuse = useCallback((task: TaskRecord) => {
+    void reuseConfig(task).catch(() => {
+      /* reuseConfig surfaces recoverable errors via toast */
     })
-  }, [setConfirmDialog])
-
-  const handleCardClick = useCallback((task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => {
-    if (Date.now() < suppressClickUntil.current) {
-      e.preventDefault()
-      return
-    }
-    suppressClickUntil.current = 0
-    const isCtrl = isMac ? (e as React.MouseEvent).metaKey : (e as React.MouseEvent).ctrlKey
-    const state = useStore.getState()
-    if (isCtrl) {
-      state.toggleTaskSelection(task.id)
-    } else if (state.selectedTaskIds.length > 0) {
-      state.clearSelection()
-      state.setDetailTaskId(task.id)
-    } else {
-      state.setDetailTaskId(task.id)
-    }
-  }, [isMac])
-
-  const handleReuse = useCallback((task: TaskRecord) => reuseConfig(task), [])
-  const handleEditOutputs = useCallback((task: TaskRecord) => editOutputs(task), [])
-
-  const beginSelection = (target: HTMLElement, clientX: number, clientY: number, isCtrl: boolean) => {
-    startedOnCard.current = Boolean(target.closest('.task-card-wrapper'))
-    startedWithCtrl.current = isCtrl
-    initialSelection.current = [...useStore.getState().selectedTaskIds]
-    lastAppliedSelection.current = new Set(initialSelection.current)
-
-    isDragging.current = true
-    hasDragged.current = false
-    dragStart.current = { x: clientX, y: clientY }
-    document.body.classList.add('select-none')
-    document.body.classList.add('drag-selecting')
-    setSelectionBox({
-      startX: clientX,
-      startY: clientY,
-      currentX: clientX,
-      currentY: clientY,
+  }, [])
+  const handleEditOutputs = useCallback((task: TaskRecord) => {
+    void editOutputs(task).catch(() => {
+      /* editOutputs surfaces recoverable errors via toast */
     })
-  }
+  }, [])
 
-  const updateSelectionFromPoint = (clientX: number, clientY: number) => {
-    const start = dragStart.current
-    if (!start || !gridRef.current) return
+  const beginSelection = useCallback(
+    (target: HTMLElement, clientX: number, clientY: number, isCtrl: boolean) => {
+      startedOnCard.current = Boolean(target.closest('.task-card-wrapper'))
+      startedWithCtrl.current = isCtrl
+      initialSelection.current = isCtrl ? [...useStore.getState().selectedTaskIds] : []
+      lastAppliedSelection.current = new Set(initialSelection.current)
 
-    const minX = Math.min(start.x, clientX)
-    const maxX = Math.max(start.x, clientX)
-    const minY = Math.min(start.y, clientY)
-    const maxY = Math.max(start.y, clientY)
+      isDragging.current = true
+      hasDragged.current = false
+      dragStart.current = { x: clientX, y: clientY }
+      document.body.classList.add('select-none')
+      document.body.classList.add('drag-selecting')
+      setSelectionBox({
+        startX: clientX,
+        startY: clientY,
+        currentX: clientX,
+        currentY: clientY,
+      })
+    },
+    [],
+  )
 
-    const cards = gridRef.current.querySelectorAll('.task-card-wrapper')
-    const newSelected = new Set(initialSelection.current)
-    const initialSelected = new Set(initialSelection.current)
+  const updateSelectionFromPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      const start = dragStart.current
+      if (!start || !gridRef.current) return
 
-    cards.forEach((card) => {
-      const rect = card.getBoundingClientRect()
-      const taskId = card.getAttribute('data-task-id')
-      if (!taskId) return
+      const minX = Math.min(start.x, clientX)
+      const maxX = Math.max(start.x, clientX)
+      const minY = Math.min(start.y, clientY)
+      const maxY = Math.max(start.y, clientY)
 
-      const isIntersecting =
-        minX < rect.right && maxX > rect.left && minY < rect.bottom && maxY > rect.top
+      const cards = gridRef.current.querySelectorAll('.task-card-wrapper')
+      const newSelected = new Set(initialSelection.current)
+      const initialSelected = new Set(initialSelection.current)
 
-      if (isIntersecting) {
-        if (initialSelected.has(taskId)) {
+      cards.forEach((card) => {
+        const rect = card.getBoundingClientRect()
+        const taskId = card.getAttribute('data-task-id')
+        if (!taskId) return
+
+        const isIntersecting =
+          minX < rect.right && maxX > rect.left && minY < rect.bottom && maxY > rect.top
+
+        if (isIntersecting) {
+          if (initialSelected.has(taskId)) {
+            newSelected.delete(taskId)
+          } else {
+            newSelected.add(taskId)
+          }
+        } else if (!initialSelected.has(taskId)) {
           newSelected.delete(taskId)
-        } else {
-          newSelected.add(taskId)
         }
-      } else if (!initialSelected.has(taskId)) {
-        newSelected.delete(taskId)
-      }
-    })
+      })
 
-    // mousemove 高频路径:与上次提交的选区集合相等就直接返回,跳过 set(短路理由见 ref 定义处)
-    const prev = lastAppliedSelection.current
-    if (prev && prev.size === newSelected.size) {
-      let unchanged = true
-      for (const id of newSelected) {
-        if (!prev.has(id)) {
-          unchanged = false
-          break
+      // mousemove 高频路径:与上次提交的选区集合相等就直接返回,跳过 set(短路理由见 ref 定义处)
+      const prev = lastAppliedSelection.current
+      if (prev && prev.size === newSelected.size) {
+        let unchanged = true
+        for (const id of newSelected) {
+          if (!prev.has(id)) {
+            unchanged = false
+            break
+          }
         }
+        if (unchanged) return
       }
-      if (unchanged) return
-    }
-    lastAppliedSelection.current = newSelected
-    setSelectedTaskIds(Array.from(newSelected))
-  }
+      lastAppliedSelection.current = newSelected
+      setSelectedTaskIds(Array.from(newSelected))
+    },
+    [setSelectedTaskIds],
+  )
 
   useEffect(() => {
     const getEventElement = (e: MouseEvent) => {
@@ -363,31 +396,53 @@ export default function TaskGrid() {
       e.preventDefault()
     }
 
-    const handleDocumentMouseUp = () => {
-      if (isDragging.current) {
+    const resetSelectionDrag = (applyMouseUpActions: boolean) => {
+      const wasDragging = isDragging.current
+      if (wasDragging) {
         document.body.classList.remove('select-none')
         document.body.classList.remove('drag-selecting')
       }
-      if (isDragging.current && !hasDragged.current && !startedOnCard.current && !startedWithCtrl.current) {
+      if (
+        applyMouseUpActions &&
+        wasDragging &&
+        !hasDragged.current &&
+        !startedOnCard.current &&
+        !startedWithCtrl.current
+      ) {
         clearSelection()
       }
-      if (isDragging.current && hasDragged.current) {
+      if (applyMouseUpActions && wasDragging && hasDragged.current) {
         suppressClickUntil.current = Date.now() + 250
       }
       isDragging.current = false
       dragStart.current = null
+      hasDragged.current = false
+      startedOnCard.current = false
+      startedWithCtrl.current = false
+      lastAppliedSelection.current = null
       setSelectionBox(null)
+    }
+
+    const handleDocumentMouseUp = () => {
+      resetSelectionDrag(true)
+    }
+
+    const handleWindowBlur = () => {
+      resetSelectionDrag(false)
     }
 
     document.addEventListener('mousedown', handleDocumentMouseDown, true)
     document.addEventListener('mousemove', handleDocumentMouseMove, true)
     document.addEventListener('mouseup', handleDocumentMouseUp, true)
+    window.addEventListener('blur', handleWindowBlur)
     return () => {
       document.removeEventListener('mousedown', handleDocumentMouseDown, true)
       document.removeEventListener('mousemove', handleDocumentMouseMove, true)
       document.removeEventListener('mouseup', handleDocumentMouseUp, true)
+      window.removeEventListener('blur', handleWindowBlur)
+      resetSelectionDrag(false)
     }
-  }, [clearSelection, isMac])
+  }, [beginSelection, clearSelection, isMac, updateSelectionFromPoint])
 
   if (!filteredTasks.length) {
     // 「真正的空对话」由 App 的 EmptyState 承接；这里只在用户主动加了筛选/搜索时占位。
@@ -402,11 +457,7 @@ export default function TaskGrid() {
   }
 
   return (
-    <div 
-      ref={rootRef}
-      data-task-grid-root
-      className="relative min-h-[50vh]"
-    >
+    <div ref={rootRef} data-task-grid-root className="relative min-h-[50vh]">
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={sortableIds} strategy={rectSortingStrategy}>
           <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
@@ -446,7 +497,8 @@ export default function TaskGrid() {
       </DndContext>
       {isCapped && (
         <div className="py-6 text-center text-xs text-gray-400 dark:text-gray-500">
-          仅显示前 {RENDER_CAP} 条,共 {filteredTasks.length} 条记录。请用搜索 / 筛选缩小范围以查看其余。
+          仅显示前 {RENDER_CAP} 条,共 {filteredTasks.length} 条记录。请用搜索 /
+          筛选缩小范围以查看其余。
         </div>
       )}
       {selectionBox && (

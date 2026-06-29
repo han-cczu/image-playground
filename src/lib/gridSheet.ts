@@ -13,12 +13,16 @@ export const SHEET_ROW_HEADER_W = 120
 export const SHEET_NOTE_LINE_H = 28
 export const SHEET_NOTE_MAX_LINES = 4
 export const MAX_BATCH_NOTE_LEN = 500
+export const MAX_BATCH_ID_LEN = 5000
 /** 笔记条数上限:防恶意/损坏备份把 localStorage 顶爆致 persist 整体静默失效 */
 export const MAX_BATCH_NOTES = 500
 /** 浏览器 canvas 单边硬上限 ~16384(Chrome/Safari),留余量 */
 export const SHEET_MAX_EDGE = 16000
+/** 导出画布总像素上限:对齐输入图 64M pixels 量级,避免大矩阵分配数百 MB 位图内存 */
+export const SHEET_MAX_PIXELS = 64 * 1024 * 1024
 /** 收缩后的格子尺寸下限:再小轴标签/图片已不可读,不如明确拒绝 */
 export const SHEET_MIN_CELL_SIZE = 96
+const DANGEROUS_RECORD_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 
 export interface SheetRect {
   x: number
@@ -99,8 +103,17 @@ export function computeSafeCellSize(
     SHEET_PADDING * 2 + noteOverhead + SHEET_COL_HEADER_H + SHEET_GAP + (rows - 1) * SHEET_GAP
   const maxByWidth = Math.floor((SHEET_MAX_EDGE - overheadW) / cols)
   const maxByHeight = Math.floor((SHEET_MAX_EDGE - overheadH) / rows)
-  const cellSize = Math.min(SHEET_CELL_SIZE, maxByWidth, maxByHeight)
-  return cellSize >= SHEET_MIN_CELL_SIZE ? cellSize : null
+  const maxCellSize = Math.min(SHEET_CELL_SIZE, maxByWidth, maxByHeight)
+  if (maxCellSize < SHEET_MIN_CELL_SIZE) return null
+
+  const fitsPixelBudget = (cellSize: number) =>
+    (overheadW + cols * cellSize) * (overheadH + rows * cellSize) <= SHEET_MAX_PIXELS
+  if (fitsPixelBudget(maxCellSize)) return maxCellSize
+
+  for (let cellSize = maxCellSize - 1; cellSize >= SHEET_MIN_CELL_SIZE; cellSize -= 1) {
+    if (fitsPixelBudget(cellSize)) return cellSize
+  }
+  return null
 }
 
 /**
@@ -170,12 +183,14 @@ export function normalizeBatchNotes(value: unknown, now = Date.now()): Record<st
   const result: Record<string, BatchNote> = {}
   for (const [batchId, entry] of Object.entries(value as Record<string, unknown>)) {
     if (!batchId.trim()) continue
+    if (DANGEROUS_RECORD_KEYS.has(batchId)) continue
+    const id = batchId.slice(0, MAX_BATCH_ID_LEN)
     if (!entry || typeof entry !== 'object') continue
     const item = entry as Partial<BatchNote>
     if (typeof item.text !== 'string') continue
     const text = item.text.trim().slice(0, MAX_BATCH_NOTE_LEN)
     if (!text) continue
-    result[batchId] = {
+    result[id] = {
       text,
       updatedAt:
         typeof item.updatedAt === 'number' && Number.isFinite(item.updatedAt) ? item.updatedAt : now,

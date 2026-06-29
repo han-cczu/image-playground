@@ -1,5 +1,6 @@
 import type { ApiMode, ApiProvider, AppSettings } from '../types'
 import { normalizeBaseUrl } from './api'
+import { MAX_CONFIG_FIELD_LEN } from './api/apiProfiles'
 
 const BOOTSTRAP_KEYS = ['apiUrl', 'apiKey', 'codexCli', 'apiMode', 'provider']
 
@@ -28,6 +29,16 @@ function normalizeApiMode(value: string | null): ApiMode | undefined {
   return value === 'images' || value === 'responses' ? value : undefined
 }
 
+function clampBootstrapValue(value: string): string {
+  return value.slice(0, MAX_CONFIG_FIELD_LEN)
+}
+
+function normalizeBootstrapBaseUrl(value: string, provider: ApiProvider | null): string {
+  const trimmed = value.trim()
+  if (provider === 'gemini') return trimmed.replace(/\/+$/, '')
+  return normalizeBaseUrl(trimmed)
+}
+
 function cleanSearchParams(searchParams: URLSearchParams) {
   for (const key of BOOTSTRAP_KEYS) {
     searchParams.delete(key)
@@ -48,20 +59,21 @@ export function readUrlBootstrap(href: string): UrlBootstrapResult {
   const searchParams = new URLSearchParams(url.search)
   const hashParams = parseHashParams(url.hash)
   const settings: Partial<AppSettings> = {}
+  const provider = normalizeProvider(searchParams.get('provider') ?? hashParams.get('provider'))
 
   // 仅从 hash 读取 apiUrl(与 apiKey 对称):查询串里的 ?apiUrl= 可被攻击者注入改写 baseUrl,
   // 使带 Authorization 的请求发往恶意主机。'apiUrl' 仍保留在 BOOTSTRAP_KEYS,故查询串里的值仍会被
   // changed 命中并由 cleanSearchParams 清出 URL(读丢弃、URL 照样净化)。
   const apiUrlParam = hashParams.get('apiUrl')
   if (apiUrlParam !== null) {
-    settings.baseUrl = normalizeBaseUrl(apiUrlParam.trim())
+    settings.baseUrl = clampBootstrapValue(normalizeBootstrapBaseUrl(apiUrlParam, provider))
   }
 
   // 仅从 hash 读取 apiKey:查询串会进服务器访问日志 / Referer,密钥绝不应走查询串。
   // 'apiKey' 仍保留在 BOOTSTRAP_KEYS 中,故查询串里的 ?apiKey= 仍会被 cleanSearchParams 清理出 URL。
   const apiKeyParam = hashParams.get('apiKey')
   if (apiKeyParam !== null) {
-    settings.apiKey = apiKeyParam.trim()
+    settings.apiKey = clampBootstrapValue(apiKeyParam.trim())
   }
 
   const codexCliParam = searchParams.get('codexCli') ?? hashParams.get('codexCli')
@@ -74,7 +86,9 @@ export function readUrlBootstrap(href: string): UrlBootstrapResult {
     settings.apiMode = apiMode
   }
 
-  const provider = normalizeProvider(searchParams.get('provider') ?? hashParams.get('provider'))
+  if (provider && apiKeyParam === null) {
+    settings.apiKey = ''
+  }
   const changed = BOOTSTRAP_KEYS.some((key) => searchParams.has(key) || hashParams.has(key))
 
   if (changed) {

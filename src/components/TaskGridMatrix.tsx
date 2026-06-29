@@ -26,8 +26,16 @@ interface MatrixCellProps {
 // memo + 稳定回调:本组件订阅 selectedTaskIds,框选/Ctrl 点选时只有 isSelected 翻转的格重渲染
 const MatrixCell = memo(function MatrixCell({ task, isSelected, onCellClick, onDelete }: MatrixCellProps) {
   const onClick = useCallback((e: React.MouseEvent | React.TouchEvent) => onCellClick(task, e), [onCellClick, task])
-  const onReuseCb = useCallback(() => reuseConfig(task), [task])
-  const onEditCb = useCallback(() => editOutputs(task), [task])
+  const onReuseCb = useCallback(() => {
+    void reuseConfig(task).catch(() => {
+      /* reuseConfig surfaces recoverable errors via toast */
+    })
+  }, [task])
+  const onEditCb = useCallback(() => {
+    void editOutputs(task).catch(() => {
+      /* editOutputs surfaces recoverable errors via toast */
+    })
+  }, [task])
   const onDeleteCb = useCallback(() => onDelete(task), [onDelete, task])
   return (
     <div className="task-card-wrapper" data-task-id={task.id}>
@@ -45,13 +53,10 @@ const MatrixCell = memo(function MatrixCell({ task, isSelected, onCellClick, onD
 
 /** XY 网格矩阵卡:行=Y 取值、列=X 取值,单元格复用 TaskCard,空格可补跑。占据流中整行。 */
 export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
-  const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const selectedTaskIds = useStore((s) => s.selectedTaskIds)
   const setSelectedTaskIds = useStore((s) => s.setSelectedTaskIds)
-  const toggleTaskSelection = useStore((s) => s.toggleTaskSelection)
   const batchNote = useStore((s) => s.batchNotes[batchId])
   const setBatchNote = useStore((s) => s.setBatchNote)
-  const showToast = useStore((s) => s.showToast)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
 
   const [editingNote, setEditingNote] = useState(false)
@@ -105,9 +110,14 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
   // 稳定回调(store action 引用稳定),供 MatrixCell 的 memo 依赖
   const handleCellClick = useCallback((task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => {
     const isCtrl = isMac ? (e as React.MouseEvent).metaKey : (e as React.MouseEvent).ctrlKey
-    if (isCtrl) toggleTaskSelection(task.id)
-    else setDetailTaskId(task.id)
-  }, [toggleTaskSelection, setDetailTaskId])
+    const state = useStore.getState()
+    if (isCtrl) {
+      state.toggleTaskSelection(task.id)
+    } else {
+      if (state.selectedTaskIds.length > 0) state.clearSelection()
+      state.setDetailTaskId(task.id)
+    }
+  }, [])
 
   if (!matrix) return null
   const { axes, cols, rows } = matrix
@@ -123,9 +133,9 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
     if (exporting) return
     setExporting(true)
     exportGridSheet({ tasks, batchId, note: batchNote?.text })
-      .then(() => showToast('对照图已导出', 'success'))
+      .then(() => useStore.getState().showToast('对照图已导出', 'success'))
       .catch((err) => {
-        showToast(`导出失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+        useStore.getState().showToast(`导出失败：${err instanceof Error ? err.message : String(err)}`, 'error')
       })
       .finally(() => setExporting(false))
   }
@@ -143,9 +153,9 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
         // 实时返回兜住弹窗到确认之间的状态漂移:期间成员可能已全部自然完成
         const { aborted, skipped } = cancelBatch(batchId)
         if (aborted + skipped === 0) {
-          showToast('该批次已全部完成,无可取消任务', 'info')
+          useStore.getState().showToast('该批次已全部完成,无可取消任务', 'info')
         } else {
-          showToast(`已取消 ${aborted + skipped} 条:中止 ${aborted} 条在途、跳过 ${skipped} 条排队`, 'success')
+          useStore.getState().showToast(`已取消 ${aborted + skipped} 条:中止 ${aborted} 条在途、跳过 ${skipped} 条排队`, 'success')
         }
       },
     })

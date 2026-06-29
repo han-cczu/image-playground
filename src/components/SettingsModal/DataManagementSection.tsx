@@ -8,9 +8,9 @@ export interface DataManagementSectionProps {
   onPruneOrphans: () => void
   onExport: () => void | Promise<void>
   onImport: (file: File, mode: ImportMode) => Promise<void>
-  onClearAll: () => void
-  onConfirmReplaceImport: (proceed: () => void) => void
-  onConfirmClearAll: (proceed: () => void) => void
+  onClearAll: () => void | Promise<void>
+  onConfirmReplaceImport: (proceed: () => void | Promise<void>) => void
+  onConfirmClearAll: (proceed: () => void | Promise<void>) => void
 }
 
 const SOURCE_LABELS: { key: ImageSourceBucket; label: string }[] = [
@@ -69,17 +69,20 @@ export function DataManagementSection({
   }
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      setBusy('import')
-      try {
+    const input = e.currentTarget
+    const file = input.files?.[0]
+    try {
+      if (file) {
+        setBusy('import')
         await onImport(file, pendingImportMode)
-      } finally {
-        setBusy(null)
       }
+    } catch {
+      /* Import actions surface domain errors themselves; keep the file input reusable. */
+    } finally {
+      if (file) setBusy(null)
+      input.value = ''
+      setPendingImportMode('merge')
     }
-    e.target.value = ''
-    setPendingImportMode('merge')
   }
 
   return (
@@ -107,7 +110,8 @@ export function DataManagementSection({
                   />
                 </div>
                 <div className="text-[11px] text-gray-400 dark:text-gray-500">
-                  浏览器已用 {formatBytes(storageStats.quota.usage)} / {formatBytes(storageStats.quota.quota)}
+                  浏览器已用 {formatBytes(storageStats.quota.usage)} /{' '}
+                  {formatBytes(storageStats.quota.quota)}
                 </div>
               </div>
             )}
@@ -179,7 +183,12 @@ export function DataManagementSection({
           className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            />
           </svg>
           {busy === 'export' ? '导出中…' : '导出'}
         </button>
@@ -189,19 +198,27 @@ export function DataManagementSection({
           className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+            />
           </svg>
           {busy === 'import' ? '导入中…' : '合并导入'}
         </button>
         <button
-          onClick={() =>
-            onConfirmReplaceImport(() => selectImportFile('replace'))
-          }
+          onClick={() => onConfirmReplaceImport(() => selectImportFile('replace'))}
           disabled={busy !== null}
           className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 006.34 4.34L4 6.68M4 15a8 8 0 0013.66 4.66L20 17.32" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 006.34 4.34L4 6.68M4 15a8 8 0 0013.66 4.66L20 17.32"
+            />
           </svg>
           替换导入
         </button>

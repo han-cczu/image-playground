@@ -62,4 +62,12 @@ describe('mapWithConcurrency', () => {
     const results = await mapWithConcurrency([1, 2], 10, async (n) => n)
     expect(results.map((r) => (r.status === 'fulfilled' ? r.value : null))).toEqual([1, 2])
   })
+
+  it('falls back to one worker for invalid limits', async () => {
+    const nanResults = await mapWithConcurrency([1, 2], Number.NaN, async (n) => n)
+    expect(nanResults.map((r) => (r.status === 'fulfilled' ? r.value : null))).toEqual([1, 2])
+
+    const negativeResults = await mapWithConcurrency([3, 4], -2, async (n) => n)
+    expect(negativeResults.map((r) => (r.status === 'fulfilled' ? r.value : null))).toEqual([3, 4])
+  })
 })

@@ -17,6 +17,13 @@ function getParamsSearchText(task: TaskRecord): string {
   return text
 }
 
+function getApiMetadataSearchText(task: TaskRecord): string {
+  return [task.apiProvider, task.apiProfileName, task.apiModel]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .join('\n')
+    .toLowerCase()
+}
+
 export interface TaskFilterOptions {
   searchQuery: string
   filterStatus: TaskStatus | 'all'
@@ -63,6 +70,10 @@ export function filterAndSortTasks(tasks: TaskRecord[], options: TaskFilterOptio
 
     if (!q) return true
     const prompt = (task.prompt || '').toLowerCase()
-    return prompt.includes(q) || getParamsSearchText(task).includes(q)
+    return (
+      prompt.includes(q) ||
+      getApiMetadataSearchText(task).includes(q) ||
+      getParamsSearchText(task).includes(q)
+    )
   })
 }

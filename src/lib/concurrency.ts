@@ -28,8 +28,9 @@ export async function mapWithConcurrency<T, R>(
     }
   }
 
-  // worker 数取 min(limit, item 数)，至少 1（item 为空时该 worker 立即返回）。
-  const workerCount = Math.max(1, Math.min(limit, items.length))
+  // worker 数取 min(limit, item 数)，至少 1；非法 limit 兜底为 1，避免静默 0 worker。
+  const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 1
+  const workerCount = Math.max(1, Math.min(normalizedLimit, items.length))
   await Promise.all(Array.from({ length: workerCount }, () => worker()))
   return results
 }

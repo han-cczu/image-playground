@@ -1,5 +1,10 @@
 import type { Conversation, TaskRecord, StoredImage } from '../types'
-import { ARCHIVE_CONVERSATION_ID, createArchiveConversation } from './conversations'
+import {
+  ARCHIVE_CONVERSATION_ID,
+  createArchiveConversation,
+  normalizeConversations,
+} from './conversations'
+import { normalizeTasks } from './tasks'
 
 const DB_NAME = 'image-playground'
 const DB_VERSION = 2
@@ -8,6 +13,17 @@ const STORE_IMAGES = 'images'
 const STORE_CONVERSATIONS = 'conversations'
 
 let dbPromise: Promise<IDBDatabase> | null = null
+
+export const IDB_CHANGE_STORAGE_KEY = 'image-playground.idbChange'
+
+function notifyIndexedDbChanged(): void {
+  try {
+    if (typeof localStorage === 'undefined') return
+    localStorage.setItem(IDB_CHANGE_STORAGE_KEY, `${Date.now()}:${Math.random()}`)
+  } catch {
+    /* Cross-tab sync is best-effort; DB write success must not depend on localStorage. */
+  }
+}
 
 function openDB(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise
@@ -95,7 +111,10 @@ function dbTransaction<T>(
             result = req.result
           }
           req.onerror = () => reject(req.error)
-          tx.oncomplete = () => resolve(result)
+          tx.oncomplete = () => {
+            notifyIndexedDbChanged()
+            resolve(result)
+          }
           tx.onabort = () => reject(tx.error ?? new Error('数据库写事务被中止'))
         }
       }),
@@ -105,7 +124,9 @@ function dbTransaction<T>(
 // ===== Tasks =====
 
 export function getAllTasks(): Promise<TaskRecord[]> {
-  return dbTransaction(STORE_TASKS, 'readonly', (s) => s.getAll())
+  return dbTransaction<unknown[]>(STORE_TASKS, 'readonly', (s) => s.getAll()).then((tasks) =>
+    normalizeTasks(tasks),
+  )
 }
 
 export function putTask(task: TaskRecord): Promise<IDBValidKey> {
@@ -123,7 +144,9 @@ export function clearTasks(): Promise<undefined> {
 // ===== Conversations =====
 
 export function getAllConversations(): Promise<Conversation[]> {
-  return dbTransaction(STORE_CONVERSATIONS, 'readonly', (s) => s.getAll())
+  return dbTransaction<unknown[]>(STORE_CONVERSATIONS, 'readonly', (s) => s.getAll()).then(
+    (conversations) => normalizeConversations(conversations),
+  )
 }
 
 export function putConversation(conversation: Conversation): Promise<IDBValidKey> {
@@ -149,7 +172,10 @@ export function persistConversationMigration(
     (db) =>
       new Promise((resolve, reject) => {
         const tx = db.transaction([STORE_CONVERSATIONS, STORE_TASKS], 'readwrite')
-        tx.oncomplete = () => resolve()
+        tx.oncomplete = () => {
+          notifyIndexedDbChanged()
+          resolve()
+        }
         tx.onerror = () => reject(tx.error)
         tx.onabort = () => reject(tx.error ?? new Error('conversation migration aborted'))
         const convStore = tx.objectStore(STORE_CONVERSATIONS)
@@ -172,11 +198,12 @@ export function deleteConversation(id: string, cascadeTasks: boolean): Promise<v
   return openDB().then(
     (db) =>
       new Promise((resolve, reject) => {
-        const storeNames = cascadeTasks
-          ? [STORE_CONVERSATIONS, STORE_TASKS]
-          : [STORE_CONVERSATIONS]
+        const storeNames = cascadeTasks ? [STORE_CONVERSATIONS, STORE_TASKS] : [STORE_CONVERSATIONS]
         const tx = db.transaction(storeNames, 'readwrite')
-        tx.oncomplete = () => resolve()
+        tx.oncomplete = () => {
+          notifyIndexedDbChanged()
+          resolve()
+        }
         tx.onerror = () => reject(tx.error)
         tx.onabort = () => reject(tx.error ?? new Error('delete conversation aborted'))
 
@@ -239,8 +266,17 @@ export function forEachImageMeta(onRecord: (image: StoredImage) => void): Promis
         cursorReq.onsuccess = () => {
           const cursor = cursorReq.result
           if (!cursor) return
-          onRecord(cursor.value as StoredImage)
-          cursor.continue()
+          try {
+            onRecord(cursor.value as StoredImage)
+            cursor.continue()
+          } catch (err) {
+            reject(err)
+            try {
+              tx.abort()
+            } catch {
+              /* Transaction may already be finishing; preserve the original callback error. */
+            }
+          }
         }
       }),
   )
@@ -262,19 +298,31 @@ export function pruneImagesViaCursor(
     (db) =>
       new Promise<void>((resolve, reject) => {
         const tx = db.transaction(STORE_IMAGES, 'readwrite')
-        tx.oncomplete = () => resolve()
+        tx.oncomplete = () => {
+          notifyIndexedDbChanged()
+          resolve()
+        }
         tx.onerror = () => reject(tx.error)
         tx.onabort = () => reject(tx.error ?? new Error('清理图片事务被中止'))
         const cursorReq = tx.objectStore(STORE_IMAGES).openCursor()
         cursorReq.onsuccess = () => {
           const cursor = cursorReq.result
           if (!cursor) return
-          const value = cursor.value as StoredImage
-          if (shouldDelete(value)) {
-            onDeleted(value)
-            cursor.delete()
+          try {
+            const value = cursor.value as StoredImage
+            if (shouldDelete(value)) {
+              onDeleted(value)
+              cursor.delete()
+            }
+            cursor.continue()
+          } catch (err) {
+            reject(err)
+            try {
+              tx.abort()
+            } catch {
+              /* Transaction may already be finishing; preserve the original callback error. */
+            }
           }
-          cursor.continue()
         }
       }),
   )
@@ -294,9 +342,13 @@ function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return buffer
 }
 
+function hasDataUrlScheme(value: string): boolean {
+  return value.slice(0, 'data:'.length).toLowerCase() === 'data:'
+}
+
 function getDataUrlMeta(dataUrl: string): { mime: string; isBase64: boolean; payload: string } {
   const commaIndex = dataUrl.indexOf(',')
-  if (!dataUrl.startsWith('data:') || commaIndex < 0) {
+  if (!hasDataUrlScheme(dataUrl) || commaIndex < 0) {
     throw new Error('图片 data URL 格式无效')
   }
 
@@ -311,6 +363,9 @@ function getDataUrlMeta(dataUrl: string): { mime: string; isBase64: boolean; pay
 
 export function dataUrlToImageBlob(dataUrl: string): { blob: Blob; mime: string } {
   const { mime, isBase64, payload } = getDataUrlMeta(dataUrl)
+  if (!mime.toLowerCase().startsWith('image/')) {
+    throw new Error(`图片 data URL 不是图片内容(Content-Type: ${mime || '未知'})`)
+  }
   let bytes: Uint8Array
   try {
     bytes = isBase64
@@ -333,22 +388,43 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
-export async function blobToDataUrl(blob: Blob, fallbackMime = 'application/octet-stream'): Promise<string> {
+export async function blobToDataUrl(
+  blob: Blob,
+  fallbackMime = 'application/octet-stream',
+): Promise<string> {
   const bytes = new Uint8Array(await blob.arrayBuffer())
   return `data:${blob.type || fallbackMime};base64,${bytesToBase64(bytes)}`
 }
 
+function assertImageBlobMime(blob: Blob, fallbackMime?: string): string {
+  const mime = blob.type || fallbackMime || 'application/octet-stream'
+  if (!mime.toLowerCase().startsWith('image/')) {
+    throw new Error(`图片 Blob 不是图片内容(Content-Type: ${mime || '未知'})`)
+  }
+  return mime
+}
+
 export async function storedImageToDataUrl(image: StoredImage): Promise<string | undefined> {
-  if (image.dataUrl) return image.dataUrl
+  if (image.dataUrl) {
+    const { mime } = getDataUrlMeta(image.dataUrl)
+    if (!mime.toLowerCase().startsWith('image/')) {
+      throw new Error(`图片 data URL 不是图片内容(Content-Type: ${mime || '未知'})`)
+    }
+    return image.dataUrl
+  }
   if (!image.blob) return undefined
+  assertImageBlobMime(image.blob, image.mime)
   return blobToDataUrl(image.blob, image.mime)
 }
 
-export async function storedImageToBytes(image: StoredImage): Promise<{ bytes: Uint8Array; mime: string } | undefined> {
+export async function storedImageToBytes(
+  image: StoredImage,
+): Promise<{ bytes: Uint8Array; mime: string } | undefined> {
   if (image.blob) {
+    const mime = assertImageBlobMime(image.blob, image.mime)
     return {
       bytes: new Uint8Array(await image.blob.arrayBuffer()),
-      mime: image.blob.type || image.mime || 'application/octet-stream',
+      mime,
     }
   }
 
@@ -359,17 +435,25 @@ export async function storedImageToBytes(image: StoredImage): Promise<{ bytes: U
 
 async function normalizeImageForStorage(image: StoredImage): Promise<StoredImage> {
   const source = image.blob
-    ? { blob: image.blob, mime: image.blob.type || image.mime || 'application/octet-stream' }
+    ? { blob: image.blob, mime: assertImageBlobMime(image.blob, image.mime) }
     : image.dataUrl
       ? dataUrlToImageBlob(image.dataUrl)
       : { blob: undefined, mime: image.mime }
+  const imageSource =
+    image.source === 'upload' || image.source === 'generated' || image.source === 'mask'
+      ? image.source
+      : undefined
+  const createdAt =
+    typeof image.createdAt === 'number' && Number.isFinite(image.createdAt)
+      ? image.createdAt
+      : undefined
 
   return {
     id: image.id,
     ...(source.blob ? { blob: source.blob } : {}),
     ...(source.mime ? { mime: source.mime } : {}),
-    ...(image.createdAt !== undefined ? { createdAt: image.createdAt } : {}),
-    ...(image.source !== undefined ? { source: image.source } : {}),
+    ...(createdAt !== undefined ? { createdAt } : {}),
+    ...(imageSource !== undefined ? { source: imageSource } : {}),
   }
 }
 
@@ -404,7 +488,10 @@ function hashDataUrlFallback(dataUrl: string): string {
  * 存储图片，若已存在（按 hash 去重）则跳过。
  * 返回 image id。
  */
-export async function storeImage(dataUrl: string, source: NonNullable<StoredImage['source']> = 'upload'): Promise<string> {
+export async function storeImage(
+  dataUrl: string,
+  source: NonNullable<StoredImage['source']> = 'upload',
+): Promise<string> {
   const id = await hashDataUrl(dataUrl)
   const existing = await getImage(id)
   if (!existing) {

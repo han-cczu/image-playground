@@ -14,6 +14,9 @@ export const FAVORITE_CATEGORY_COLORS = [
 export const DEFAULT_FAVORITE_CATEGORY_COLOR = FAVORITE_CATEGORY_COLORS[0]
 export const DEFAULT_FAVORITE_CATEGORY_ID = 'default-favorite-category'
 export const DEFAULT_FAVORITE_CATEGORY_NAME = '默认分类'
+export const MAX_FAVORITE_CATEGORIES = 200
+export const MAX_FAVORITE_CATEGORY_ID_LEN = 5000
+export const MAX_FAVORITE_CATEGORY_NAME_LEN = 50
 
 export function createDefaultFavoriteCategory(now = 0): FavoriteCategory {
   return {
@@ -49,10 +52,14 @@ export function normalizeFavoriteCategories(categories: unknown, now = Date.now(
     if (!category || typeof category !== 'object') return
     const item = category as Partial<FavoriteCategory>
     if (typeof item.id !== 'string' || !item.id.trim()) return
+    const id = item.id.slice(0, MAX_FAVORITE_CATEGORY_ID_LEN)
 
-    byId.set(item.id, {
-      id: item.id,
-      name: typeof item.name === 'string' ? item.name : '未命名分类',
+    byId.set(id, {
+      id,
+      name:
+        typeof item.name === 'string' && item.name.trim()
+          ? item.name.trim().slice(0, MAX_FAVORITE_CATEGORY_NAME_LEN)
+          : '未命名分类',
       color: isValidColor(item.color) ? item.color : DEFAULT_FAVORITE_CATEGORY_COLOR,
       sortOrder: typeof item.sortOrder === 'number' && Number.isFinite(item.sortOrder) ? item.sortOrder : index,
       createdAt: typeof item.createdAt === 'number' && Number.isFinite(item.createdAt) ? item.createdAt : now,
@@ -63,6 +70,7 @@ export function normalizeFavoriteCategories(categories: unknown, now = Date.now(
   return Array.from(byId.values())
     .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt || a.id.localeCompare(b.id))
     .map((category, index) => ({ ...category, sortOrder: index }))
+    .slice(0, MAX_FAVORITE_CATEGORIES)
 }
 
 export function mergeFavoriteCategories(
@@ -84,8 +92,10 @@ export function mergeFavoriteCategories(
   const localIds = new Set(existing.map((category) => category.id))
 
   // 1.2 追加备份中新 id 分类
-  return normalizeFavoriteCategories([
-    ...existing,
-    ...incoming.filter((category) => !localIds.has(category.id)),
-  ])
+  return normalizeFavoriteCategories(
+    [
+      ...existing,
+      ...incoming.filter((category) => !localIds.has(category.id)),
+    ].map((category, sortOrder) => ({ ...category, sortOrder })),
+  )
 }

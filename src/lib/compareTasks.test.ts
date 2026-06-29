@@ -123,12 +123,18 @@ describe('buildCompareRows', () => {
 
   it('never flags elapsed as differing and formats it with fallback', () => {
     const rows = buildCompareRows([
-      makeTask({ elapsed: 1.234 }),
+      makeTask({ elapsed: 1_234 }),
       makeTask({ id: 'task-2', elapsed: undefined as unknown as number }),
     ])
     const elapsed = rows.find((r) => r.key === 'elapsed')!
     expect(elapsed.values).toEqual(['1.2s', '—'])
     expect(elapsed.differs).toBe(false)
+  })
+
+  it('formats elapsed from stored milliseconds to seconds', () => {
+    const rows = buildCompareRows([makeTask({ elapsed: 1_234 })])
+
+    expect(rows.find((r) => r.key === 'elapsed')!.values).toEqual(['1.2s'])
   })
 
   it('handles 3 and 4 columns keeping value order aligned with input', () => {

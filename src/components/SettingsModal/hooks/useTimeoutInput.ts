@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { normalizeTimeoutInput } from '../timeout'
 
 export interface UseTimeoutInputOptions {
@@ -28,22 +28,26 @@ export interface TimeoutInputController {
  * API / 提示词优化器 / 图说器三套 timeout 输入框共用。
  */
 export function useTimeoutInput(options: UseTimeoutInputOptions): TimeoutInputController {
-  const { initialTimeout, activeId, activeTimeout, rejectNonPositiveOnFlush = false } = options
-  const [value, setValue] = useState(String(initialTimeout))
-
-  // 切换激活 profile 或其 timeout 被外部改写时,把输入框同步回真实值
-  useEffect(() => {
-    setValue(String(activeTimeout))
-  }, [activeId, activeTimeout])
+  const { activeId, activeTimeout, rejectNonPositiveOnFlush = false } = options
+  const [draft, setDraft] = useState<{ activeId: string; value: string } | null>(null)
+  const value = draft?.activeId === activeId ? draft.value : String(activeTimeout)
+  const setValue = useCallback(
+    (nextValue: string) => setDraft({ activeId, value: nextValue }),
+    [activeId],
+  )
 
   const flush = useCallback(
-    () => normalizeTimeoutInput(value, activeTimeout, { rejectNonPositive: rejectNonPositiveOnFlush }),
+    () =>
+      normalizeTimeoutInput(value, activeTimeout, { rejectNonPositive: rejectNonPositiveOnFlush }),
     [value, activeTimeout, rejectNonPositiveOnFlush],
   )
 
-  const reset = useCallback((timeout: number) => setValue(String(timeout)), [])
+  const reset = useCallback(
+    (timeout: number) => setDraft({ activeId, value: String(timeout) }),
+    [activeId],
+  )
 
   // controller 对象 useMemo 化:身份仅随 value/flush 变化,调用方可整体放进依赖数组
   // (失效粒度与单列 flush 一致,且满足 exhaustive-deps 的对象级追踪)
-  return useMemo(() => ({ value, setValue, reset, flush }), [value, reset, flush])
+  return useMemo(() => ({ value, setValue, reset, flush }), [value, setValue, reset, flush])
 }

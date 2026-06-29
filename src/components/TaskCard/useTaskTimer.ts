@@ -6,19 +6,18 @@ import type { TaskRecord } from '../../types'
  * 返回 MM:SS 格式字符串;elapsed 缺失时回退 '00:00'。
  */
 export function useTaskTimer(task: TaskRecord): string {
-  const [now, setNow] = useState(Date.now())
+  const [now, setNow] = useState(() => Date.now())
 
   // 定时更新运行中任务的计时
   useEffect(() => {
     if (task.status !== 'running') return
     const id = setInterval(() => setNow(Date.now()), 1000)
-    setNow(Date.now())
     return () => clearInterval(id)
   }, [task.status])
 
   let seconds: number
   if (task.status === 'running') {
-    seconds = Math.floor((now - task.createdAt) / 1000)
+    seconds = Math.max(0, Math.floor((now - task.createdAt) / 1000))
   } else if (task.elapsed != null) {
     seconds = Math.floor(task.elapsed / 1000)
   } else {

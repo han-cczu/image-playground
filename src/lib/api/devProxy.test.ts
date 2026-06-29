@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildApiUrl } from './devProxy'
+import { buildApiUrl, normalizeDevProxyConfig } from './devProxy'
 
 describe('buildApiUrl', () => {
   it('uses the same-origin proxy prefix when API proxy is enabled', () => {
@@ -35,5 +35,19 @@ describe('buildApiUrl', () => {
     expect(buildApiUrl('http://api.example.com/v1', 'responses', null, false)).toBe(
       'http://api.example.com/v1/responses',
     )
+  })
+
+  it('rejects non-http API URLs before building direct request URLs', () => {
+    expect(() => buildApiUrl('ftp://api.example.com/v1', 'responses', null, false)).toThrow(
+      '未配置 API URL',
+    )
+  })
+})
+
+describe('normalizeDevProxyConfig', () => {
+  it('rejects non-http proxy targets', () => {
+    expect(
+      normalizeDevProxyConfig({ enabled: true, target: 'ftp://api.example.com/v1' }),
+    ).toBeNull()
   })
 })

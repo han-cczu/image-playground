@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { useStore } from '../../store'
 import { listModels } from '../../lib/api/listModels'
 import {
@@ -37,35 +37,44 @@ export function ApiProfileSection({
 }: ApiProfileSectionProps) {
   const [showApiKey, setShowApiKey] = useState(false)
   const [modelListOpen, setModelListOpen] = useState(false)
-  const [modelListLoading, setModelListLoading] = useState(false)
-  const [modelList, setModelList] = useState<string[] | null>(null)
-  const [modelListError, setModelListError] = useState<string | null>(null)
+  const [modelListLoadingKey, setModelListLoadingKey] = useState('')
+  const [modelListState, setModelListState] = useState<{
+    key: string
+    list: string[] | null
+    error: string | null
+  }>({ key: '', list: null, error: null })
+  const modelListRequestSeqRef = useRef(0)
+  const latestModelListRequestByKeyRef = useRef<Map<string, number>>(new Map())
   const dismissedPlaintextKeyNotice = useStore((s) => s.dismissedPlaintextKeyNotice)
   const setDismissedPlaintextKeyNotice = useStore((s) => s.setDismissedPlaintextKeyNotice)
-
-  // Reset model list cache when key connection params change
-  useEffect(() => {
-    setModelListOpen(false)
-    setModelList(null)
-    setModelListError(null)
-  }, [activeProfile.id, activeProfile.baseUrl, activeProfile.apiKey])
+  const modelListKey = `${activeProfile.id}:${activeProfile.baseUrl}:${activeProfile.apiKey}:${activeProfile.provider === 'openai' && activeProfile.apiProxy ? 'proxy' : 'direct'}`
+  const modelListLoading = modelListLoadingKey === modelListKey
+  const modelList = modelListState.key === modelListKey ? modelListState.list : null
+  const modelListError = modelListState.key === modelListKey ? modelListState.error : null
 
   const fetchModelList = useCallback(async () => {
     if (activeProfile.provider !== 'openai') return
+    const key = modelListKey
     setModelListOpen(true)
-    setModelListLoading(true)
-    setModelListError(null)
+    setModelListLoadingKey(key)
+    setModelListState({ key, list: null, error: null })
+    const requestId = ++modelListRequestSeqRef.current
+    latestModelListRequestByKeyRef.current.set(key, requestId)
     try {
       const ids = await listModels(activeProfile)
-      setModelList(ids)
-      if (ids.length === 0) setModelListError('接口返回为空')
+      if (latestModelListRequestByKeyRef.current.get(key) !== requestId) return
+      setModelListState({ key, list: ids, error: ids.length === 0 ? '接口返回为空' : null })
     } catch (err) {
-      setModelList(null)
-      setModelListError(err instanceof Error ? err.message : String(err))
+      if (latestModelListRequestByKeyRef.current.get(key) !== requestId) return
+      setModelListState({
+        key,
+        list: null,
+        error: err instanceof Error ? err.message : String(err),
+      })
     } finally {
-      setModelListLoading(false)
+      setModelListLoadingKey((current) => (current === key ? '' : current))
     }
-  }, [activeProfile])
+  }, [activeProfile, modelListKey])
 
   return (
     <div className="space-y-4">
@@ -83,8 +92,13 @@ export function ApiProfileSection({
         <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">服务商类型</span>
         <Select
           value={activeProfile.provider}
-          onChange={(value) => onUpdate(switchApiProfileProvider(activeProfile, value as ApiProfile['provider']))}
-          options={[{ label: 'OpenAI 兼容接口', value: 'openai' }, { label: 'Google Gemini', value: 'gemini' }]}
+          onChange={(value) =>
+            onUpdate(switchApiProfileProvider(activeProfile, value as ApiProfile['provider']))
+          }
+          options={[
+            { label: 'OpenAI 兼容接口', value: 'openai' },
+            { label: 'Google Gemini', value: 'gemini' },
+          ]}
           className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
         />
       </label>
@@ -103,9 +117,17 @@ export function ApiProfileSection({
               aria-checked={activeProfile.codexCli}
               aria-label="Codex CLI"
             >
-              <span className={`text-xs transition-colors ${activeProfile.codexCli ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}>Codex CLI</span>
-              <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${activeProfile.codexCli ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
-                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-md transition-transform duration-200 ${activeProfile.codexCli ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+              <span
+                className={`text-xs transition-colors ${activeProfile.codexCli ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}
+              >
+                Codex CLI
+              </span>
+              <span
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${activeProfile.codexCli ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-md transition-transform duration-200 ${activeProfile.codexCli ? 'translate-x-[18px]' : 'translate-x-0.5'}`}
+                />
               </span>
             </div>
           </div>
@@ -117,11 +139,25 @@ export function ApiProfileSection({
             placeholder={DEFAULT_SETTINGS.baseUrl}
             className={`w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 ${apiProxyEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
           />
-          <div data-selectable-text className="mt-1 min-h-[22px] flex items-center text-xs text-gray-400 dark:text-gray-500">
+          <div
+            data-selectable-text
+            className="mt-1 min-h-[22px] flex items-center text-xs text-gray-400 dark:text-gray-500"
+          >
             {apiProxyEnabled ? (
-              <span className="text-yellow-600 dark:text-yellow-500">已开启代理，实际请求目标由部署端决定，此处设置被忽略。</span>
+              <span className="text-yellow-600 dark:text-yellow-500">
+                已开启代理，实际请求目标由部署端决定，此处设置被忽略。
+              </span>
             ) : (
-              <span>支持通过查询参数覆盖：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiUrl=</code>，<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">codexCli=true</code></span>
+              <span>
+                支持通过 hash 覆盖：
+                <code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">
+                  #apiUrl=
+                </code>
+                ，
+                <code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">
+                  codexCli=true
+                </code>
+              </span>
             )}
           </div>
         </label>
@@ -155,7 +191,9 @@ export function ApiProfileSection({
               aria-checked={activeProfile.apiProxy}
               aria-label="API 代理"
             >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-md transition-transform duration-200 ${activeProfile.apiProxy ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-md transition-transform duration-200 ${activeProfile.apiProxy ? 'translate-x-[18px]' : 'translate-x-0.5'}`}
+              />
             </button>
           </div>
           <div data-selectable-text className="text-xs text-gray-400 dark:text-gray-500">
@@ -184,14 +222,29 @@ export function ApiProfileSection({
           </button>
         </div>
         <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-          URL 临时传入密钥请使用 hash：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">#apiKey=</code>，读取后会自动清除。
+          URL 临时传入密钥请使用 hash：
+          <code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">#apiKey=</code>
+          ，读取后会自动清除。
         </div>
         {!dismissedPlaintextKeyNotice && (
           <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200/70 bg-amber-50/60 px-2.5 py-2 text-xs text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/[0.06] dark:text-amber-400/90">
-            <svg className="mt-px h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <svg
+              className="mt-px h-3.5 w-3.5 flex-shrink-0"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+              />
             </svg>
-            <span className="flex-1 leading-relaxed">密钥仅以明文保存在本机浏览器(localStorage),清除浏览器数据即丢失;共享或不可信设备上请谨慎,并优先使用可随时吊销的密钥。</span>
+            <span className="flex-1 leading-relaxed">
+              密钥仅以明文保存在本机浏览器(localStorage),清除浏览器数据即丢失;共享或不可信设备上请谨慎,并优先使用可随时吊销的密钥。
+            </span>
             <button
               type="button"
               onClick={() => setDismissedPlaintextKeyNotice(true)}
@@ -199,7 +252,14 @@ export function ApiProfileSection({
               aria-label="不再提示"
               title="不再提示"
             >
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24" aria-hidden="true">
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.5}
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
               </svg>
             </button>
@@ -215,7 +275,8 @@ export function ApiProfileSection({
             onChange={(value) => {
               const apiMode = value as AppSettings['apiMode']
               const nextModel =
-                activeProfile.model === DEFAULT_IMAGES_MODEL || activeProfile.model === DEFAULT_RESPONSES_MODEL
+                activeProfile.model === DEFAULT_IMAGES_MODEL ||
+                activeProfile.model === DEFAULT_RESPONSES_MODEL
                   ? getDefaultModelForMode(apiMode)
                   : activeProfile.model
               onUpdate({ apiMode, model: nextModel })
@@ -227,15 +288,21 @@ export function ApiProfileSection({
             className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
           />
           <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-            支持通过查询参数覆盖：<code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">apiMode=images</code> 或 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">apiMode=responses</code>。
+            支持通过查询参数覆盖：
+            <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">
+              apiMode=images
+            </code>{' '}
+            或{' '}
+            <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">
+              apiMode=responses
+            </code>
+            。
           </div>
         </label>
       )}
 
       <label className="block">
-        <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-          模型 ID
-        </span>
+        <span className="block text-xs text-gray-500 dark:text-gray-400 mb-1">模型 ID</span>
         <ModelListDropdown
           value={activeProfile.model}
           onChange={(model) => onUpdate({ model })}
@@ -245,16 +312,42 @@ export function ApiProfileSection({
           onOpenChange={setModelListOpen}
           modelList={modelList}
           error={modelListError}
-          placeholder={activeProfile.provider === 'gemini' ? DEFAULT_GEMINI_MODEL : getDefaultModelForMode(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode)}
+          placeholder={
+            activeProfile.provider === 'gemini'
+              ? DEFAULT_GEMINI_MODEL
+              : getDefaultModelForMode(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode)
+          }
           showFetchButton={activeProfile.provider === 'openai'}
         />
         <div data-selectable-text className="mt-1 text-xs text-gray-400 dark:text-gray-500">
           {activeProfile.provider === 'gemini' ? (
-            <>使用 Google 多模态图像模型，例如 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_GEMINI_MODEL}</code>。不支持遮罩与 quality 参数；多图生成会并发拆单。</>
+            <>
+              使用 Google 多模态图像模型，例如{' '}
+              <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">
+                {DEFAULT_GEMINI_MODEL}
+              </code>
+              。不支持遮罩与 quality 参数；多图生成会并发拆单。
+            </>
           ) : (activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode) === 'responses' ? (
-            <>Responses API 需要使用支持 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">image_generation</code> 工具的文本模型，例如 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_RESPONSES_MODEL}</code>。</>
+            <>
+              Responses API 需要使用支持{' '}
+              <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">
+                image_generation
+              </code>{' '}
+              工具的文本模型，例如{' '}
+              <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">
+                {DEFAULT_RESPONSES_MODEL}
+              </code>
+              。
+            </>
           ) : (
-            <>Images API 需要使用 GPT Image 模型，例如 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_IMAGES_MODEL}</code>。</>
+            <>
+              Images API 需要使用 GPT Image 模型，例如{' '}
+              <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">
+                {DEFAULT_IMAGES_MODEL}
+              </code>
+              。
+            </>
           )}
         </div>
       </label>

@@ -3,14 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && node scripts/inject-sw-build-id.mjs && node scripts/verify-csp-hash.mjs",
     "preview": "npm run build && wrangler dev",
     "test": "vitest run",
     "test:watch": "vitest",
-    "deploy": "npm run build && wrangler deploy",
-    "lint": "eslint src",
+    "deploy": "npm run lint && npm test && npm run build && wrangler deploy",
+    "lint": "eslint src scripts public/sw.js",
     "format": "prettier --write src"
   },
   "dependencies": {
@@ -47,6 +50,6 @@
     "wrangler": "^4.90.0"
   },
   "overrides": {
-    "ws": "8.20.1"
+    "ws": "8.21.0"
   }
 }

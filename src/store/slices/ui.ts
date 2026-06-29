@@ -1,5 +1,6 @@
 import type { StateCreator } from 'zustand'
 import type { AppState } from '../index'
+import { MAX_TASK_TEXT_LEN } from '../../lib/tasks'
 
 export interface UiSlice {
   // Sidebar
@@ -75,7 +76,7 @@ export interface UiSlice {
     minConfirmDelayMs?: number
     messageAlign?: 'left' | 'center'
     tone?: 'danger' | 'warning'
-    action: () => void
+    action: () => void | Promise<void>
     cancelAction?: () => void
   } | null
   setConfirmDialog: (d: AppState['confirmDialog']) => void
@@ -83,6 +84,25 @@ export interface UiSlice {
 
 // toast 自增序号:用 id(而非 message 文本)判定计时器是否应清除当前 toast,避免并发同文案误清
 let toastSeq = 0
+
+function normalizeUiId(id: string | null): string | null {
+  return id === null ? null : id.slice(0, MAX_TASK_TEXT_LEN)
+}
+
+function normalizeUiIds(ids: string[] | null, maxItems?: number): string[] | null {
+  if (!ids) return null
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const rawId of ids) {
+    if (typeof rawId !== 'string') continue
+    const id = rawId.slice(0, MAX_TASK_TEXT_LEN)
+    if (seen.has(id)) continue
+    seen.add(id)
+    result.push(id)
+    if (maxItems !== undefined && result.length >= maxItems) break
+  }
+  return result
+}
 
 export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get) => ({
   // Sidebar
@@ -122,13 +142,13 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
 
   // UI
   detailTaskId: null,
-  setDetailTaskId: (id) => set({ detailTaskId: id }),
+  setDetailTaskId: (id) => set({ detailTaskId: normalizeUiId(id) }),
   lightboxImageId: null,
   lightboxImageList: [],
   setLightboxImageId: (lightboxImageId, list) =>
     set(() => ({
-      lightboxImageId,
-      ...(list !== undefined ? { lightboxImageList: list } : {}),
+      lightboxImageId: normalizeUiId(lightboxImageId),
+      ...(list !== undefined ? { lightboxImageList: normalizeUiIds(list) ?? [] } : {}),
     })),
   showSettings: false,
   setShowSettings: (showSettings) => set({ showSettings }),
@@ -137,11 +157,13 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   showCommandPalette: false,
   setShowCommandPalette: (showCommandPalette) => set({ showCommandPalette }),
   compareTaskIds: null,
-  setCompareTaskIds: (compareTaskIds) => set({ compareTaskIds }),
+  setCompareTaskIds: (compareTaskIds) =>
+    set({ compareTaskIds: normalizeUiIds(compareTaskIds, 4) }),
   lineageTaskId: null,
-  setLineageTaskId: (lineageTaskId) => set({ lineageTaskId }),
+  setLineageTaskId: (lineageTaskId) => set({ lineageTaskId: normalizeUiId(lineageTaskId) }),
   captionBatchImageIds: null,
-  setCaptionBatchImageIds: (captionBatchImageIds) => set({ captionBatchImageIds }),
+  setCaptionBatchImageIds: (captionBatchImageIds) =>
+    set({ captionBatchImageIds: normalizeUiIds(captionBatchImageIds) }),
   captionSource: null,
   setCaptionSource: (captionSource) => set({ captionSource }),
 
@@ -149,7 +171,7 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   toast: null,
   showToast: (message, type = 'info') => {
     const id = ++toastSeq
-    set({ toast: { id, message, type } })
+    set({ toast: { id, message: message.slice(0, MAX_TASK_TEXT_LEN), type } })
     // 错误停留更久:错误文案常含需要读完/复制的关键信息,3 秒来不及
     setTimeout(() => {
       if (get().toast?.id === id) set({ toast: null })

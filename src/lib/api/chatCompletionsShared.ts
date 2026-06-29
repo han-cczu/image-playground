@@ -1,5 +1,10 @@
+import { MAX_TASK_TEXT_LEN } from '../tasks'
 import { normalizeBaseUrl } from './devProxy'
 import { isHttpUrl } from './imageApiShared'
+
+const MAX_CHAT_ERROR_BODY_BYTES = 64 * 1024
+const MAX_CHAT_STREAM_RAW_LEN = 64 * 1024
+export const MAX_SET_TIMEOUT_MS = 2_147_483_647
 
 /**
  * 构造 OpenAI 兼容 chat completions 端点 URL。
@@ -21,7 +26,218 @@ export function buildChatCompletionsUrl(baseUrl: string): string {
 export function resolveChatTimeoutMs(timeoutSeconds: number, fallbackSeconds: number): number {
   const seconds =
     Number.isFinite(timeoutSeconds) && timeoutSeconds > 0 ? timeoutSeconds : fallbackSeconds
-  return seconds * 1000
+  return Math.min(seconds * 1000, MAX_SET_TIMEOUT_MS)
+}
+
+export function isAbortError(error: unknown): boolean {
+  return (error as { name?: string } | null)?.name === 'AbortError'
+}
+
+export function isTimeoutAbort(error: unknown, timeoutSignal: AbortSignal): boolean {
+  return timeoutSignal.aborted || isAbortError(error)
+}
+
+export function wrapCause(message: string, cause: unknown): Error {
+  return cause instanceof Error ? new Error(message, { cause }) : new Error(message)
+}
+
+export function appendCappedStreamText(
+  current: string,
+  delta: string,
+  onDelta?: (chunk: string) => void,
+): string {
+  const remaining = MAX_TASK_TEXT_LEN - current.length
+  if (remaining <= 0) return current
+
+  const accepted = delta.slice(0, remaining)
+  if (accepted) onDelta?.(accepted)
+  return current + accepted
+}
+
+export function appendCappedStreamRaw(current: string, chunk: string): string {
+  if (current.length >= MAX_CHAT_STREAM_RAW_LEN) return current
+  return (current + chunk).slice(0, MAX_CHAT_STREAM_RAW_LEN)
+}
+
+export function readStreamChunkWithAbort<T>(
+  reader: ReadableStreamDefaultReader<T>,
+  timeoutSignal: AbortSignal,
+  externalSignal?: AbortSignal,
+): Promise<ReadableStreamReadResult<T>> {
+  return new Promise((resolve, reject) => {
+    const onExternalAbort = () => {
+      cleanup()
+      try {
+        void reader.cancel?.().catch(() => undefined)
+      } catch {
+        /* Reader cancellation is best-effort; preserve the abort error. */
+      }
+      reject(wrapCause('已取消', externalSignal?.reason))
+    }
+    const onTimeoutAbort = () => {
+      cleanup()
+      try {
+        void reader.cancel?.().catch(() => undefined)
+      } catch {
+        /* Reader cancellation is best-effort; preserve the timeout error. */
+      }
+      if (externalSignal?.aborted) reject(wrapCause('已取消', externalSignal.reason))
+      else reject(wrapCause('请求超时', timeoutSignal.reason))
+    }
+    const cleanup = () => {
+      externalSignal?.removeEventListener('abort', onExternalAbort)
+      timeoutSignal.removeEventListener('abort', onTimeoutAbort)
+    }
+
+    if (externalSignal?.aborted) {
+      reject(wrapCause('已取消', externalSignal.reason))
+      return
+    }
+    if (timeoutSignal.aborted) {
+      if (externalSignal?.aborted) reject(wrapCause('已取消', externalSignal.reason))
+      else reject(wrapCause('请求超时', timeoutSignal.reason))
+      return
+    }
+
+    externalSignal?.addEventListener('abort', onExternalAbort, { once: true })
+    timeoutSignal.addEventListener('abort', onTimeoutAbort, { once: true })
+    try {
+      reader.read().then(resolve, reject).finally(cleanup)
+    } catch (err) {
+      cleanup()
+      reject(err)
+    }
+  })
+}
+
+function readTextWithAbort(
+  response: Response,
+  timeoutSignal: AbortSignal,
+  externalSignal?: AbortSignal,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const onExternalAbort = () => {
+      cleanup()
+      reject(wrapCause('已取消', externalSignal?.reason))
+    }
+    const onTimeoutAbort = () => {
+      cleanup()
+      if (externalSignal?.aborted) reject(wrapCause('已取消', externalSignal.reason))
+      else reject(wrapCause('请求超时', timeoutSignal.reason))
+    }
+    const cleanup = () => {
+      externalSignal?.removeEventListener('abort', onExternalAbort)
+      timeoutSignal.removeEventListener('abort', onTimeoutAbort)
+    }
+
+    if (externalSignal?.aborted) {
+      reject(wrapCause('已取消', externalSignal.reason))
+      return
+    }
+    if (timeoutSignal.aborted) {
+      if (externalSignal?.aborted) {
+        reject(wrapCause('已取消', externalSignal.reason))
+        return
+      }
+      reject(wrapCause('请求超时', timeoutSignal.reason))
+      return
+    }
+
+    externalSignal?.addEventListener('abort', onExternalAbort, { once: true })
+    timeoutSignal.addEventListener('abort', onTimeoutAbort, { once: true })
+    try {
+      response.text().then(resolve, reject).finally(cleanup)
+    } catch (err) {
+      cleanup()
+      reject(err)
+    }
+  })
+}
+
+async function readLimitedStreamTextWithAbort(
+  response: Response,
+  timeoutSignal: AbortSignal,
+  externalSignal?: AbortSignal,
+): Promise<string> {
+  if (externalSignal?.aborted) throw wrapCause('已取消', externalSignal.reason)
+  if (timeoutSignal.aborted) throw wrapCause('请求超时', timeoutSignal.reason)
+
+  const contentLength = Number(response.headers?.get('Content-Length'))
+  if (Number.isFinite(contentLength) && contentLength > MAX_CHAT_ERROR_BODY_BYTES) return ''
+
+  const body = response.body
+  if (!body) {
+    return (await readTextWithAbort(response, timeoutSignal, externalSignal)).slice(
+      0,
+      MAX_CHAT_ERROR_BODY_BYTES,
+    )
+  }
+
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  let bytesRead = 0
+
+  try {
+    while (bytesRead < MAX_CHAT_ERROR_BODY_BYTES) {
+      const { done, value } = await readStreamChunkWithAbort(reader, timeoutSignal, externalSignal)
+      if (done) break
+      if (!value?.byteLength) continue
+
+      const remaining = MAX_CHAT_ERROR_BODY_BYTES - bytesRead
+      const chunk = value.byteLength > remaining ? value.slice(0, remaining) : value
+      bytesRead += chunk.byteLength
+      text += decoder.decode(chunk, { stream: bytesRead < MAX_CHAT_ERROR_BODY_BYTES })
+      if (value.byteLength > remaining) break
+    }
+
+    text += decoder.decode()
+    if (bytesRead >= MAX_CHAT_ERROR_BODY_BYTES) {
+      await reader.cancel().catch(() => undefined)
+    }
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch {
+      /* Ignore cleanup errors so they do not mask timeout/cancel errors. */
+    }
+  }
+
+  return text
+}
+
+/**
+ * 读取非 2xx 错误体。普通读体失败退化为空字符串,但 abort 不能被吞:
+ * - externalSignal abort => 用户主动取消
+ * - timeoutSignal abort / AbortError => 请求超时
+ */
+export async function readChatErrorBody(
+  response: Response,
+  timeoutSignal: AbortSignal,
+  externalSignal?: AbortSignal,
+): Promise<string> {
+  let text: string
+  try {
+    if (externalSignal?.aborted) throw wrapCause('已取消', externalSignal.reason)
+    if (timeoutSignal.aborted) throw wrapCause('请求超时', timeoutSignal.reason)
+    const contentLength = Number(response.headers?.get('Content-Length'))
+    if (Number.isFinite(contentLength) && contentLength > MAX_CHAT_ERROR_BODY_BYTES) return ''
+    text = response.body
+      ? await readLimitedStreamTextWithAbort(response, timeoutSignal, externalSignal)
+      : (await readTextWithAbort(response, timeoutSignal, externalSignal)).slice(
+          0,
+          MAX_CHAT_ERROR_BODY_BYTES,
+        )
+  } catch (err) {
+    if (err instanceof Error && (err.message === '已取消' || err.message === '请求超时')) throw err
+    if (externalSignal?.aborted) throw wrapCause('已取消', err)
+    if (isTimeoutAbort(err, timeoutSignal)) throw wrapCause('请求超时', err)
+    return ''
+  }
+
+  if (externalSignal?.aborted) throw wrapCause('已取消', externalSignal.reason)
+  if (timeoutSignal.aborted) throw wrapCause('请求超时', timeoutSignal.reason)
+  return text
 }
 
 /**
@@ -47,7 +263,9 @@ export function extractStreamErrorMessage(raw: string): string | null {
         message?: unknown
       }
       const message =
-        (parsed.error && typeof parsed.error === 'object' && typeof parsed.error.message === 'string'
+        (parsed.error &&
+        typeof parsed.error === 'object' &&
+        typeof parsed.error.message === 'string'
           ? parsed.error.message
           : '') ||
         (typeof parsed.error === 'string' ? parsed.error : '') ||

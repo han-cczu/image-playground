@@ -5,7 +5,7 @@ export interface SubmitButtonProps {
   hasMask: boolean
   hover: boolean
   onHoverChange: (hover: boolean) => void
-  onSubmit: () => void
+  onSubmit: () => void | Promise<void>
   onOpenSettings: () => void
   needsConfig: boolean
 }
@@ -19,6 +19,19 @@ export default function SubmitButton({
   onOpenSettings,
   needsConfig,
 }: SubmitButtonProps) {
+  const handleClick = () => {
+    if (needsConfig) {
+      onOpenSettings()
+      return
+    }
+    const result = onSubmit()
+    if (result) {
+      void result.catch(() => {
+        /* submitTask surfaces recoverable errors via toast */
+      })
+    }
+  }
+
   return (
     <div
       data-tour-id="submit"
@@ -29,7 +42,7 @@ export default function SubmitButton({
       <ButtonTooltip visible={needsConfig && hover} text="尚未完成 API 配置，请点 sidebar 底部齿轮按钮打开设置" />
       <button
         type="button"
-        onClick={() => (needsConfig ? onOpenSettings() : onSubmit())}
+        onClick={handleClick}
         disabled={needsConfig ? false : !canSubmit}
         className={`flex h-11 w-11 items-center justify-center rounded-2xl transition-all ${
           needsConfig

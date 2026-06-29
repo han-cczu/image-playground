@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useLatestRef } from './useLatestRef'
 
 /**
  * 全局 ESC 栈：每个模态注册时入栈，只有栈顶的 handler 会被调用。
@@ -30,8 +31,7 @@ function ensureListener() {
 
 export function useCloseOnEscape(enabled: boolean, onClose: () => void) {
   const idRef = useRef<number | null>(null)
-  const handlerRef = useRef(onClose)
-  handlerRef.current = onClose
+  const handlerRef = useLatestRef(onClose)
 
   useEffect(() => {
     if (!enabled) {
@@ -54,5 +54,5 @@ export function useCloseOnEscape(enabled: boolean, onClose: () => void) {
       if (idx !== -1) escStack.splice(idx, 1)
       idRef.current = null
     }
-  }, [enabled])
+  }, [enabled, handlerRef])
 }
