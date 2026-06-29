@@ -39,6 +39,21 @@ function createDeferred<T = void>() {
   return { promise, resolve, reject }
 }
 
+function imageResponse(body = 'image', init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers)
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'image/png')
+  return new Response(body, {
+    ...init,
+    headers,
+  })
+}
+
+function htmlResponse(body = '<html></html>'): Response {
+  return new Response(body, {
+    headers: { 'Content-Type': 'text/html' },
+  })
+}
+
 describe('ImageContextMenu', () => {
   afterEach(() => {
     cleanup()
@@ -69,9 +84,7 @@ describe('ImageContextMenu', () => {
     })
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['image'], { type: 'image/png' }), {
-        headers: { 'Content-Type': 'image/png' },
-      })),
+      vi.fn(async () => imageResponse()),
     )
     vi.stubGlobal(
       'matchMedia',
@@ -106,7 +119,7 @@ describe('ImageContextMenu', () => {
     })
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['missing'], { type: 'image/png' }), { status: 404 })),
+      vi.fn(async () => imageResponse('missing', { status: 404 })),
     )
     vi.stubGlobal(
       'matchMedia',
@@ -139,7 +152,7 @@ describe('ImageContextMenu', () => {
     })
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['<html></html>'], { type: 'text/html' }))),
+      vi.fn(async () => htmlResponse()),
     )
     vi.stubGlobal(
       'matchMedia',
@@ -208,7 +221,7 @@ describe('ImageContextMenu', () => {
     clipboardMocks.copyBlobToClipboard.mockResolvedValue(undefined)
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['missing'], { type: 'image/png' }), { status: 404 })),
+      vi.fn(async () => imageResponse('missing', { status: 404 })),
     )
     vi.stubGlobal(
       'matchMedia',
@@ -237,7 +250,7 @@ describe('ImageContextMenu', () => {
     clipboardMocks.copyBlobToClipboard.mockResolvedValue(undefined)
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['<html></html>'], { type: 'text/html' }))),
+      vi.fn(async () => htmlResponse()),
     )
     vi.stubGlobal(
       'matchMedia',
@@ -346,9 +359,7 @@ describe('ImageContextMenu', () => {
     clipboardMocks.copyBlobToClipboard.mockReturnValueOnce(copy.promise)
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['image'], { type: 'image/png' }), {
-        headers: { 'Content-Type': 'image/png' },
-      })),
+      vi.fn(async () => imageResponse()),
     )
     vi.stubGlobal(
       'matchMedia',
@@ -387,9 +398,7 @@ describe('ImageContextMenu', () => {
     clipboardMocks.copyBlobToClipboard.mockReturnValueOnce(copy.promise)
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['image'], { type: 'image/png' }), {
-        headers: { 'Content-Type': 'image/png' },
-      })),
+      vi.fn(async () => imageResponse()),
     )
     vi.stubGlobal(
       'matchMedia',
@@ -513,9 +522,7 @@ describe('ImageContextMenu', () => {
     })
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['small'], { type: 'image/png' }), {
-        headers: { 'Content-Type': 'image/png' },
-      })),
+      vi.fn(async () => imageResponse('small')),
     )
     vi.stubGlobal(
       'matchMedia',

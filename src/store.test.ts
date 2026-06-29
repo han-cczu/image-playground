@@ -629,7 +629,10 @@ describe('task runtime reliability', () => {
       'fetch',
       vi.fn(
         async () =>
-          new Response(new Blob(['server error'], { type: 'image/png' }), { status: 500 }),
+          new Response('server error', {
+            status: 500,
+            headers: { 'Content-Type': 'image/png' },
+          }),
       ),
     )
 

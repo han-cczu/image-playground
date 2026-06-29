@@ -89,6 +89,15 @@ function createDeferred<T = void>() {
   return { promise, resolve, reject }
 }
 
+function imageResponse(body = 'image', init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers)
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'image/png')
+  return new Response(body, {
+    ...init,
+    headers,
+  })
+}
+
 describe('InfoPanel', () => {
   afterEach(() => {
     cleanup()
@@ -123,10 +132,7 @@ describe('InfoPanel', () => {
   it('does not copy a reference image when fetching it fails', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(
-        async () =>
-          new Response(new Blob(['not found'], { type: 'image/png' }), { status: 404 }),
-      ),
+      vi.fn(async () => imageResponse('not found', { status: 404 })),
     )
 
     render(
@@ -294,9 +300,7 @@ describe('InfoPanel', () => {
     mocks.copyBlobToClipboard.mockReturnValueOnce(copy.promise)
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['image'], { type: 'image/png' }), {
-        headers: { 'Content-Type': 'image/png' },
-      })),
+      vi.fn(async () => imageResponse()),
     )
 
     render(

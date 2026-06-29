@@ -33,6 +33,12 @@ vi.mock('./image/canvasImage', async (importOriginal) => {
 
 import { addImageFromFile, addImageFromUrl } from './taskRuntime'
 
+function imageResponse(body = 'image'): Response {
+  return new Response(body, {
+    headers: { 'Content-Type': 'image/png' },
+  })
+}
+
 describe('addImageFromUrl', () => {
   beforeEach(() => {
     vi.mocked(storeImage).mockReset()
@@ -51,9 +57,7 @@ describe('addImageFromUrl', () => {
   it('stores a valid remote image and adds it to input images', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['image'], { type: 'image/png' }), {
-        headers: { 'Content-Type': 'image/png' },
-      })),
+      vi.fn(async () => imageResponse()),
     )
 
     await addImageFromUrl('https://example.test/image.png')
@@ -74,9 +78,7 @@ describe('addImageFromUrl', () => {
   it('rejects duplicate remote images instead of resolving without adding a reference', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['image'], { type: 'image/png' }), {
-        headers: { 'Content-Type': 'image/png' },
-      })),
+      vi.fn(async () => imageResponse()),
     )
     useStore.setState({
       inputImages: [{ id: 'stored-image-id', dataUrl: 'data:image/png;base64,existing' }],
@@ -92,9 +94,7 @@ describe('addImageFromUrl', () => {
   })
 
   it('rejects immediately when the input image list is already full', async () => {
-    const fetchMock = vi.fn(async () => new Response(new Blob(['image'], { type: 'image/png' }), {
-      headers: { 'Content-Type': 'image/png' },
-    }))
+    const fetchMock = vi.fn(async () => imageResponse())
     vi.stubGlobal('fetch', fetchMock)
     useStore.setState({
       inputImages: Array.from({ length: MAX_INPUT_IMAGES_PER_SUBMISSION }, (_, index) => ({
@@ -114,9 +114,7 @@ describe('addImageFromUrl', () => {
   it('rolls back a stored remote image when the list becomes full before it is added', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(new Blob(['image'], { type: 'image/png' }), {
-        headers: { 'Content-Type': 'image/png' },
-      })),
+      vi.fn(async () => imageResponse()),
     )
     useStore.setState({
       inputImages: Array.from({ length: MAX_INPUT_IMAGES_PER_SUBMISSION - 1 }, (_, index) => ({
