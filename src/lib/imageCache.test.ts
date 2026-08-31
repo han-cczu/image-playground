@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   _MAX_ENTRIES_FOR_TESTING,
-  _MAX_TOTAL_CHARS_FOR_TESTING,
+  _MAX_TOTAL_BYTES_FOR_TESTING,
   _getCacheKeysInOrderForTesting,
   _getDeletedVersionCountForTesting,
   _getCacheSizeForTesting,
-  _getCacheTotalCharsForTesting,
-  _setMaxTotalCharsForTesting,
+  _getCacheTotalBytesForTesting,
+  _setMaxTotalBytesForTesting,
   clearImageCache,
   deleteCachedImage,
   evictCachedImageDataUrl,
@@ -58,7 +58,7 @@ describe('imageCache', () => {
   })
 
   afterEach(() => {
-    _setMaxTotalCharsForTesting(_MAX_TOTAL_CHARS_FOR_TESTING)
+    _setMaxTotalBytesForTesting(_MAX_TOTAL_BYTES_FOR_TESTING)
     clearImageCache()
   })
 
@@ -103,7 +103,8 @@ describe('imageCache', () => {
   })
 
   it('evicts least-recently-used entries when total cached data exceeds the byte budget', () => {
-    _setMaxTotalCharsForTesting(128)
+    // 预算按驻留字节计(UTF-16,每字符 2 字节):单条 102 字符 = 204 字节,预算 256 容一条、容不下两条
+    _setMaxTotalBytesForTesting(256)
     const big = 'x'.repeat(80)
 
     setCachedImage('a', `data:image/png;base64,${big}`)
@@ -111,7 +112,7 @@ describe('imageCache', () => {
 
     expect(getCachedImage('a')).toBeUndefined()
     expect(getCachedImage('b')).toBe(`data:image/png;base64,${big}`)
-    expect(_getCacheTotalCharsForTesting()).toBe(`data:image/png;base64,${big}`.length)
+    expect(_getCacheTotalBytesForTesting()).toBe(`data:image/png;base64,${big}`.length * 2)
   })
 
   it('access protects from eviction', () => {
@@ -154,7 +155,7 @@ describe('imageCache', () => {
     setCachedImage('b', 'data:b')
     clearImageCache()
     expect(_getCacheSizeForTesting()).toBe(0)
-    expect(_getCacheTotalCharsForTesting()).toBe(0)
+    expect(_getCacheTotalBytesForTesting()).toBe(0)
     expect(clearImageObjectUrlCache).toHaveBeenCalled()
   })
 

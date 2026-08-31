@@ -2,16 +2,22 @@ import { getImage, storedImageToDataUrl } from './db'
 import { clearImageObjectUrlCache, deleteImageObjectUrl } from './objectUrlCache'
 
 /**
- * 图片 dataUrl 内存缓存。LRU 策略：超过条数或累计字符预算时驱逐最久未访问项。
+ * 图片 dataUrl 内存缓存。LRU 策略：超过条数或累计字节预算时驱逐最久未访问项。
  * 利用 Map 的插入顺序 = 访问顺序：每次 get/set 命中时先 delete 再 set，
  * 最近访问的项始终在末尾。
+ *
+ * 预算按「驻留字节」计:JS 字符串是 UTF-16,每字符 2 字节——此前按字符数计数,
+ * 96M「字符」实际驻留 ≈192MB 堆(2026-06-10 审查遗留 low 项),口径修正后同一常量
+ * 语义变为真实内存占用上限。
  */
 const MAX_ENTRIES = 100
-const DEFAULT_MAX_TOTAL_CHARS = 96 * 1024 * 1024
+const DEFAULT_MAX_TOTAL_BYTES = 96 * 1024 * 1024
+/** dataUrl 主体是 base64 ASCII,V8 仍按 UTF-16 存储:驻留字节 = length × 2 */
+const BYTES_PER_CHAR = 2
 const imageCache = new Map<string, string>()
 const inFlightLoads = new Map<string, Promise<string | undefined>>()
-let maxTotalChars = DEFAULT_MAX_TOTAL_CHARS
-let cacheTotalChars = 0
+let maxTotalBytes = DEFAULT_MAX_TOTAL_BYTES
+let cacheTotalBytes = 0
 // 每次 clearImageCache 自增;ensureImageCached 用它判断 await 期间缓存是否被清空,避免把已删图写回(僵尸缓存)。
 let cacheEpoch = 0
 const deletedImageVersions = new Map<string, number>()
@@ -19,7 +25,7 @@ const activeLoadTokens = new Map<string, Set<symbol>>()
 
 function deleteCacheEntry(id: string): void {
   const existing = imageCache.get(id)
-  if (existing !== undefined) cacheTotalChars -= existing.length
+  if (existing !== undefined) cacheTotalBytes -= existing.length * BYTES_PER_CHAR
   imageCache.delete(id)
 }
 
@@ -27,11 +33,11 @@ function touch(id: string, dataUrl: string): void {
   // 命中即移到末尾，标记为最近使用
   deleteCacheEntry(id)
   imageCache.set(id, dataUrl)
-  cacheTotalChars += dataUrl.length
+  cacheTotalBytes += dataUrl.length * BYTES_PER_CHAR
 }
 
 function evictIfOverflow(): void {
-  while (imageCache.size > MAX_ENTRIES || cacheTotalChars > maxTotalChars) {
+  while (imageCache.size > MAX_ENTRIES || cacheTotalBytes > maxTotalBytes) {
     const oldest = imageCache.keys().next().value
     if (oldest === undefined) break
     deleteCacheEntry(oldest)
@@ -101,7 +107,7 @@ export function deleteCachedImage(id: string): void {
 
 export function clearImageCache(): void {
   imageCache.clear()
-  cacheTotalChars = 0
+  cacheTotalBytes = 0
   inFlightLoads.clear()
   clearImageObjectUrlCache()
   cacheEpoch++
@@ -114,8 +120,8 @@ export function _getCacheSizeForTesting(): number {
   return imageCache.size
 }
 
-export function _getCacheTotalCharsForTesting(): number {
-  return cacheTotalChars
+export function _getCacheTotalBytesForTesting(): number {
+  return cacheTotalBytes
 }
 
 export function _getCacheEpochForTesting(): number {
@@ -131,10 +137,10 @@ export function _getDeletedVersionCountForTesting(): number {
 }
 
 export const _MAX_ENTRIES_FOR_TESTING = MAX_ENTRIES
-export const _MAX_TOTAL_CHARS_FOR_TESTING = DEFAULT_MAX_TOTAL_CHARS
+export const _MAX_TOTAL_BYTES_FOR_TESTING = DEFAULT_MAX_TOTAL_BYTES
 
-export function _setMaxTotalCharsForTesting(value: number): void {
-  maxTotalChars =
-    Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_MAX_TOTAL_CHARS
+export function _setMaxTotalBytesForTesting(value: number): void {
+  maxTotalBytes =
+    Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_MAX_TOTAL_BYTES
   evictIfOverflow()
 }

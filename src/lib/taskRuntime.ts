@@ -84,6 +84,11 @@ export function resetTaskRuntimeForTest(): void {
   syncHttpWatchdogTimers.clear()
   taskAbortControllers.clear()
   initStorePromise = null
+  pendingStartupOrphanGc = null
+  if (startupOrphanGcTimer !== null) {
+    clearTimeout(startupOrphanGcTimer)
+    startupOrphanGcTimer = null
+  }
 }
 export const SYNC_HTTP_INTERRUPTED_ERROR = '请求中断'
 const TASK_CANCELLED_ERROR = '已取消生成'
@@ -408,7 +413,86 @@ export function showCodexCliPrompt(force = false, reason = '接口返回的提�
   })
 }
 
-/** 初始化：加载 conversations → 跑迁移 → 加载 tasks → 激活默认对话 → 清理孤立图片 */
+/**
+ * 启动期孤儿图 GC 的调度与频控。
+ *
+ * 为什么不再在 initStore 里同步 await:游标扫全 images 表在大库(数千张图)上是每次冷启动的
+ * IO 尖刺(2026-06-10 审查报告 C1 轮已知遗留),而孤儿本身只是「良性存储泄漏」——晚删一天
+ * 没有任何用户可见后果。故改为:24h 频控(localStorage 时间戳) + 空闲期执行(requestIdleCallback,
+ * Safari 无 rIC 时退化为固定延迟),把扫表挪出首屏关键路径。
+ *
+ * 误删侧的双层守卫不变、且都推迟到「真正执行的时刻」评估:
+ *  1. 执行时重读 store 最新引用集(此刻 initStore 已写完 store,天然覆盖 init 窗口内新增的引用);
+ *  2. pruneOrphanImages 只删 createdAt < initStartedAt 的图,放过本次启动之后写入的新图。
+ * 最坏情况仍只是漏删(下个符合频控条件的启动补收),绝不误删在用图。
+ */
+export const ORPHAN_GC_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000
+const ORPHAN_GC_LAST_RUN_KEY = 'image-playground.lastOrphanGcAt'
+/** 无 requestIdleCallback 的环境(Safari)退化为固定延迟,避开首屏渲染与首批封面加载 */
+const ORPHAN_GC_FALLBACK_DELAY_MS = 5_000
+/** rIC 的兜底触发上限:页面长期无空闲帧时也要在此时限内跑到 */
+const ORPHAN_GC_IDLE_TIMEOUT_MS = 30_000
+
+let pendingStartupOrphanGc: (() => Promise<void>) | null = null
+let startupOrphanGcTimer: ReturnType<typeof setTimeout> | null = null
+
+function shouldRunStartupOrphanGc(now: number): boolean {
+  try {
+    const raw = localStorage.getItem(ORPHAN_GC_LAST_RUN_KEY)
+    if (raw !== null) {
+      const last = Number(raw)
+      // 时间戳落在未来(时钟回拨/脏数据)视为无效:照常执行并在完成后覆写
+      if (Number.isFinite(last) && last <= now && now - last < ORPHAN_GC_MIN_INTERVAL_MS)
+        return false
+    }
+  } catch {
+    /* localStorage 不可用(隐私模式等):退回每次启动执行,与旧行为一致 */
+  }
+  return true
+}
+
+function scheduleStartupOrphanGc(initStartedAt: number): void {
+  if (!shouldRunStartupOrphanGc(initStartedAt)) return
+  pendingStartupOrphanGc = async () => {
+    const latestState = useStore.getState()
+    const referencedIds = collectReferencedImageIds(latestState.tasks, latestState.inputImages)
+    await pruneOrphanImages(referencedIds, initStartedAt)
+    try {
+      localStorage.setItem(ORPHAN_GC_LAST_RUN_KEY, String(Date.now()))
+    } catch {
+      /* 写失败仅影响频控,不影响本次清理结果 */
+    }
+  }
+  const kick = () => {
+    const pending = pendingStartupOrphanGc
+    pendingStartupOrphanGc = null
+    startupOrphanGcTimer = null
+    // GC 失败不再向上冒泡(旧实现会连累 initStore 走失败 banner):清理失败不该被当成「数据可能丢失」
+    if (pending) void pending().catch((err) => console.error('孤儿图片清理失败:', err))
+  }
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(kick, { timeout: ORPHAN_GC_IDLE_TIMEOUT_MS })
+  } else {
+    const timer = setTimeout(kick, ORPHAN_GC_FALLBACK_DELAY_MS)
+    startupOrphanGcTimer = timer
+    // node 测试环境下不阻塞进程退出;浏览器 setTimeout 返回 number,无 unref(DOM lib 类型如此,故经 unknown 探测)
+    const maybeUnref = timer as unknown as { unref?: () => void }
+    if (typeof maybeUnref?.unref === 'function') maybeUnref.unref()
+  }
+}
+
+/** 仅测试用:绕过 idle 调度立即执行待运行的启动期孤儿 GC(无待运行任务时为 no-op) */
+export async function __runPendingStartupOrphanGcForTests(): Promise<void> {
+  const pending = pendingStartupOrphanGc
+  pendingStartupOrphanGc = null
+  if (startupOrphanGcTimer !== null) {
+    clearTimeout(startupOrphanGcTimer)
+    startupOrphanGcTimer = null
+  }
+  if (pending) await pending()
+}
+
+/** 初始化：加载 conversations → 跑迁移 → 加载 tasks → 激活默认对话 → 调度孤儿图清理 */
 export async function initStore() {
   if (initStorePromise) return initStorePromise
   initStorePromise = initStoreOnce().finally(() => {
@@ -510,18 +594,11 @@ async function initStoreOnce() {
     useStore.getState().setActiveConversation(nextActive?.id ?? null)
   }
 
-  const tasks = finalTasks
+  // 孤儿图清理移出关键路径:此刻 store 已写完,交给空闲期调度(引用集判定推迟到执行时刻,
+  // 见 scheduleStartupOrphanGc 头注释;与孤儿 GC / 存储统计共用 collectReferencedImageIds 判定)
+  scheduleStartupOrphanGc(initStartedAt)
 
-  // 收集所有任务引用的图片 id（与孤儿 GC / 存储统计共用同一判定，见 lib/storageStats）
   const persistedInputImages = useStore.getState().inputImages
-  const referencedIds = collectReferencedImageIds(tasks, persistedInputImages)
-
-  // 删除前重读最新引用集:init 的多个 await 窗口里,本页提交或另一标签页可能已新增引用 / 写入新图。
-  // 叠加 createdAt >= initStartedAt 守卫,放过 init 期间另一标签刚 storeImage 但其 task 尚未被本页读到的新图。
-  // 两层互补,最坏只漏删孤儿(良性存储泄漏),绝不误删在用图。
-  const latestState = useStore.getState()
-  const latestReferencedIds = collectReferencedImageIds(latestState.tasks, latestState.inputImages)
-  await pruneOrphanImages(new Set([...referencedIds, ...latestReferencedIds]), initStartedAt)
 
   // 输入图片需要立即可用（用于显示在输入栏），仍然缓存这部分
   const restoredInputImages = (

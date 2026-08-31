@@ -26,7 +26,12 @@ import { getAllConversations, getAllImages, getAllTasks, getImage, putConversati
 import { ARCHIVE_CONVERSATION_ID, CONVERSATION_MIGRATION_VERSION } from './conversations'
 import { pruneOrphanImages } from './storageStats'
 import { useStore } from '../store'
-import { initStore, resetTaskRuntimeForTest } from './taskRuntime'
+import {
+  __runPendingStartupOrphanGcForTests,
+  initStore,
+  ORPHAN_GC_MIN_INTERVAL_MS,
+  resetTaskRuntimeForTest,
+} from './taskRuntime'
 
 const storedInputImage: InputImage = { id: 'input-a', dataUrl: '' }
 
@@ -126,7 +131,30 @@ describe('initStore image cleanup', () => {
     await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined])
 
     expect(getAllConversations).toHaveBeenCalledTimes(1)
+    // GC 已改为 init 完成后的空闲期调度:flush 前不执行,flush 后合并的两次 init 也只跑一次
+    expect(pruneOrphanImages).not.toHaveBeenCalled()
+    await __runPendingStartupOrphanGcForTests()
     expect(pruneOrphanImages).toHaveBeenCalledTimes(1)
+  })
+
+  it('throttles startup orphan GC to once per interval and re-runs after it elapses', async () => {
+    await initStore()
+    await __runPendingStartupOrphanGcForTests()
+    expect(pruneOrphanImages).toHaveBeenCalledTimes(1)
+
+    // 频控周期内的下一次启动:不调度(lastOrphanGcAt 在首次执行完成时写入,= 假时钟 10_000)
+    resetTaskRuntimeForTest()
+    vi.setSystemTime(10_000 + ORPHAN_GC_MIN_INTERVAL_MS - 1)
+    await initStore()
+    await __runPendingStartupOrphanGcForTests()
+    expect(pruneOrphanImages).toHaveBeenCalledTimes(1)
+
+    // 周期已过:重新调度
+    resetTaskRuntimeForTest()
+    vi.setSystemTime(10_000 + ORPHAN_GC_MIN_INTERVAL_MS + 1)
+    await initStore()
+    await __runPendingStartupOrphanGcForTests()
+    expect(pruneOrphanImages).toHaveBeenCalledTimes(2)
   })
 
   it('normalizes persisted tasks before exposing them to the store and image pruning', async () => {
@@ -160,6 +188,7 @@ describe('initStore image cleanup', () => {
         gridCoord: undefined,
       }),
     ])
+    await __runPendingStartupOrphanGcForTests()
     expect(pruneOrphanImages).toHaveBeenCalledWith(new Set(['kept-input']), 10_000)
   })
 
@@ -181,6 +210,7 @@ describe('initStore image cleanup', () => {
     await initStore()
 
     expect(getAllImages).not.toHaveBeenCalled()
+    await __runPendingStartupOrphanGcForTests()
     expect(pruneOrphanImages).toHaveBeenCalledWith(
       new Set(['input-a', 'task-input', 'task-output']),
       10_000,
