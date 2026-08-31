@@ -157,7 +157,9 @@ function createImportFileWithPatchedOriginalSizes(
   images: Record<string, Uint8Array>,
   sizes: Record<string, number>,
 ) {
-  let zipped = zipSync({
+  // 显式放宽为 Uint8Array<ArrayBufferLike>:fflate 0.8.3 起 zipSync 返回 Uint8Array<ArrayBuffer>,
+  // 而 patch helper 返回泛型默认的 ArrayBufferLike,直接复用 let 推断会在再赋值处报 TS2322
+  let zipped: Uint8Array = zipSync({
     'manifest.json': strToU8(JSON.stringify(data)),
     ...images,
   })
