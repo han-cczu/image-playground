@@ -4,7 +4,13 @@ import { DEFAULT_SETTINGS } from './api/apiProfiles'
 import type { ExportData, TaskRecord } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { useStore } from '../store'
-import { clearAllData, exportData, importData, redactSettingsForExport } from './exportImport'
+import {
+  __unzipImportArchiveForTests,
+  clearAllData,
+  exportData,
+  importData,
+  redactSettingsForExport,
+} from './exportImport'
 import { DEFAULT_FAVORITE_CATEGORY_COLOR } from './favoriteCategories'
 import {
   clearConversations,
@@ -116,6 +122,13 @@ function patchCentralDirectoryOriginalSize(
     const name = strFromU8(copy.subarray(offset + 46, offset + 46 + nameLen))
     if (name === fileName) {
       view.setUint32(offset + 24, originalSize, true)
+      // 同步补丁 local header 的声明尺寸:导入改用流式 Unzip 后读的是 local header
+      // (高层 unzip 读 central directory),两处一起伪造才能覆盖「声明超限 → 跳过」路径。
+      const localOffset = view.getUint32(offset + 42, true)
+      if (view.getUint32(localOffset, true) !== 0x04034b50) {
+        throw new Error('local header not found')
+      }
+      view.setUint32(localOffset + 22, originalSize, true)
       return copy
     }
     offset += 46 + nameLen + extraLen + commentLen
@@ -144,7 +157,9 @@ function createImportFileWithPatchedOriginalSizes(
   images: Record<string, Uint8Array>,
   sizes: Record<string, number>,
 ) {
-  let zipped = zipSync({
+  // 显式放宽为 Uint8Array<ArrayBufferLike>:fflate 0.8.3 起 zipSync 返回 Uint8Array<ArrayBuffer>,
+  // 而 patch helper 返回泛型默认的 ArrayBufferLike,直接复用 let 推断会在再赋值处报 TS2322
+  let zipped: Uint8Array = zipSync({
     'manifest.json': strToU8(JSON.stringify(data)),
     ...images,
   })
@@ -777,6 +792,33 @@ describe('export/import reliability', () => {
       expect.stringContaining('导入完成，但 1 张图片缺失或无效'),
       'error',
     )
+  })
+
+  it('rejects a zip whose actual decompressed bytes exceed the budget despite a small declared size', async () => {
+    // zip 炸弹核心场景:header 声明尺寸伪造得很小(通过声明预筛),DEFLATE 实际膨胀远超预算。
+    // 高压缩比载荷:4KB 全零 deflate 后仅数十字节;声明伪造为 10 字节,实际预算给 1KB → 必须整体拒绝。
+    const payload = new Uint8Array(4096)
+    const zipped = zipSync({ 'images/bomb.png': [payload, { level: 6 }] })
+    const patched = patchCentralDirectoryOriginalSize(zipped, 'images/bomb.png', 10)
+
+    await expect(
+      __unzipImportArchiveForTests(patched, { entryBytes: 1024, totalBytes: 1024 }),
+    ).rejects.toThrow(/解压后超过|上限/)
+  })
+
+  it('extracts entries normally when actual decompressed bytes stay within the budget', async () => {
+    const zipped = zipSync({
+      'manifest.json': strToU8('{}'),
+      'images/ok.png': [new Uint8Array([1, 2, 3]), { level: 0 }],
+      'ignored/other.bin': new Uint8Array([9]),
+    })
+    const out = await __unzipImportArchiveForTests(zipped, {
+      entryBytes: 1024,
+      totalBytes: 4096,
+    })
+    // 条目名过滤保持旧口径:manifest 与 images/* 提取,其余忽略
+    expect(Object.keys(out).sort()).toEqual(['images/ok.png', 'manifest.json'])
+    expect(Array.from(out['images/ok.png'])).toEqual([1, 2, 3])
   })
 
   it('does not warn about missing images from duplicate tasks skipped in merge mode', async () => {

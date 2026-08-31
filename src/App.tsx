@@ -13,21 +13,13 @@ import TaskGrid from './components/TaskGrid'
 import InputBar from './components/InputBar'
 import DetailModal from './components/DetailModal'
 import Lightbox from './components/Lightbox'
-import SettingsModal from './components/SettingsModal'
-import PromptOptimizerModal from './components/PromptOptimizerModal'
-import ImageCaptionModal from './components/ImageCaptionModal'
 import ConfirmDialog from './components/ConfirmDialog'
 import Toast from './components/Toast'
-import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
-import CommandPalette from './components/CommandPalette'
-import CompareModal from './components/CompareModal'
-import LineageModal from './components/LineageModal'
-import BatchCaptionModal from './components/BatchCaptionModal'
 import ErrorBoundary from './components/ErrorBoundary'
 import InsecureContextBanner from './components/InsecureContextBanner'
 import InitErrorBanner from './components/InitErrorBanner'
-import TourOverlay from './components/TourOverlay'
+import LazyModals from './components/LazyModals'
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
@@ -214,38 +206,13 @@ export default function App() {
       <ErrorBoundary region="modal">
         <Lightbox />
       </ErrorBoundary>
-      <ErrorBoundary region="modal">
-        <SettingsModal />
-      </ErrorBoundary>
-      <ErrorBoundary region="modal">
-        <PromptOptimizerModal />
-      </ErrorBoundary>
-      <ErrorBoundary region="modal">
-        <ImageCaptionModal />
-      </ErrorBoundary>
       <ConfirmDialog />
       <Toast />
       <ErrorBoundary region="modal">
-        <MaskEditorModal />
-      </ErrorBoundary>
-      <ErrorBoundary region="modal">
         <ImageContextMenu />
       </ErrorBoundary>
-      <ErrorBoundary region="modal">
-        <CommandPalette />
-      </ErrorBoundary>
-      <ErrorBoundary region="modal">
-        <CompareModal />
-      </ErrorBoundary>
-      <ErrorBoundary region="modal">
-        <LineageModal />
-      </ErrorBoundary>
-      <ErrorBoundary region="modal">
-        <BatchCaptionModal />
-      </ErrorBoundary>
-      <ErrorBoundary region="modal">
-        <TourOverlay />
-      </ErrorBoundary>
+      {/* 低频弹层统一走 LazyModals 惰性挂载(chunk 按需拉取);各弹层 z 层显式声明,DOM 顺序调整无叠层影响 */}
+      <LazyModals />
     </>
   )
 }

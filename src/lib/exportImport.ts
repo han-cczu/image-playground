@@ -1,10 +1,10 @@
 import {
   zip,
-  unzip,
   strToU8,
   strFromU8,
-  type AsyncUnzipOptions,
-  type UnzipFileInfo,
+  Unzip,
+  UnzipPassThrough,
+  AsyncUnzipInflate,
   type Zippable,
   type Unzipped,
 } from 'fflate'
@@ -110,48 +110,139 @@ function zipAsync(files: Zippable): Promise<Uint8Array> {
   })
 }
 
-function unzipAsync(data: Uint8Array, options?: AsyncUnzipOptions): Promise<Unzipped> {
-  return new Promise((resolve, reject) => {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let settled = false
-    const finish = (cb: () => void) => {
-      settled = true
-      if (timer !== undefined) clearTimeout(timer)
-      cb()
-    }
-    const terminator = unzip(data, options ?? {}, (err, out) =>
-      err ? finish(() => reject(err)) : finish(() => resolve(out)),
-    )
-    if (!settled) {
-      timer = setTimeout(() => {
-        terminator()
-        reject(new Error('解压超时:worker 可能创建失败,请检查部署的 CSP 是否放行 worker-src blob:'))
-      }, WORKER_WATCHDOG_MS)
-    }
-  })
-}
-
 function isImportImageEntryName(name: string): boolean {
   return /^images\/[^/]+\.(png|jpg|jpeg|webp|svg|gif|avif)$/.test(name)
 }
 
-function createImportEntryFilter(): NonNullable<AsyncUnzipOptions['filter']> {
-  let declaredUncompressedBytes = 0
-  return (file) => {
-    if (!shouldExtractImportEntry(file)) return false
-    const nextDeclaredUncompressedBytes = declaredUncompressedBytes + file.originalSize
-    if (nextDeclaredUncompressedBytes > MAX_IMPORT_FILE_BYTES) return false
-    declaredUncompressedBytes = nextDeclaredUncompressedBytes
-    return true
-  }
+/** 仅测试可传:生产调用一律走默认预算。 */
+interface UnzipBudget {
+  entryBytes: number
+  totalBytes: number
 }
 
-function shouldExtractImportEntry(file: UnzipFileInfo): boolean {
-  if (!Number.isFinite(file.originalSize) || file.originalSize > MAX_IMPORT_ENTRY_BYTES) {
-    return false
-  }
-  if (file.name === 'manifest.json') return true
-  return isImportImageEntryName(file.name)
+/**
+ * 流式解压导入包,并按「实际解压出的字节」设预算(2026-06-10 审查遗留 low:zip 炸弹解压态上限)。
+ *
+ * 为什么弃用高层 unzip() + filter:filter 只能读 zip header 的**声明**尺寸(originalSize),
+ * 而声明值可伪造——恶意 zip 声明 1KB、DEFLATE 流实际膨胀出数 GB,filter 全数放行后在解压期
+ * OOM。流式 Unzip 在 ondata 逐块计数,任一条目或累计总量超限立即 terminate 全部流并整体报错
+ * (声明与实际不符 = 损坏或恶意输入,不做静默跳过)。
+ *
+ * 与旧行为保持一致的部分:
+ * - 条目名过滤(仅 manifest.json 与 images/*)与「声明尺寸超限 → 静默跳过该条目」的宽容语义
+ *   照旧(诚实的超大备份图跳过后 import 侧照常报「N 张图片缺失」);流式读的是 local header
+ *   的声明值(高层 unzip 读 central directory,两者在诚实 zip 中一致)。
+ * - 小条目(<320KB)走 AsyncUnzipInflate 的同步回退不建 worker;大 manifest 仍进 worker
+ *   (CSP 已放行 worker-src blob:),故保留同款 watchdog。
+ */
+function unzipImportArchive(
+  data: Uint8Array,
+  budget: UnzipBudget = { entryBytes: MAX_IMPORT_ENTRY_BYTES, totalBytes: MAX_IMPORT_FILE_BYTES },
+): Promise<Unzipped> {
+  return new Promise((resolve, reject) => {
+    const out: Unzipped = {}
+    const activeTerminators: Array<() => void> = []
+    let declaredTotalBytes = 0
+    let actualTotalBytes = 0
+    let pendingFiles = 0
+    let parsed = false
+    let settled = false
+
+    const finish = (cb: () => void) => {
+      if (settled) return
+      settled = true
+      // timer 在下方同步段内初始化;任何回调(含 push 期间的同步 ondata)都晚于它,无 TDZ 风险
+      clearTimeout(timer)
+      // 终止仍在解压的 worker 流(同步回退流没有可终止的 worker,terminate 为空实现或缺失,均安全)
+      for (const terminate of activeTerminators) {
+        try {
+          terminate()
+        } catch {
+          /* 已完成/已终止的流重复 terminate 不应连累收尾 */
+        }
+      }
+      activeTerminators.length = 0
+      cb()
+    }
+    const maybeResolve = () => {
+      if (parsed && pendingFiles === 0) finish(() => resolve(out))
+    }
+
+    const unzipper = new Unzip((file) => {
+      if (settled) return
+      if (file.name !== 'manifest.json' && !isImportImageEntryName(file.name)) return
+      // 声明尺寸可用时预筛(与旧 filter 同口径:超限静默跳过,不为它解压一个字节);
+      // 流式打包的 zip 无 local header 尺寸(数据描述符),此时放行,由下方实际计数兜底。
+      if (file.originalSize !== undefined) {
+        if (!Number.isFinite(file.originalSize) || file.originalSize > budget.entryBytes) return
+        if (declaredTotalBytes + file.originalSize > budget.totalBytes) return
+        declaredTotalBytes += file.originalSize
+      }
+      pendingFiles++
+      if (typeof file.terminate === 'function') activeTerminators.push(file.terminate)
+      const chunks: Uint8Array[] = []
+      let entryBytes = 0
+      file.ondata = (err, chunk, final) => {
+        if (settled) return
+        if (err) return finish(() => reject(err))
+        if (chunk) {
+          entryBytes += chunk.length
+          actualTotalBytes += chunk.length
+          if (entryBytes > budget.entryBytes || actualTotalBytes > budget.totalBytes) {
+            return finish(() =>
+              reject(
+                new Error(
+                  `导入文件解压后超过 ${Math.round(budget.totalBytes / 1024 / 1024)}MB 上限(zip 声明尺寸与实际不符,文件可能已损坏或被恶意构造)`,
+                ),
+              ),
+            )
+          }
+          chunks.push(chunk)
+        }
+        if (final) {
+          const merged = new Uint8Array(entryBytes)
+          let offset = 0
+          for (const part of chunks) {
+            merged.set(part, offset)
+            offset += part.length
+          }
+          out[file.name] = merged
+          pendingFiles--
+          maybeResolve()
+        }
+      }
+      try {
+        file.start()
+      } catch (err) {
+        // 未注册的压缩算法等:与高层 unzip() 一致,整体报错而不是静默丢条目
+        finish(() => reject(err instanceof Error ? err : new Error(String(err))))
+      }
+    })
+    unzipper.register(UnzipPassThrough)
+    unzipper.register(AsyncUnzipInflate)
+    const timer = setTimeout(() => {
+      finish(() =>
+        reject(
+          new Error('解压超时:worker 可能创建失败,请检查部署的 CSP 是否放行 worker-src blob:'),
+        ),
+      )
+    }, WORKER_WATCHDOG_MS)
+    try {
+      unzipper.push(data, true)
+    } catch (err) {
+      return finish(() => reject(err instanceof Error ? err : new Error(String(err))))
+    }
+    parsed = true
+    maybeResolve()
+  })
+}
+
+/** 仅测试用:以自定义预算跑流式解压,用小体积构造出「声明与实际不符」的炸弹场景。 */
+export function __unzipImportArchiveForTests(
+  data: Uint8Array,
+  budget: UnzipBudget,
+): Promise<Unzipped> {
+  return unzipImportArchive(data, budget)
 }
 
 /**
@@ -593,9 +684,7 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
       throw new Error(`导入文件过大:超过 ${Math.round(MAX_IMPORT_FILE_BYTES / 1024 / 1024)}MB 上限`)
     }
     const buffer = await file.arrayBuffer()
-    const unzipped = await unzipAsync(new Uint8Array(buffer), {
-      filter: createImportEntryFilter(),
-    })
+    const unzipped = await unzipImportArchive(new Uint8Array(buffer))
 
     const manifestBytes = unzipped['manifest.json']
     if (!manifestBytes) throw new Error('ZIP 中缺少 manifest.json')

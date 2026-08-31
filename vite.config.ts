@@ -49,6 +49,17 @@ export default defineConfig(({ command }) => {
     build: {
       rollupOptions: {
         output: {
+          // 目录组件(SettingsModal/index.tsx 等)懒加载后 facade 名是 index,产物会出现多个
+          // 无语义的 index-<hash>.js;取上级目录名命名,便于在 dist/网络面板里对号入座。
+          // 入口 chunk 走 entryFileNames,不受影响。
+          chunkFileNames(chunkInfo) {
+            const facade = chunkInfo.facadeModuleId?.replace(/\\/g, '/')
+            if (facade && /\/index\.[jt]sx?$/.test(facade)) {
+              const dir = facade.split('/').slice(-2, -1)[0]
+              if (dir && dir !== 'src') return `assets/${dir}-[hash].js`
+            }
+            return 'assets/[name]-[hash].js'
+          },
           manualChunks(id) {
             const normalized = id.replace(/\\/g, '/')
             if (!normalized.includes('/node_modules/')) return
