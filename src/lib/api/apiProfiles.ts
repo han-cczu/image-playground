@@ -41,6 +41,17 @@ export function clampBatchConcurrency(value: unknown): number {
   return Math.min(BATCH_CONCURRENCY_MAX, Math.max(BATCH_CONCURRENCY_MIN, n))
 }
 
+export const AUTO_RETRY_MIN = 0
+export const AUTO_RETRY_MAX_LIMIT = 3
+export const DEFAULT_AUTO_RETRY_MAX = 2
+
+/** 自动重试次数净化(0=关闭);口径与 clampBatchConcurrency 一致:唯一净化口在 normalizeSettings */
+export function clampAutoRetryMax(value: unknown): number {
+  const n = Math.trunc(Number(value))
+  if (!Number.isFinite(n)) return DEFAULT_AUTO_RETRY_MAX
+  return Math.min(AUTO_RETRY_MAX_LIMIT, Math.max(AUTO_RETRY_MIN, n))
+}
+
 function clampConfigField(value: string): string {
   return value.slice(0, MAX_CONFIG_FIELD_LEN)
 }
@@ -462,6 +473,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     clearInputAfterSubmit:
       typeof record.clearInputAfterSubmit === 'boolean' ? record.clearInputAfterSubmit : false,
     batchConcurrency: clampBatchConcurrency(record.batchConcurrency),
+    autoRetryMax: clampAutoRetryMax(record.autoRetryMax),
     theme:
       record.theme === 'light' || record.theme === 'dark' || record.theme === 'system'
         ? record.theme
@@ -777,4 +789,5 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   apiProxy: false,
   clearInputAfterSubmit: false,
   batchConcurrency: DEFAULT_BATCH_CONCURRENCY,
+  autoRetryMax: DEFAULT_AUTO_RETRY_MAX,
 })

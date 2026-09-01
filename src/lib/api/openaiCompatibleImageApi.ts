@@ -10,7 +10,7 @@ import {
   type CallApiOptions,
   type CallApiResult,
   fetchImageUrlAsDataUrl,
-  getApiErrorMessage,
+  createApiHttpError,
   extractResponsesImageBase64,
   getDataUrlDecodedByteSize,
   isDataUrl,
@@ -303,7 +303,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
     }
 
     if (!response.ok) {
-      throw new Error(await getApiErrorMessage(response, requestSignal))
+      throw await createApiHttpError(response, requestSignal)
     }
 
     const payload = await readJsonWithAbort<ImageApiResponse>(response, requestSignal)
@@ -446,7 +446,7 @@ async function callResponsesImageApiSingle(
     })
 
     if (!response.ok) {
-      throw new Error(await getApiErrorMessage(response, requestSignal))
+      throw await createApiHttpError(response, requestSignal)
     }
 
     const payload = await readJsonWithAbort<ResponsesApiResponse>(response, requestSignal)

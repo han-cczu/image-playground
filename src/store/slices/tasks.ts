@@ -146,6 +146,15 @@ function createCategoryStatePatch(
   }
 }
 
+export interface TaskRetryInfo {
+  /** 即将进行的是第几次重试(从 1 起) */
+  attempt: number
+  /** 本任务允许的最大重试次数(executeTask 入口快照) */
+  maxAttempts: number
+  /** 预计下次尝试的时间戳(ms) */
+  nextRetryAt: number
+}
+
 export interface TasksSlice {
   // 输入
   prompt: string
@@ -169,6 +178,11 @@ export interface TasksSlice {
   // 任务列表
   tasks: TaskRecord[]
   setTasks: (t: TaskRecord[]) => void
+
+  // 自动重试瞬态(仅驱动卡片「第 N/M 次重试中」徽标;不进 persist/TaskRecord/导出,刷新即清)
+  taskRetryInfo: Record<string, TaskRetryInfo>
+  /** info 为 null 时删除条目(任务落终态/取消/删除时清理) */
+  setTaskRetryInfo: (taskId: string, info: TaskRetryInfo | null) => void
 
   // 收藏分类
   favoriteCategories: FavoriteCategory[]
@@ -274,6 +288,18 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
   // Tasks
   tasks: [],
   setTasks: (tasks) => set({ tasks }),
+
+  taskRetryInfo: {},
+  setTaskRetryInfo: (taskId, info) =>
+    set((s) => {
+      if (info === null) {
+        if (!(taskId in s.taskRetryInfo)) return s
+        const next = { ...s.taskRetryInfo }
+        delete next[taskId]
+        return { taskRetryInfo: next }
+      }
+      return { taskRetryInfo: { ...s.taskRetryInfo, [taskId]: info } }
+    }),
 
   // Favorite categories
   favoriteCategories: [createDefaultFavoriteCategory()],

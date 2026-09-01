@@ -79,6 +79,8 @@ export interface AppSettings {
   clearInputAfterSubmit: boolean
   /** 批量调度并发上限(1~6,默认 3);全局顶层标量,只作用于 runEnqueuedTasks 批量路径 */
   batchConcurrency: number
+  /** 瞬时失败(429/5xx/超时/网络)的最大自动重试次数(0~3,默认 2,0=关闭);executeTask 入口快照,改动对在途任务不生效 */
+  autoRetryMax: number
   theme: 'light' | 'dark' | 'system'
   profiles: ApiProfile[]
   activeProfileId: string

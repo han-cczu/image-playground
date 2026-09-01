@@ -662,6 +662,9 @@ describe('task runtime reliability', () => {
 
   it('aborts the in-flight API request when the task watchdog times out', async () => {
     vi.useFakeTimers()
+    // 本用例验证「超时直接落 error」的兜底路径:关闭自动重试,否则默认 autoRetryMax=2 会让
+    // watchdog 仲裁接管、任务保持 running 进入退避(该路径由 taskRuntime.retry.test.ts 覆盖)
+    useStore.setState((s) => ({ settings: { ...s.settings, autoRetryMax: 0 } }))
     let signal: AbortSignal | undefined
     vi.mocked(callImageApi).mockImplementation(async (opts) => {
       signal = opts.signal
@@ -3419,6 +3422,18 @@ describe('batch concurrency & cancellation (B3)', () => {
     expect(mergeImportedSettings(DEFAULT_SETTINGS, { batchConcurrency: 5 }).batchConcurrency).toBe(
       5,
     )
+  })
+
+  it('clamps autoRetryMax at the normalizeSettings whitelist (同 batchConcurrency 口径)', () => {
+    expect(normalizeSettings({ autoRetryMax: -1 }).autoRetryMax).toBe(0)
+    expect(normalizeSettings({ autoRetryMax: 0 }).autoRetryMax).toBe(0) // 0=关闭是合法取值
+    expect(normalizeSettings({ autoRetryMax: 99 }).autoRetryMax).toBe(3)
+    expect(normalizeSettings({ autoRetryMax: 1.9 }).autoRetryMax).toBe(1)
+    expect(normalizeSettings({}).autoRetryMax).toBe(2) // 旧持久化缺字段兜默认(默认开启)
+    expect(normalizeSettings({ autoRetryMax: 'x' }).autoRetryMax).toBe(2)
+    expect(DEFAULT_SETTINGS.autoRetryMax).toBe(2)
+    // 导入 round-trip 不丢
+    expect(mergeImportedSettings(DEFAULT_SETTINGS, { autoRetryMax: 3 }).autoRetryMax).toBe(3)
   })
 
   it('runEnqueuedTasks honors settings.batchConcurrency as the worker limit', async () => {

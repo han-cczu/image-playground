@@ -1,5 +1,5 @@
 import type { TaskRecord } from '../../types'
-import { cancelTask } from '../../store'
+import { cancelTask, useStore } from '../../store'
 
 interface Props {
   task: TaskRecord
@@ -14,6 +14,8 @@ interface Props {
 /** 左侧图片区域:运行中转圈(可取消)/失败图标/完成封面,左上角耗时或比例+分辨率标签 */
 export default function CoverArea({ task, thumbSrc, coverRatio, coverSize, duration }: Props) {
   const showRunningTimer = task.status === 'running'
+  // 自动重试瞬态徽标:仅 running 时订阅有意义;条目对象整体替换,zustand 引用比较天然精确
+  const retryInfo = useStore((s) => (task.status === 'running' ? s.taskRetryInfo[task.id] : undefined))
 
   return (
     <div className="w-40 min-w-[10rem] h-full bg-gray-100 dark:bg-black/20 relative flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -38,7 +40,9 @@ export default function CoverArea({ task, thumbSrc, coverRatio, coverSize, durat
               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
             />
           </svg>
-          <span className="text-xs text-gray-400 dark:text-gray-500">生成中...</span>
+          <span className="text-xs text-gray-400 dark:text-gray-500">
+            {retryInfo ? `第 ${retryInfo.attempt}/${retryInfo.maxAttempts} 次重试中` : '生成中...'}
+          </span>
           <button
             type="button"
             onClick={(e) => {
