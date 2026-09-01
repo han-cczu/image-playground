@@ -18,8 +18,6 @@ describe('SubmitButton', () => {
       <SubmitButton
         canSubmit={true}
         hasMask={false}
-        hover={false}
-        onHoverChange={vi.fn()}
         onSubmit={onSubmit}
         onOpenSettings={vi.fn()}
         needsConfig={false}

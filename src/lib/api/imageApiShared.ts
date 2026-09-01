@@ -465,6 +465,59 @@ export function readJsonWithAbort<T = unknown>(
   )
 }
 
+/**
+ * 结构化 HTTP 错误(自动重试轮 D1):getApiErrorMessage 在响应 body 带 message 时会丢弃
+ * status,靠消息正则分类 429/5xx 不可靠——重试判定必须拿到结构化 status。message 口径
+ * 与旧 `new Error(getApiErrorMessage())` 完全一致,对 UI 文案零影响。
+ */
+export class ApiHttpError extends Error {
+  readonly status: number
+  /** 来自 Retry-After 头(已 clamp 1~60s);无头/无法解析时缺省 */
+  readonly retryAfterMs?: number
+
+  constructor(message: string, status: number, retryAfterMs?: number) {
+    super(message)
+    this.name = 'ApiHttpError'
+    this.status = status
+    if (retryAfterMs !== undefined) this.retryAfterMs = retryAfterMs
+  }
+}
+
+const RETRY_AFTER_MIN_MS = 1_000
+const RETRY_AFTER_MAX_MS = 60_000
+
+/**
+ * 解析 Retry-After 头(RFC 9110:非负秒数或 HTTP 日期),clamp 到 [1s, 60s]。
+ * 负数秒/垃圾串返回 undefined(视作无头);过去的日期 clamp 到下限。
+ */
+export function parseRetryAfterMs(headerValue: string | null, now = Date.now()): number | undefined {
+  if (headerValue === null) return undefined
+  const trimmed = headerValue.trim()
+  if (!trimmed) return undefined
+  const clamp = (ms: number) => Math.min(RETRY_AFTER_MAX_MS, Math.max(RETRY_AFTER_MIN_MS, ms))
+  const seconds = Number(trimmed)
+  if (Number.isFinite(seconds)) {
+    if (seconds < 0) return undefined
+    return clamp(seconds * 1000)
+  }
+  const dateMs = Date.parse(trimmed)
+  if (Number.isNaN(dateMs)) return undefined
+  return clamp(dateMs - now)
+}
+
+/** 非 2xx 响应 → ApiHttpError(读 body 提炼 message 的行为与 getApiErrorMessage 相同)。 */
+export async function createApiHttpError(
+  response: Response,
+  signal?: AbortSignal,
+): Promise<ApiHttpError> {
+  // headers 防御性读取:真实 Response 恒有 headers,但测试里的极简 stub(只带 status/body)没有
+  const retryAfterMs = parseRetryAfterMs(
+    typeof response.headers?.get === 'function' ? response.headers.get('Retry-After') : null,
+  )
+  const message = await getApiErrorMessage(response, signal)
+  return new ApiHttpError(message, response.status, retryAfterMs)
+}
+
 export async function getApiErrorMessage(
   response: Response,
   signal?: AbortSignal,

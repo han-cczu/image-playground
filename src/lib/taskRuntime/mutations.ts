@@ -52,8 +52,16 @@ export function clearTransientUiReferencesForDeletedTasks(deletedTasks: TaskReco
       state.maskDraft && orphanedImageIds.has(state.maskDraft.targetImageId)
         ? null
         : state.maskDraft
+    // 自动重试瞬态徽标:被删任务的条目一并清掉(executeTask finally 也会清,这里兜删除先于醒来的窗口)
+    let taskRetryInfo = state.taskRetryInfo
+    if (Object.keys(taskRetryInfo).some((id) => deletedTaskIds.has(id))) {
+      taskRetryInfo = Object.fromEntries(
+        Object.entries(taskRetryInfo).filter(([id]) => !deletedTaskIds.has(id)),
+      )
+    }
 
     return {
+      taskRetryInfo,
       selectedTaskIds,
       detailTaskId:
         state.detailTaskId && deletedTaskIds.has(state.detailTaskId) ? null : state.detailTaskId,

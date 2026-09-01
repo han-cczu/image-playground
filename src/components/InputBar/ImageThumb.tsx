@@ -58,6 +58,7 @@ export default function ImageThumb({
       : ''
   const displaySrc = isMaskTarget && maskPreviewUrl ? maskPreviewUrl : img.dataUrl
 
+  // 提示的 focus/blur 冒泡自内部按钮:键盘用户 Tab 到缩略图时同样能看到遮罩约束提示
   return (
     <div
       key={img.id}
@@ -67,6 +68,8 @@ export default function ImageThumb({
       draggable={dragHandlers.draggable}
       onMouseEnter={hintHandlers.onHintShow}
       onMouseLeave={hintHandlers.onHintHide}
+      onFocus={hintHandlers.onHintShow}
+      onBlur={hintHandlers.onHintHide}
       onDragStart={dragHandlers.onDragStart}
       onDragOver={dragHandlers.onDragOver}
       onDrop={dragHandlers.onDrop}

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { calculateImageSize, normalizeImageSize, parseRatio, type SizeTier } from '../lib/image/size'
+import { useHintTooltip } from '../hooks/useHintTooltip'
 import ViewportTooltip from './ViewportTooltip'
 import Modal, { ModalCloseButton } from './Modal'
 
@@ -62,12 +63,8 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
   const [customW, setCustomW] = useState(currentParsedSize?.width ?? '1024')
   const [customH, setCustomH] = useState(currentParsedSize?.height ?? '1024')
 
-  const [hintVisible, setHintVisible] = useState(false)
-  const hintTimerRef = useRef<number | null>(null)
-
-  useEffect(() => () => {
-    if (hintTimerRef.current != null) window.clearTimeout(hintTimerRef.current)
-  }, [])
+  // 悬停/聚焦/触屏轻点均可查看,关闭路径(外点/Esc/自动隐藏)由 hook 统一接管
+  const clampHint = useHintTooltip<HTMLButtonElement>()
 
   const activeRatio = ratio === 'custom' ? customRatio : ratio
   const parsedCustomRatio = parseRatio(customRatio)
@@ -110,25 +107,6 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
     }
     return false
   }, [mode, ratio, customRatioClamped, customW, customH, previewSize])
-
-  const showHint = () => setHintVisible(true)
-  const hideHint = () => {
-    setHintVisible(false)
-    clearHintTimer()
-  }
-  const clearHintTimer = () => {
-    if (hintTimerRef.current != null) {
-      window.clearTimeout(hintTimerRef.current)
-      hintTimerRef.current = null
-    }
-  }
-  const startHintTouch = () => {
-    clearHintTimer()
-    hintTimerRef.current = window.setTimeout(() => {
-      setHintVisible(true)
-      hintTimerRef.current = null
-    }, 450)
-  }
 
   const applySize = () => {
     if (!previewSize) return
@@ -293,22 +271,22 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                 {previewSize || '尺寸无效'}
               </span>
               {isClamped && (
-                <div
-                  className="relative flex items-center"
-                  onMouseEnter={showHint}
-                  onMouseLeave={hideHint}
-                  onTouchStart={startHintTouch}
-                  onTouchEnd={clearHintTimer}
-                  onTouchCancel={hideHint}
-                  onClick={showHint}
-                >
-                  <svg className="w-5 h-5 text-yellow-500 cursor-pointer" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <ViewportTooltip visible={hintVisible} className="w-56 whitespace-normal text-center">
+                <span className="relative flex items-center">
+                  {/* 语义是「输入被自动调整」的警示,不是帮助——图标用警告三角而非问号 */}
+                  <button
+                    type="button"
+                    {...clampHint.anchorProps}
+                    className="flex cursor-help items-center rounded-full text-yellow-500 outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/70"
+                    aria-label="尺寸被自动调整的原因"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </button>
+                  <ViewportTooltip visible={clampHint.visible} className="w-56 whitespace-normal text-center">
                     {SIZE_LIMIT_TEXT}
                   </ViewportTooltip>
-                </div>
+                </span>
               )}
             </div>
           </div>

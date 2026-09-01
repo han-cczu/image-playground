@@ -6,7 +6,7 @@ import {
   assertImageInputPayloadSize,
   type CallApiOptions,
   type CallApiResult,
-  getApiErrorMessage,
+  createApiHttpError,
   getDataUrlDecodedByteSize,
   isHttpUrl,
   mergeActualParams,
@@ -206,7 +206,7 @@ async function callGeminiSingleWithBody(
     })
 
     if (!response.ok) {
-      throw new Error(await getApiErrorMessage(response, requestSignal))
+      throw await createApiHttpError(response, requestSignal)
     }
 
     const payload = await readJsonWithAbort<GeminiResponse>(response, requestSignal)

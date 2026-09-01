@@ -40,8 +40,12 @@ import {
   taskAbortControllers,
   clearSyncHttpWatchdogTimer,
   clearTaskAbortController,
+  registerTaskRuntimeTestReset,
+  sleepForRetryBackoff,
+  terminateTaskRuntime,
 } from './shared'
-import { scheduleSyncHttpWatchdog } from './watchdog'
+import { registerWatchdogTimeoutRetryArbiter, scheduleSyncHttpWatchdog } from './watchdog'
+import { computeRetryDelayMs, getRetryAfterMs, isTransientTaskError } from './retryPolicy'
 import {
   persistTaskSilently,
   rollbackStoredImagesSilently,
@@ -429,6 +433,46 @@ export function resolveExecutionProfile(
   return { profile: model === resolved.model ? resolved : { ...resolved, model }, isActive }
 }
 
+// ===== 自动重试(spec: docs/superpowers/specs/2026-08-31-auto-retry-design.md) =====
+
+/** 运行期重试进度(仅本模块;watchdog 经注册制回调读取,不反向依赖本模块) */
+interface RetryProgress {
+  /** 已用掉的重试次数(0 = 首次尝试进行中) */
+  retriesUsed: number
+  /** 入口快照的最大重试次数 */
+  max: number
+}
+const retryProgressByTask = new Map<string, RetryProgress>()
+/** watchdog 超时接管标记:置位后本次 attempt 的 AbortError 应判为「超时(可重试)」而非「用户取消」 */
+const timeoutRetryFlags = new Set<string>()
+
+registerWatchdogTimeoutRetryArbiter((taskId) => {
+  const progress = retryProgressByTask.get(taskId)
+  const retriesUsed = progress?.retriesUsed ?? 0
+  // 尝试耗尽/未在执行循环内:交回 watchdog 兜底直落(retriesUsed 供其拼接文案后缀)。
+  // 兜底不能挪进循环:循环靠请求 reject 推进,不响应 abort 的挂死请求只有直落能终结。
+  if (!progress || progress.retriesUsed >= progress.max) return { kind: 'fail', retriesUsed }
+  const task = useStore.getState().tasks.find((t) => t.id === taskId)
+  if (!task || task.status !== 'running') return { kind: 'fail', retriesUsed }
+  timeoutRetryFlags.add(taskId)
+  // 中止在途请求:fetch 以 AbortError 拒绝进入 attempt 的 catch,循环凭标记识别为超时重试。
+  // 注意必须在置标记之后 terminate(先 abort 会让 catch 抢在标记前消费)。
+  terminateTaskRuntime(taskId)
+  return { kind: 'takeover' }
+})
+
+registerTaskRuntimeTestReset(() => {
+  retryProgressByTask.clear()
+  timeoutRetryFlags.clear()
+})
+
+type AttemptOutcome =
+  /** 成功落 done */
+  | { kind: 'completed' }
+  /** 任务已被取消/删除(status 守卫命中),善后已完成,循环直接退出 */
+  | { kind: 'settled' }
+  | { kind: 'failed'; err: unknown }
+
 export async function executeTask(taskId: string) {
   const { settings } = useStore.getState()
   const task = useStore.getState().tasks.find((t) => t.id === taskId)
@@ -449,7 +493,86 @@ export async function executeTask(taskId: string) {
   }
   const { profile: executionProfile, isActive: executingOnActiveProfile } = resolved
   const taskProvider = task.apiProvider ?? executionProfile.provider
+  // 入口快照(与 batchConcurrency 同口径):normalizeSettings 已 clamp 到 0~3,读取处信任;
+  // 改设置对在途任务不生效。
+  const maxAutoRetries = settings.autoRetryMax
 
+  try {
+    for (let retriesUsed = 0; ; retriesUsed++) {
+      retryProgressByTask.set(taskId, { retriesUsed, max: maxAutoRetries })
+      const outcome = await attemptTask(
+        taskId,
+        task,
+        settings,
+        executionProfile,
+        executingOnActiveProfile,
+        taskProvider,
+      )
+      // 标记按 attempt 消费:无论本轮结局如何都取走,避免陈旧标记污染下一轮判定
+      const hadTimeoutRetryFlag = timeoutRetryFlags.delete(taskId)
+      if (outcome.kind !== 'failed') return
+
+      // 任务可能在请求进行中被删除/取消:find 不到或已非 running 时直接退出,不要复活已删任务。
+      const latestAfterFail = useStore.getState().tasks.find((t) => t.id === taskId)
+      if (!latestAfterFail || latestAfterFail.status !== 'running') return
+
+      const transient = isTransientTaskError(outcome.err, hadTimeoutRetryFlag)
+      if (!transient || retriesUsed >= maxAutoRetries) {
+        failTaskWithError(taskId, task, outcome.err, retriesUsed)
+        return
+      }
+
+      const attempt = retriesUsed + 1
+      const delayMs = computeRetryDelayMs(attempt, getRetryAfterMs(outcome.err))
+      useStore.getState().setTaskRetryInfo(taskId, {
+        attempt,
+        maxAttempts: maxAutoRetries,
+        nextRetryAt: Date.now() + delayMs,
+      })
+      // 可唤醒睡眠:取消/删除路径经 terminateTaskRuntime 立即唤醒,醒来后由 status 守卫退出,
+      // 不会让并发闸 worker 槽位死等退避到期(退避期间占槽本身是刻意的 429 背压,见 spec D3)。
+      await sleepForRetryBackoff(taskId, delayMs)
+      useStore.getState().setTaskRetryInfo(taskId, null)
+      const awake = useStore.getState().tasks.find((t) => t.id === taskId)
+      if (!awake || awake.status !== 'running') return
+    }
+  } finally {
+    retryProgressByTask.delete(taskId)
+    timeoutRetryFlags.delete(taskId)
+    useStore.getState().setTaskRetryInfo(taskId, null)
+    // 释放输入图片的内存缓存（已持久化到 IndexedDB，后续按需从 DB 加载）
+    for (const imgId of task.inputImageIds) {
+      evictCachedImageDataUrl(imgId)
+    }
+  }
+}
+
+/** 终态落 error(文案追加自动重试次数便于事后判读)。调用方已确认任务仍是 running。 */
+function failTaskWithError(taskId: string, task: TaskRecord, err: unknown, retriesUsed: number) {
+  // L7:用 silent 变体(内部已 toast + 标 persistenceError 并吞错),避免错误态写库再次失败时
+  // 越过 catch 逃逸成未捕获 rejection、并跳过下面的 setDetailTaskId。
+  const finishedAt = Date.now()
+  const baseError = normalizeTaskRuntimeText(err)
+  updateTaskInStoreSilently(taskId, {
+    status: 'error',
+    error: retriesUsed > 0 ? `${baseError}(已自动重试 ${retriesUsed} 次)` : baseError,
+    finishedAt,
+    elapsed: Math.max(0, finishedAt - task.createdAt),
+  })
+  // 批量任务(batchId 存在)失败时逐个自动弹详情会互相打架,改由失败卡片的 error 态呈现;
+  // 单任务保持原行为:失败即弹详情。
+  if (!task.batchId) useStore.getState().setDetailTaskId(taskId)
+}
+
+/** 单次请求尝试:controller/watchdog 建立 → 输入图加载 → 请求 → 成功落态。失败只报告不落态(命运归 executeTask 循环)。 */
+async function attemptTask(
+  taskId: string,
+  task: TaskRecord,
+  settings: AppSettings,
+  executionProfile: ApiProfile,
+  executingOnActiveProfile: boolean,
+  taskProvider: ApiProvider,
+): Promise<AttemptOutcome> {
   if (taskProvider === 'openai' || taskProvider === 'gemini') {
     taskAbortControllers.set(taskId, new AbortController())
     // 先以完整预算守住输入图加载阶段(IDB 读挂起时任务不会永久卡 running);
@@ -501,7 +624,7 @@ export async function executeTask(taskId: string) {
     clearSyncHttpWatchdogTimer(taskId)
 
     const latestBeforeSuccess = useStore.getState().tasks.find((t) => t.id === taskId)
-    if (!latestBeforeSuccess || latestBeforeSuccess.status !== 'running') return
+    if (!latestBeforeSuccess || latestBeforeSuccess.status !== 'running') return { kind: 'settled' }
 
     // 存储输出图片
     for (const dataUrl of result.images) {
@@ -549,7 +672,7 @@ export async function executeTask(taskId: string) {
     if (!latestBeforeUpdate || latestBeforeUpdate.status !== 'running') {
       // 任务在写图期间被删/取消:回滚已存但无引用的输出图,避免孤儿记录泄漏
       await rollbackStoredImagesSilently(outputIds)
-      return
+      return { kind: 'settled' }
     }
     const finishedAt = Date.now()
     await updateTaskInStore(taskId, {
@@ -592,29 +715,13 @@ export async function executeTask(taskId: string) {
     ) {
       useStore.getState().clearMaskDraft()
     }
+    return { kind: 'completed' }
   } catch (err) {
     clearSyncHttpWatchdogTimer(taskId)
     await rollbackStoredImagesSilently(outputIds)
-    // 任务可能在请求进行中被删除/取消:find 不到或已非 running 时直接退出,不要用 `?? task` 复活已删任务。
-    const latestTask = useStore.getState().tasks.find((t) => t.id === taskId)
-    if (!latestTask || latestTask.status !== 'running') return
-    // L7:用 silent 变体(内部已 toast + 标 persistenceError 并吞错),避免错误态写库再次失败时
-    // 越过 catch 逃逸成未捕获 rejection、并跳过下面的 setDetailTaskId。
-    const finishedAt = Date.now()
-    updateTaskInStoreSilently(taskId, {
-      status: 'error',
-      error: normalizeTaskRuntimeText(err),
-      finishedAt,
-      elapsed: Math.max(0, finishedAt - task.createdAt),
-    })
-    // 批量任务(batchId 存在)失败时逐个自动弹详情会互相打架,改由失败卡片的 error 态呈现;
-    // 单任务保持原行为:失败即弹详情。
-    if (!task.batchId) useStore.getState().setDetailTaskId(taskId)
+    // 落不落 error、重不重试由 executeTask 循环统一裁决(任务命运单一所有权)
+    return { kind: 'failed', err }
   } finally {
     clearTaskAbortController(taskId)
-    // 释放输入图片的内存缓存（已持久化到 IndexedDB，后续按需从 DB 加载）
-    for (const imgId of task.inputImageIds) {
-      evictCachedImageDataUrl(imgId)
-    }
   }
 }

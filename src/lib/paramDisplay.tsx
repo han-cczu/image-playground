@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
 import type { TaskParams, TaskRecord } from '../types'
+import { useHintTooltip } from '../hooks/useHintTooltip'
 import ViewportTooltip from '../components/ViewportTooltip'
 import { getParamDisplay } from './paramDisplayLogic'
 
@@ -23,49 +23,23 @@ export function ActualValueBadge({
   className = '',
   variant = 'highlight',
 }: ActualValueBadgeProps) {
-  const [tooltipVisible, setTooltipVisible] = useState(false)
-  const touchTimerRef = useRef<number | null>(null)
+  const hint = useHintTooltip<HTMLSpanElement>()
   const colorClass =
     variant === 'normal'
       ? 'bg-gray-100 text-gray-500 dark:bg-white/[0.04] dark:text-gray-400'
       : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-500/20 dark:text-yellow-300'
 
-  useEffect(
-    () => () => {
-      if (touchTimerRef.current != null) window.clearTimeout(touchTimerRef.current)
-    },
-    [],
-  )
-
-  const clearTouchTimer = () => {
-    if (touchTimerRef.current != null) {
-      window.clearTimeout(touchTimerRef.current)
-      touchTimerRef.current = null
-    }
-  }
-
+  // 不用 role="button":角标没有可执行动作,Enter/Space 也无响应,挂 button 语义反而误导读屏;
+  // tabIndex 仅为键盘聚焦查看提示,读屏用户由 aria-label 直接获得完整信息
   return (
     <span
+      {...hint.anchorProps}
       className={`relative inline-flex cursor-help ${colorClass} ${className}`}
-      role="button"
       tabIndex={0}
-      onMouseEnter={() => setTooltipVisible(true)}
-      onMouseLeave={() => setTooltipVisible(false)}
-      onFocus={() => setTooltipVisible(true)}
-      onBlur={() => setTooltipVisible(false)}
-      onClick={() => setTooltipVisible(true)}
-      onTouchStart={() => {
-        clearTouchTimer()
-        touchTimerRef.current = window.setTimeout(() => {
-          setTooltipVisible(true)
-          touchTimerRef.current = null
-        }, 450)
-      }}
-      onTouchEnd={clearTouchTimer}
-      onTouchCancel={clearTouchTimer}
+      aria-label={`${value}（API 实际响应值）`}
     >
       {value}
-      <ViewportTooltip visible={tooltipVisible} className="whitespace-nowrap">
+      <ViewportTooltip visible={hint.visible} className="whitespace-nowrap">
         API 实际响应值
       </ViewportTooltip>
     </span>

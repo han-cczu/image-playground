@@ -7,6 +7,8 @@ import {
   createDefaultOptimizerProfile,
   createDefaultCaptionerProfile,
   DEFAULT_SETTINGS,
+  AUTO_RETRY_MAX_LIMIT,
+  AUTO_RETRY_MIN,
   BATCH_CONCURRENCY_MAX,
   BATCH_CONCURRENCY_MIN,
   getActiveApiProfile,
@@ -473,6 +475,33 @@ export default function SettingsModal() {
                 ) : (
                   ' 过高可能触发上游限流(429)。'
                 )}
+              </div>
+            </div>
+            <div className="block">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="block text-xs text-gray-500 dark:text-gray-400">
+                  瞬时失败自动重试
+                </span>
+                {/* select 离散下拉:同批量并发上限,直接 setDraft 进脏检测闭环 */}
+                <select
+                  value={draft.autoRetryMax}
+                  onChange={(e) => setDraft({ ...draft, autoRetryMax: Number(e.target.value) })}
+                  aria-label="瞬时失败自动重试次数"
+                  className="rounded-lg border border-gray-200/70 bg-white/60 px-2 py-1 text-xs text-gray-700 outline-none focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/40"
+                >
+                  {Array.from(
+                    { length: AUTO_RETRY_MAX_LIMIT - AUTO_RETRY_MIN + 1 },
+                    (_, i) => AUTO_RETRY_MIN + i,
+                  ).map((n) => (
+                    <option key={n} value={n}>
+                      {n === 0 ? '关闭' : `${n} 次`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div data-selectable-text className="text-xs text-gray-400 dark:text-gray-500">
+                限流(429)、服务端错误(5xx)、超时与网络中断按指数退避自动重试;参数错误、
+                内容拦截等不重试。调整后对新任务生效。
               </div>
             </div>
           </div>

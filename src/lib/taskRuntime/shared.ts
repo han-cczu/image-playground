@@ -13,6 +13,36 @@
 export const syncHttpWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
 export const taskAbortControllers = new Map<string, AbortController>()
 
+/**
+ * 自动重试的退避睡眠(可唤醒)。**必须可唤醒而不是只可清除**:executeTask 的重试循环
+ * `await` 在这个 promise 上,若取消/删除路径只 clearTimeout 而不 resolve,promise 永不
+ * 落定 → executeTask 永久挂起,并发闸 worker 槽位被死占,后续批量任务全部饿死。
+ * 唤醒后循环里的 status 守卫会发现任务已非 running 而立即退出。
+ */
+interface RetryBackoffSleep {
+  timer: ReturnType<typeof setTimeout>
+  wake: () => void
+}
+const retryBackoffSleeps = new Map<string, RetryBackoffSleep>()
+
+export function sleepForRetryBackoff(taskId: string, delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      retryBackoffSleeps.delete(taskId)
+      resolve()
+    }, delayMs)
+    retryBackoffSleeps.set(taskId, { timer, wake: resolve })
+  })
+}
+
+export function wakeRetryBackoffSleep(taskId: string): void {
+  const entry = retryBackoffSleeps.get(taskId)
+  if (!entry) return
+  clearTimeout(entry.timer)
+  retryBackoffSleeps.delete(taskId)
+  entry.wake()
+}
+
 const testResetCallbacks: Array<() => void> = []
 
 /**
@@ -31,6 +61,8 @@ export function resetTaskRuntimeForTest(): void {
   for (const timer of syncHttpWatchdogTimers.values()) clearTimeout(timer)
   syncHttpWatchdogTimers.clear()
   taskAbortControllers.clear()
+  // 先唤醒再清:悬挂的退避 promise 不落定会让上一个用例的 executeTask 泄漏到下一个用例
+  for (const taskId of [...retryBackoffSleeps.keys()]) wakeRetryBackoffSleep(taskId)
   for (const callback of testResetCallbacks) callback()
 }
 
@@ -54,9 +86,10 @@ function abortTaskRequest(taskId: string) {
   if (controller && !controller.signal.aborted) controller.abort()
 }
 
-/** 统一收口在途任务的运行期资源:中止请求 + 清 watchdog 定时器 + 清 AbortController。 */
+/** 统一收口在途任务的运行期资源:中止请求 + 清 watchdog 定时器 + 清 AbortController + 唤醒退避睡眠。 */
 export function terminateTaskRuntime(taskId: string) {
   abortTaskRequest(taskId)
   clearSyncHttpWatchdogTimer(taskId)
   clearTaskAbortController(taskId)
+  wakeRetryBackoffSleep(taskId)
 }
