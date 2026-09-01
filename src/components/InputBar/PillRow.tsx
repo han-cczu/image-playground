@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { useStore } from '../../store'
+import { useHintTooltip } from '../../hooks/useHintTooltip'
 import { getActiveApiProfile } from '../../lib/api/apiProfiles'
 import { STYLE_PRESETS, isStylePresetKey } from '../../lib/stylePresets'
 import ModelMenu from './ModelMenu'
@@ -77,9 +78,10 @@ export default function PillRow({
   const clearMaskDraft = useStore((s) => s.clearMaskDraft)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
 
-  const [optimizeHover, setOptimizeHover] = useState(false)
-  const [captionHover, setCaptionHover] = useState(false)
-  const [attachHover, setAttachHover] = useState(false)
+  // 禁用原因气泡:hover/聚焦/触屏轻点均可查看;仅在确有原因可讲时启用
+  const optimizeHint = useHintTooltip<HTMLDivElement>({ enabled: Boolean(optimizeTooltipText) })
+  const captionHint = useHintTooltip<HTMLDivElement>({ enabled: Boolean(captionTooltipText) })
+  const attachHint = useHintTooltip<HTMLDivElement>({ enabled: atImageLimit })
 
   /** 顶部 pill 弹出层互斥 */
   type OpenMenu = 'model' | 'style' | 'resolution' | 'advanced' | 'grid' | 'snippet' | null
@@ -246,19 +248,14 @@ export default function PillRow({
         )}
       </div>
 
-      {/* 优化 pill */}
-      <div
-        className="relative"
-        onMouseEnter={() => setOptimizeHover(true)}
-        onMouseLeave={() => setOptimizeHover(false)}
-      >
-        <ButtonTooltip visible={Boolean(optimizeTooltipText) && optimizeHover} text={optimizeTooltipText} />
+      {/* 优化 pill:禁用态用 aria-disabled(而非 disabled)保持可聚焦,键盘用户才能看到禁用原因 */}
+      <div className="relative" {...optimizeHint.anchorProps}>
+        <ButtonTooltip visible={Boolean(optimizeTooltipText) && optimizeHint.visible} text={optimizeTooltipText} />
         <button
           type="button"
           onClick={() => canOptimize && onOptimize()}
-          disabled={!canOptimize}
+          aria-disabled={!canOptimize}
           className={canOptimize ? PILL_BASE : PILL_DISABLED}
-          title="AI 提示词优化"
           aria-label="AI 提示词优化"
         >
           <svg className="h-3.5 w-3.5 opacity-80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -268,19 +265,14 @@ export default function PillRow({
         </button>
       </div>
 
-      {/* 反推 pill */}
-      <div
-        className="relative"
-        onMouseEnter={() => setCaptionHover(true)}
-        onMouseLeave={() => setCaptionHover(false)}
-      >
-        <ButtonTooltip visible={Boolean(captionTooltipText) && captionHover} text={captionTooltipText} />
+      {/* 反推 pill:禁用态同上,aria-disabled 保持可聚焦 */}
+      <div className="relative" {...captionHint.anchorProps}>
+        <ButtonTooltip visible={Boolean(captionTooltipText) && captionHint.visible} text={captionTooltipText} />
         <button
           type="button"
           onClick={() => canCaption && onCaption()}
-          disabled={!canCaption}
+          aria-disabled={!canCaption}
           className={canCaption ? PILL_BASE : PILL_DISABLED}
-          title="图生文 / 反推提示词"
           aria-label="图生文 / 反推提示词"
         >
           <svg className="h-3.5 w-3.5 opacity-80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -342,18 +334,15 @@ export default function PillRow({
           )
         })()}
 
-        {/* 上传 */}
-        <div
-          className="relative"
-          onMouseEnter={() => setAttachHover(true)}
-          onMouseLeave={() => setAttachHover(false)}
-        >
-          <ButtonTooltip visible={atImageLimit && attachHover} text={`参考图数量已达上限（${apiMaxImages} 张），无法继续添加`} />
+        {/* 上传:达上限时原生 title 让位给自定义气泡,避免双重提示叠放 */}
+        <div className="relative" {...attachHint.anchorProps}>
+          <ButtonTooltip visible={atImageLimit && attachHint.visible} text={`参考图数量已达上限（${apiMaxImages} 张），无法继续添加`} />
           <button
             type="button"
             onClick={() => !atImageLimit && onAttach()}
+            aria-disabled={atImageLimit}
             className={atImageLimit ? PILL_DISABLED : PILL_BASE}
-            title={atImageLimit ? `已达上限 ${apiMaxImages} 张` : '上传参考图'}
+            title={atImageLimit ? undefined : '上传参考图'}
             aria-label="上传参考图"
           >
             <svg className="h-3.5 w-3.5 opacity-80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

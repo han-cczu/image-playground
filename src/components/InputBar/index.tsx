@@ -113,7 +113,6 @@ export default function InputBar() {
     return () => el.removeEventListener('focus', markTouched)
   }, [])
 
-  const [submitHover, setSubmitHover] = useState(false)
   const [showSizePicker, setShowSizePicker] = useState(false)
   const [maskPreview, setMaskPreview] = useState<MaskPreviewState>({ key: '', url: '' })
 
@@ -474,8 +473,6 @@ export default function InputBar() {
             <SubmitButton
               canSubmit={Boolean(canSubmit)}
               hasMask={Boolean(maskDraft)}
-              hover={submitHover}
-              onHoverChange={setSubmitHover}
               onSubmit={submitTask}
               onOpenSettings={() => setShowSettings(true)}
               needsConfig={!settings.apiKey}

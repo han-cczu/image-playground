@@ -1,10 +1,9 @@
+import { useHintTooltip } from '../../hooks/useHintTooltip'
 import ButtonTooltip from './ButtonTooltip'
 
 export interface SubmitButtonProps {
   canSubmit: boolean
   hasMask: boolean
-  hover: boolean
-  onHoverChange: (hover: boolean) => void
   onSubmit: () => void | Promise<void>
   onOpenSettings: () => void
   needsConfig: boolean
@@ -13,12 +12,13 @@ export interface SubmitButtonProps {
 export default function SubmitButton({
   canSubmit,
   hasMask,
-  hover,
-  onHoverChange,
   onSubmit,
   onOpenSettings,
   needsConfig,
 }: SubmitButtonProps) {
+  // 未配置 API 的引导气泡:hover/聚焦/触屏轻点均可见,原实现把 hover 状态提升到父级并无必要
+  const hint = useHintTooltip<HTMLDivElement>({ enabled: needsConfig })
+
   const handleClick = () => {
     if (needsConfig) {
       onOpenSettings()
@@ -36,10 +36,9 @@ export default function SubmitButton({
     <div
       data-tour-id="submit"
       className="relative flex shrink-0 items-end pb-0.5"
-      onMouseEnter={() => onHoverChange(true)}
-      onMouseLeave={() => onHoverChange(false)}
+      {...hint.anchorProps}
     >
-      <ButtonTooltip visible={needsConfig && hover} text="尚未完成 API 配置，请点 sidebar 底部齿轮按钮打开设置" />
+      <ButtonTooltip visible={needsConfig && hint.visible} text="尚未完成 API 配置，请点 sidebar 底部齿轮按钮打开设置" />
       <button
         type="button"
         onClick={handleClick}
