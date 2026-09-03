@@ -12,7 +12,9 @@ const MAX_DELAY_MS = 30_000
  * - watchdog 超时标记 → 重试(标记优先:此时底层错误是 abort 出来的 AbortError);
  * - AbortError(用户取消/删除)→ 绝不重试;
  * - ApiHttpError 429 / 5xx → 重试;其余 4xx(参数错/鉴权/内容策略)→ 不重试;
- * - TypeError → 重试(fetch 网络层失败的标准形态:DNS/断网/连接被拒);
+ * - TypeError → 重试(fetch 网络层失败的标准形态:DNS/断网/连接被拒)。只针对主请求:
+ *   结果图 URL 下载阶段的 TypeError 已在 fetchImageUrlAsDataUrl 内降级为普通 Error——那时上游
+ *   已计费出图,重跑整轮生成只会再烧配额(CORS 拒绝还是确定性失败);
  * - 其余业务错误(「接口未返回图片数据」「Gemini 安全拦截」等)→ 不重试,重试只会烧配额。
  */
 export function isTransientTaskError(err: unknown, hasTimeoutRetryFlag = false): boolean {

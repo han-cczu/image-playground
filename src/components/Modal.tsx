@@ -1,4 +1,12 @@
-import { useRef, type KeyboardEventHandler, type ReactNode } from 'react'
+import {
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEventHandler,
+  type ReactNode,
+  type RefObject,
+} from 'react'
+import { ModalFocusScopeContext, type ModalFocusScope } from './modalFocusScope'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { useLockBodyScroll } from '../hooks/useLockBodyScroll'
 import { useFocusTrap } from '../hooks/useFocusTrap'
@@ -62,40 +70,73 @@ export default function Modal({
   const panelRef = useRef<HTMLDivElement>(null)
   useCloseOnEscape(escEnabled, onClose)
   useLockBodyScroll(true)
-  useFocusTrap(true, panelRef)
+  // portal 到面板外的附属面板(见 modalFocusScope.ts)注册进来后并入焦点环;用 state 存数组,
+  // 注册变化要触发一次渲染让 useFocusTrap 读到最新列表
+  const [extraContainerRefs, setExtraContainerRefs] = useState<
+    Array<RefObject<HTMLElement | null>>
+  >([])
+  const focusScope = useMemo<ModalFocusScope>(
+    () => ({
+      register: (ref) => {
+        setExtraContainerRefs((prev) => (prev.includes(ref) ? prev : [...prev, ref]))
+        return () => setExtraContainerRefs((prev) => prev.filter((item) => item !== ref))
+      },
+    }),
+    [],
+  )
+  useFocusTrap(true, panelRef, { extraContainerRefs })
 
   return (
-    <div data-no-drag-select className={`fixed inset-0 flex justify-center p-4 ${containerClassName}`}>
+    <ModalFocusScopeContext.Provider value={focusScope}>
       <div
-        className={`absolute inset-0 animate-overlay-in ${BACKDROP_TONE[tone]}`}
-        onClick={closeOnBackdrop ? onClose : undefined}
-      />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={ariaLabel}
-        tabIndex={-1}
-        onKeyDown={onPanelKeyDown}
-        className={`relative z-10 rounded-3xl border border-white/50 ring-1 ring-black/5 dark:border-white/[0.08] dark:ring-white/10 ${SURFACE_TONE[tone]} ${ANIMATION[animation]} ${panelClassName}`}
+        data-no-drag-select
+        className={`fixed inset-0 flex justify-center p-4 ${containerClassName}`}
       >
-        {children}
+        <div
+          className={`absolute inset-0 animate-overlay-in ${BACKDROP_TONE[tone]}`}
+          onClick={closeOnBackdrop ? onClose : undefined}
+        />
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={ariaLabel}
+          tabIndex={-1}
+          onKeyDown={onPanelKeyDown}
+          className={`relative z-10 rounded-3xl border border-white/50 ring-1 ring-black/5 dark:border-white/[0.08] dark:ring-white/10 ${SURFACE_TONE[tone]} ${ANIMATION[animation]} ${panelClassName}`}
+        >
+          {children}
+        </div>
       </div>
-    </div>
+    </ModalFocusScopeContext.Provider>
   )
 }
 
 /** 标题 h3:大多数弹窗共用的「图标 + 文案」样式 */
-export function ModalTitle({ children, className = '' }: { children: ReactNode; className?: string }) {
+export function ModalTitle({
+  children,
+  className = '',
+}: {
+  children: ReactNode
+  className?: string
+}) {
   return (
-    <h3 className={`flex items-center gap-2 text-base font-semibold text-gray-800 dark:text-gray-100 ${className}`}>
+    <h3
+      className={`flex items-center gap-2 text-base font-semibold text-gray-800 dark:text-gray-100 ${className}`}
+    >
       {children}
     </h3>
   )
 }
 
 /** 带底边框的标题栏(Compare/Lineage/BatchCaption 风格):内容区在其下方独立滚动 */
-export function ModalHeaderBar({ children, className = '' }: { children: ReactNode; className?: string }) {
+export function ModalHeaderBar({
+  children,
+  className = '',
+}: {
+  children: ReactNode
+  className?: string
+}) {
   return (
     <div
       className={`flex items-center justify-between gap-4 border-b border-gray-100 px-5 py-3 dark:border-white/[0.08] ${className}`}
@@ -125,7 +166,12 @@ export function ModalCloseButton({
       className={`rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200 ${className}`}
     >
       <svg className={iconClassName} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M6 18L18 6M6 6l12 12"
+        />
       </svg>
     </button>
   )

@@ -17,7 +17,16 @@ export function genConversationId(): string {
 }
 
 /** 简易 hash → 取色（按 id 稳定地从一组品牌色里挑一个，用于无 color 时的兜底色块）。 */
-const FALLBACK_COLORS = ['#3b82f6', '#f59e0b', '#14b8a6', '#a855f7', '#ef4444', '#22c55e', '#ec4899', '#64748b']
+const FALLBACK_COLORS = [
+  '#3b82f6',
+  '#f59e0b',
+  '#14b8a6',
+  '#a855f7',
+  '#ef4444',
+  '#22c55e',
+  '#ec4899',
+  '#64748b',
+]
 export function pickFallbackColor(id: string): string {
   let h = 0
   for (let i = 0; i < id.length; i++) {
@@ -54,10 +63,7 @@ function isValidColor(color: unknown): color is string {
 /**
  * 归一化对话列表：跳过无效 id、修补缺失字段、按 updatedAt 降序输出（archive 永远最末）。
  */
-export function normalizeConversations(
-  conversations: unknown,
-  now = Date.now(),
-): Conversation[] {
+export function normalizeConversations(conversations: unknown, now = Date.now()): Conversation[] {
   if (!Array.isArray(conversations)) return []
 
   const byId = new Map<string, Conversation>()
@@ -70,7 +76,9 @@ export function normalizeConversations(
     const createdAt =
       typeof item.createdAt === 'number' && Number.isFinite(item.createdAt) ? item.createdAt : now
     const updatedAt =
-      typeof item.updatedAt === 'number' && Number.isFinite(item.updatedAt) ? item.updatedAt : createdAt
+      typeof item.updatedAt === 'number' && Number.isFinite(item.updatedAt)
+        ? item.updatedAt
+        : createdAt
 
     byId.set(id, {
       id,
@@ -85,12 +93,21 @@ export function normalizeConversations(
     })
   })
 
-  return Array.from(byId.values()).sort((a, b) => {
-    // archive 永远沉底
-    if (a.id === ARCHIVE_CONVERSATION_ID && b.id !== ARCHIVE_CONVERSATION_ID) return 1
-    if (b.id === ARCHIVE_CONVERSATION_ID && a.id !== ARCHIVE_CONVERSATION_ID) return -1
-    return b.updatedAt - a.updatedAt || a.id.localeCompare(b.id)
-  }).slice(0, MAX_CONVERSATIONS)
+  // archive 单独摘出、最后追加:它「永远沉底」,若和普通对话一起 slice,普通对话一满 500 条被截掉的
+  // 第一条恰好就是它——「历史记录」从侧栏消失、其下任务在任何对话视图都看不到,而 initStore 每次启动
+  // 又会补建一份再被截掉。上限只施加在普通对话上(archive 存在时为 MAX - 1)。
+  const archive = byId.get(ARCHIVE_CONVERSATION_ID)
+  const regular = Array.from(byId.values())
+    .filter((conversation) => conversation.id !== ARCHIVE_CONVERSATION_ID)
+    .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id))
+    .slice(0, archive ? MAX_CONVERSATIONS - 1 : MAX_CONVERSATIONS)
+  return archive ? [...regular, archive] : regular
+}
+
+/** 普通对话(不含 archive)是否已达 normalizeConversations 的上限——写入侧应先拦,而不是等读取侧静默截断。 */
+export function isConversationLimitReached(conversations: readonly Conversation[]): boolean {
+  const regularCount = conversations.filter((c) => c.id !== ARCHIVE_CONVERSATION_ID).length
+  return regularCount >= MAX_CONVERSATIONS - 1
 }
 
 /**
@@ -116,9 +133,7 @@ export function findReusableEmptyConversation(
   )
   if (candidates.length === 0) return null
   // createdAt 降序，取最新
-  return candidates.reduce((latest, curr) =>
-    curr.createdAt > latest.createdAt ? curr : latest,
-  )
+  return candidates.reduce((latest, curr) => (curr.createdAt > latest.createdAt ? curr : latest))
 }
 
 /** 取 prompt 前 N 字符作为对话标题（去掉换行、压缩空白）。 */

@@ -26,8 +26,10 @@ vi.mock('./api', async (importOriginal) => {
 
 import { callImageApi } from './api'
 import type { CallApiResult } from './api'
+import { getImage } from './db'
+import { clearImageCache } from './imageCache'
 import { useStore } from '../store'
-import { cancelTask, resetTaskRuntimeForTest, submitTask } from './taskRuntime'
+import { cancelAllRunning, cancelTask, resetTaskRuntimeForTest, submitTask } from './taskRuntime'
 
 const SUCCESS_RESULT: CallApiResult = {
   images: ['data:image/png;base64,AA=='],
@@ -47,8 +49,11 @@ async function submitAndWaitFirstCall() {
 describe('瞬时失败自动重试(executeTask 集成)', () => {
   beforeEach(() => {
     resetTaskRuntimeForTest()
+    // 永挂的 getImage mock 会让 ensureImageCached 的 inFlightLoads 条目跨用例残留,必须连同内存缓存一起清
+    clearImageCache()
     vi.useFakeTimers()
     vi.mocked(callImageApi).mockReset()
+    vi.mocked(getImage).mockReset().mockResolvedValue(undefined)
     useStore.setState({
       // timeout: 1(秒)顶层镜像 → watchdog 用例的超时预算;autoRetryMax 各用例按需覆盖
       settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', timeout: 1 },
@@ -146,9 +151,7 @@ describe('瞬时失败自动重试(executeTask 集成)', () => {
     vi.mocked(callImageApi).mockRejectedValue(new ApiHttpError('限流', 429))
 
     await submitAndWaitFirstCall()
-    await vi.waitFor(() =>
-      expect(useStore.getState().taskRetryInfo[currentTask().id]).toBeTruthy(),
-    )
+    await vi.waitFor(() => expect(useStore.getState().taskRetryInfo[currentTask().id]).toBeTruthy())
 
     cancelTask(currentTask().id)
     await vi.advanceTimersByTimeAsync(120_000)
@@ -156,6 +159,18 @@ describe('瞬时失败自动重试(executeTask 集成)', () => {
     expect(callImageApi).toHaveBeenCalledTimes(1)
     expect(currentTask()).toMatchObject({ status: 'error', error: '已取消生成' })
     expect(useStore.getState().taskRetryInfo).toEqual({})
+  })
+
+  it('退避中的任务在批量取消里计为「在途中止」而不是「排队跳过」', async () => {
+    vi.mocked(callImageApi).mockRejectedValue(new ApiHttpError('限流', 429))
+
+    await submitAndWaitFirstCall()
+    await vi.waitFor(() => expect(useStore.getState().taskRetryInfo[currentTask().id]).toBeTruthy())
+
+    const result = cancelAllRunning()
+
+    expect(result).toEqual({ aborted: 1, skipped: 0 })
+    expect(currentTask()).toMatchObject({ status: 'error', error: '已取消生成' })
   })
 
   it('autoRetryMax=0 时行为与旧版完全一致:一次失败即落 error', async () => {
@@ -172,8 +187,9 @@ describe('瞬时失败自动重试(executeTask 集成)', () => {
   it('watchdog 超时被重试接管:中止旧请求重发,耗尽后按超时落 error 并标注重试次数', async () => {
     useStore.setState((s) => ({ settings: { ...s.settings, autoRetryMax: 1 } }))
     const signals: Array<AbortSignal | undefined> = []
-    // 模拟真实 fetch:abort 时以 AbortError 拒绝(重试循环靠 reject 推进;
-    // 完全不响应 abort 的挂死场景由 watchdog 兜底直落覆盖,见 store.test.ts 同名用例)
+    // 模拟真实 fetch:abort 时以 AbortError 拒绝(重试循环靠 reject 推进;真实请求层自带同预算的
+    // 超时控制器,请求阶段不存在「永不落定」。不响应 abort 的挂死只会出现在输入图加载阶段,
+    // 由下面「输入图 IDB 读挂起」用例覆盖;autoRetryMax=0 的直落路径见 store.test.ts 同名用例)
     vi.mocked(callImageApi).mockImplementation(async (opts) => {
       signals.push(opts.signal)
       return new Promise<never>((_, reject) => {
@@ -194,6 +210,56 @@ describe('瞬时失败自动重试(executeTask 集成)', () => {
     expect(task.status).toBe('error')
     expect(task.error).toContain('请求超时')
     expect(task.error).toContain('已自动重试 1 次')
+  })
+
+  it('输入图 IDB 读挂起(默认 autoRetryMax=2):超时不进重试而直落 error,任务不会永久 running', async () => {
+    expect(useStore.getState().settings.autoRetryMax).toBe(2)
+    // 模拟浏览器 IndexedDB 请求永不完成:ensureImageCached 不观察 signal,abort 对它无效,
+    // 若仲裁器仍按「有剩余尝试」接管,attempt 永不落定、watchdog 又已被清,任务就永久卡 running
+    vi.mocked(getImage).mockImplementation(() => new Promise<never>(() => undefined))
+    useStore.setState({
+      inputImages: [{ id: 'hung-input-image', dataUrl: 'data:image/png;base64,aQ==' }],
+    })
+
+    await submitTask()
+    await vi.waitFor(() => expect(currentTask()?.status).toBe('running'))
+    expect(getImage).toHaveBeenCalledWith('hung-input-image')
+    await vi.advanceTimersByTimeAsync(600_000)
+
+    expect(callImageApi).not.toHaveBeenCalled()
+    const task = currentTask()
+    expect(task.status).toBe('error')
+    expect(task.error).toContain('请求超时')
+    // 加载阶段没有发过请求,不算「已自动重试」
+    expect(task.error).not.toContain('已自动重试')
+    expect(useStore.getState().taskRetryInfo).toEqual({})
+    expect(useStore.getState().showToast).toHaveBeenCalledWith('生成任务请求超时', 'error')
+  })
+
+  it('输入图加载超时直落后 IDB 迟到完成:不再发请求,也不复活已落 error 的任务', async () => {
+    let resolveImage: (value: undefined) => void = () => undefined
+    vi.mocked(getImage).mockImplementation(
+      () => new Promise<undefined>((resolve) => (resolveImage = resolve)),
+    )
+    useStore.setState({
+      inputImages: [{ id: 'late-input-image', dataUrl: 'data:image/png;base64,aQ==' }],
+    })
+    vi.mocked(callImageApi).mockResolvedValue(SUCCESS_RESULT)
+
+    await submitTask()
+    await vi.advanceTimersByTimeAsync(600_000)
+    expect(currentTask().status).toBe('error')
+
+    // 迟到的 IDB 结果让挂起的 attempt 继续往下走:store 里已无该图 → 抛错 → 循环发现任务已非 running 退出
+    resolveImage(undefined)
+    await vi.advanceTimersByTimeAsync(120_000)
+
+    expect(callImageApi).not.toHaveBeenCalled()
+    expect(currentTask()).toMatchObject({
+      status: 'error',
+      error: expect.stringContaining('请求超时'),
+    })
+    expect(useStore.getState().taskRetryInfo).toEqual({})
   })
 
   it('AbortError(取消而非超时)不触发重试', async () => {

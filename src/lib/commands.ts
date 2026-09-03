@@ -3,7 +3,8 @@ import { exportData } from './exportImport'
 import { cancelAllRunning } from './taskRuntime'
 
 /** 命令分组（也是面板里的展示顺序） */
-export type CommandGroup = 'navigation' | 'conversation' | 'snippet' | 'provider' | 'theme' | 'action'
+export type CommandGroup =
+  'navigation' | 'conversation' | 'snippet' | 'provider' | 'theme' | 'action'
 
 export const COMMAND_GROUP_ORDER: CommandGroup[] = [
   'navigation',
@@ -48,7 +49,7 @@ export type CommandStore = Pick<
   | 'toggleSidebar'
   | 'conversations'
   | 'activeConversationId'
-  | 'createConversation'
+  | 'createOrReuseEmptyConversation'
   | 'setActiveConversation'
   | 'settings'
   | 'setSettings'
@@ -67,7 +68,11 @@ export interface CommandCtx {
   close: () => void
 }
 
-const THEME_OPTIONS: Array<{ value: 'light' | 'dark' | 'system'; title: string; keywords: string }> = [
+const THEME_OPTIONS: Array<{
+  value: 'light' | 'dark' | 'system'
+  title: string
+  keywords: string
+}> = [
   { value: 'light', title: '主题：浅色', keywords: 'theme light qianse liangse' },
   { value: 'dark', title: '主题：深色', keywords: 'theme dark shense anse' },
   { value: 'system', title: '主题：跟随系统', keywords: 'theme system auto follow xitong gensui' },
@@ -121,7 +126,8 @@ export function buildCommands(ctx: CommandCtx): Command[] {
     group: 'conversation',
     keywords: 'new conversation create xinjian duihua',
     run: () => {
-      store.createConversation()
+      // 与侧栏「新建对话」同口径:复用空的「新对话」而不是每按一次都新建并写库
+      store.createOrReuseEmptyConversation()
       store.setGalleryView(false)
       close()
     },

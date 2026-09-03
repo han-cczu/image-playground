@@ -20,7 +20,15 @@ type PersistedStoreState = Partial<AppState> & {
 }
 
 export const MAX_DISMISSED_CODEX_CLI_PROMPTS = 50
-export const MAX_DISMISSED_CODEX_CLI_PROMPT_KEY_LEN = MAX_CONFIG_FIELD_LEN * 2 + 1
+/**
+ * Codex CLI 提示「已忽略」记录的 key 版本前缀。v1 的 key 是 `${baseUrl}\n${apiKey}`——把 API 密钥明文
+ * 落进了 localStorage,且密钥改掉/删掉后仍长期残留;v2 改为 `${profile.id}\n${baseUrl}`。恢复时不带
+ * 前缀的旧条目一律丢弃,这是把已落盘的明文密钥从存量用户的 localStorage 里清掉的唯一路径
+ *(代价:升级后已忽略过的提示会再弹一次)。
+ */
+export const DISMISSED_CODEX_CLI_PROMPT_KEY_PREFIX = 'v2:'
+export const MAX_DISMISSED_CODEX_CLI_PROMPT_KEY_LEN =
+  DISMISSED_CODEX_CLI_PROMPT_KEY_PREFIX.length + MAX_CONFIG_FIELD_LEN * 2 + 1
 
 function normalizePersistedPrompt(value: unknown): string {
   return typeof value === 'string' ? value.slice(0, MAX_TASK_TEXT_LEN) : ''
@@ -29,15 +37,17 @@ function normalizePersistedPrompt(value: unknown): string {
 function normalizePersistedInputImages(value: unknown): AppState['inputImages'] {
   if (!Array.isArray(value)) return []
   const seen = new Set<string>()
-  return value.flatMap((item) => {
-    if (!item || typeof item !== 'object') return []
-    const record = item as Record<string, unknown>
-    if (typeof record.id !== 'string' || !record.id.trim()) return []
-    const id = record.id.slice(0, MAX_TASK_TEXT_LEN)
-    if (seen.has(id)) return []
-    seen.add(id)
-    return [{ id, dataUrl: '' }]
-  }).slice(0, MAX_INPUT_IMAGES_PER_SUBMISSION)
+  return value
+    .flatMap((item) => {
+      if (!item || typeof item !== 'object') return []
+      const record = item as Record<string, unknown>
+      if (typeof record.id !== 'string' || !record.id.trim()) return []
+      const id = record.id.slice(0, MAX_TASK_TEXT_LEN)
+      if (seen.has(id)) return []
+      seen.add(id)
+      return [{ id, dataUrl: '' }]
+    })
+    .slice(0, MAX_INPUT_IMAGES_PER_SUBMISSION)
 }
 
 function mergePersistedInputImages(
@@ -60,7 +70,9 @@ function normalizeStringArray(value: unknown): string[] {
   for (const item of value) {
     if (typeof item !== 'string') continue
     const normalized = item.trim().slice(0, MAX_DISMISSED_CODEX_CLI_PROMPT_KEY_LEN)
-    if (!normalized || seen.has(normalized)) continue
+    // 旧格式(无版本前缀)条目含明文 apiKey,恢复时直接丢弃(见 DISMISSED_CODEX_CLI_PROMPT_KEY_PREFIX)
+    if (!normalized.startsWith(DISMISSED_CODEX_CLI_PROMPT_KEY_PREFIX)) continue
+    if (seen.has(normalized)) continue
     seen.add(normalized)
     result.push(normalized)
     if (result.length >= MAX_DISMISSED_CODEX_CLI_PROMPTS) break
@@ -108,6 +120,15 @@ export function mergePersistedStoreState(
     inputImages.some((image) => image.id === currentState.maskDraft?.targetImageId)
       ? currentState.maskDraft
       : null
+  const favoriteCategories = shouldSeedDefaultCategory
+    ? [createDefaultFavoriteCategory()]
+    : normalizedCategories
+  // 分类列表以 persisted 为准(另一标签页可能刚删了分类),筛选指向的分类不存在就复位,否则筛选结果永远为空且无法解释
+  const filterFavoriteCategoryId =
+    currentState.filterFavoriteCategoryId &&
+    favoriteCategories.some((category) => category.id === currentState.filterFavoriteCategoryId)
+      ? currentState.filterFavoriteCategoryId
+      : null
 
   return {
     ...currentState,
@@ -116,9 +137,7 @@ export function mergePersistedStoreState(
     prompt: normalizePersistedPrompt(persisted?.prompt),
     inputImages,
     dismissedCodexCliPrompts: normalizeStringArray(persisted?.dismissedCodexCliPrompts),
-    favoriteCategories: shouldSeedDefaultCategory
-      ? [createDefaultFavoriteCategory()]
-      : normalizedCategories,
+    favoriteCategories,
     favoriteCategoriesInitialized: true,
     snippets: normalizeSnippets(persisted?.snippets),
     batchNotes: normalizeBatchNotes(persisted?.batchNotes),
@@ -153,7 +172,7 @@ export function mergePersistedStoreState(
     searchQueryVersion: currentState.searchQueryVersion,
     filterStatus: currentState.filterStatus,
     filterFavorite: currentState.filterFavorite,
-    filterFavoriteCategoryId: currentState.filterFavoriteCategoryId,
+    filterFavoriteCategoryId,
     selectedTaskIds: selectionDomainChanged ? [] : currentState.selectedTaskIds,
     // 旧用户持久化数据没有 galleryView 字段；显式 normalize 为 boolean，避免 undefined 渗透到组件
     galleryView,

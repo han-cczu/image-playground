@@ -4,6 +4,7 @@
 import { useStore } from '../../store'
 import {
   getAllTasks,
+  getTask,
   putTask,
   getImage,
   storedImageToDataUrl,
@@ -11,6 +12,10 @@ import {
   putConversation,
   persistConversationMigration,
 } from '../db'
+import { queryHeldTaskLeases, watchTaskLeaseRelease } from './lease'
+import { getDataJobInProgress } from '../dataJobState'
+import { getInFlightImageIds } from '../inFlightImages'
+import { updateTaskInStoreSilently } from './persistence'
 import { collectReferencedImageIds, pruneOrphanImages } from '../storageStats'
 import { setCachedImage } from '../imageCache'
 import {
@@ -22,9 +27,30 @@ import {
   writeConversationMigrationVersion,
 } from '../conversations'
 import { reseedConversationsFromFavoriteCategories } from '../conversationMigration'
-import { normalizeTasks } from '../tasks'
+import { normalizeStoredTasks } from '../tasks'
 import { registerTaskRuntimeTestReset } from './shared'
-import { markInterruptedSyncHttpTasks } from './watchdog'
+import {
+  isRunningSyncHttpTask,
+  markInterruptedSyncHttpTasks,
+  SYNC_HTTP_INTERRUPTED_ERROR,
+} from './watchdog'
+
+/**
+ * 租约释放后的兜底:持有者若是崩溃/关闭而非正常收尾,库里这条任务仍是 running 且再无人执行,
+ * 这里把它补标为「请求中断」。依据必须取自库而不是内存——持有者正常完成时,它写 done 落库、
+ * 释放锁、本页收到 storage 事件刷新三件事之间没有顺序保证,内存副本可能还停在 running。
+ */
+async function markOrphanedTaskInterrupted(taskId: string): Promise<void> {
+  const latest = await getTask(taskId)
+  if (!latest || !isRunningSyncHttpTask(latest)) return
+  const now = Date.now()
+  updateTaskInStoreSilently(taskId, {
+    status: 'error',
+    error: SYNC_HTTP_INTERRUPTED_ERROR,
+    finishedAt: now,
+    elapsed: Math.max(0, now - latest.createdAt),
+  })
+}
 
 let initStorePromise: Promise<void> | null = null
 
@@ -78,8 +104,12 @@ function shouldRunStartupOrphanGc(now: number): boolean {
 function scheduleStartupOrphanGc(initStartedAt: number): void {
   if (!shouldRunStartupOrphanGc(initStartedAt)) return
   pendingStartupOrphanGc = async () => {
+    // 导入/清空进行中就放弃本轮、也不盖频控戳:导入写图与任务落库不在一个事务,窗口里的图在引用集之外
+    if (getDataJobInProgress()) return
     const latestState = useStore.getState()
     const referencedIds = collectReferencedImageIds(latestState.tasks, latestState.inputImages)
+    // 在途图(已落库、任务记录尚未引用)同样不是孤儿
+    for (const id of getInFlightImageIds()) referencedIds.add(id)
     await pruneOrphanImages(referencedIds, initStartedAt)
     try {
       localStorage.setItem(ORPHAN_GC_LAST_RUN_KEY, String(Date.now()))
@@ -138,11 +168,25 @@ async function initStoreOnce() {
     getAllConversations(),
     getAllTasks(),
   ])
-  const storedTasks = normalizeTasks(storedTaskRecords, initStartedAt)
+  // 自家库读取走不截断版本:这里的结果就是孤儿 GC 的引用集来源,少一条任务就多删一批在用图
+  const storedTasks = normalizeStoredTasks(storedTaskRecords, initStartedAt)
 
-  // 1.2 中断进行中的同步 HTTP 任务
-  const { tasks: interruptedNormalizedTasks, interruptedTasks } =
-    markInterruptedSyncHttpTasks(storedTasks)
+  // 1.2 中断进行中的同步 HTTP 任务——但跳过仍被别的标签页持有租约的(它们不是孤儿,正在跑;
+  // 不跳过就会把用户在 A 页的整批在途任务全部写成中断,再经跨标签页刷新中止 A 页的真实请求)。
+  // 被跳过的挂一个租约释放观察者:持有者崩溃时由本页补标中断,不留幽灵 running。
+  const heldLeases = await queryHeldTaskLeases()
+  const {
+    tasks: interruptedNormalizedTasks,
+    interruptedTasks,
+    skippedOwnedTasks,
+  } = markInterruptedSyncHttpTasks(storedTasks, initStartedAt, heldLeases)
+  for (const owned of skippedOwnedTasks) {
+    watchTaskLeaseRelease(owned.id, () => {
+      void markOrphanedTaskInterrupted(owned.id).catch((err) =>
+        console.error('补标孤儿任务失败:', err),
+      )
+    })
+  }
 
   /*
    * ========================================================================
@@ -203,9 +247,14 @@ async function initStoreOnce() {
     finalConversations = normalizeConversations([archive, ...finalConversations])
   }
 
-  // 3.2 写入 store
+  // 3.2 写入 store。tasks 不进 zustand-persist,此刻内存里只可能有 init 窗口内新提交的任务(用户在
+  // 首屏读库的几百毫秒里就点了发送):按 id 合并而不是整体覆盖,否则它们从内存消失、完成时找不到记录丢结果。
   useStore.getState().setConversations(finalConversations)
-  useStore.getState().setTasks(finalTasks)
+  const snapshotTaskIds = new Set(finalTasks.map((task) => task.id))
+  const memoryOnlyTasks = useStore.getState().tasks.filter((task) => !snapshotTaskIds.has(task.id))
+  useStore
+    .getState()
+    .setTasks(memoryOnlyTasks.length ? [...memoryOnlyTasks, ...finalTasks] : finalTasks)
 
   // 3.3 若没有 activeConversationId 或指向不存在的对话，激活 updatedAt 最新的对话
   const currentActiveId = useStore.getState().activeConversationId
@@ -230,9 +279,7 @@ async function initStoreOnce() {
       persistedInputImages.map(async (img) => {
         if (img.dataUrl) return img
         const storedImage = await getImage(img.id)
-        const dataUrl = storedImage
-          ? await storedImageToDataUrl(storedImage).catch(() => '')
-          : ''
+        const dataUrl = storedImage ? await storedImageToDataUrl(storedImage).catch(() => '') : ''
         return { ...img, dataUrl: dataUrl ?? '' }
       }),
     )

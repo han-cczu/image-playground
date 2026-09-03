@@ -32,7 +32,9 @@ import { ensureImageCached, evictCachedImageDataUrl, setCachedImage } from '../i
 import { ARCHIVE_CONVERSATION_ID, deriveConversationTitleFromPrompt } from '../conversations'
 import { MAX_TASK_TEXT_LEN } from '../tasks'
 import {
+  clearPendingIndexedDbConversationWrite,
   clearPendingIndexedDbTaskWrite,
+  markPendingIndexedDbConversationWrite,
   markPendingIndexedDbTaskWrite,
 } from '../../store/idbSyncState'
 import {
@@ -45,6 +47,8 @@ import {
   terminateTaskRuntime,
 } from './shared'
 import { registerWatchdogTimeoutRetryArbiter, scheduleSyncHttpWatchdog } from './watchdog'
+import { acquireTaskLease, releaseTaskLease } from './lease'
+import { registerInFlightImages, releaseInFlightImages } from '../inFlightImages'
 import { computeRetryDelayMs, getRetryAfterMs, isTransientTaskError } from './retryPolicy'
 import {
   persistTaskSilently,
@@ -68,9 +72,13 @@ export async function maybeUpdateConversationOnFirstTask(
   // archive 永远保持「历史记录」标题
   if (target.id === ARCHIVE_CONVERSATION_ID) return
 
-  // 判断是否为该对话首条 task（除新建的这一条）
+  // 判断是否为该对话首条 task(除新建的这一条与同批兄弟:通配/XY 网格一次入队多条,首条回填时
+  // 兄弟已在 store 里,若把它们当「先前任务」,新对话标题永远停留在「新对话」)
   const hadPriorTask = state.tasks.some(
-    (task) => task.id !== newTask.id && task.conversationId === conversationId,
+    (task) =>
+      task.id !== newTask.id &&
+      task.conversationId === conversationId &&
+      (!newTask.batchId || task.batchId !== newTask.batchId),
   )
   const isFirstTask = !hadPriorTask
   const isUnnamed = !target.title || target.title === '新对话'
@@ -82,6 +90,8 @@ export async function maybeUpdateConversationOnFirstTask(
     title: nextTitle,
     updatedAt: newTask.createdAt,
   }
+  // 登记在途写入(总账见 idbSyncState.ts):落盘前的跨标签页刷新不得把回填的标题/updatedAt 打回旧值
+  markPendingIndexedDbConversationWrite(conversationId)
   useStore
     .getState()
     .setConversations(state.conversations.map((c) => (c.id === conversationId ? updated : c)))
@@ -89,6 +99,8 @@ export async function maybeUpdateConversationOnFirstTask(
     await putConversation(updated)
   } catch {
     /* 持久化失败不阻塞 UI；下次 submit 会再次尝试更新 */
+  } finally {
+    clearPendingIndexedDbConversationWrite(conversationId)
   }
 }
 
@@ -146,6 +158,9 @@ export async function enqueueTask(spec: EnqueueTaskSpec): Promise<string | null>
   const latestTasks = useStore.getState().tasks
   useStore.getState().setTasks([task, ...latestTasks])
   markPendingIndexedDbTaskWrite(taskId)
+  // 租约必须先于 running 落库:别的标签页一旦在库里看到 running,就要能查到本页持锁,否则其 initStore
+  // 会把这条正在跑的任务当孤儿翻成「请求中断」(见 lease.ts 头注释)。executeTask 收尾统一释放。
+  acquireTaskLease(taskId)
   try {
     await putTask(task)
   } catch (err) {
@@ -155,6 +170,7 @@ export async function enqueueTask(spec: EnqueueTaskSpec): Promise<string | null>
     const state = useStore.getState()
     state.setTasks(state.tasks.filter((t) => t.id !== taskId))
     state.showToast(`保存任务失败：${message}`, 'error')
+    releaseTaskLease(taskId)
     return null
   } finally {
     clearPendingIndexedDbTaskWrite(taskId)
@@ -243,6 +259,8 @@ export async function prepareSubmission(
         return null
       }
       maskImageId = await storeImage(maskDraft.maskDataUrl, 'mask')
+      // 已落库、尚未进任何任务记录:登记为在途,否则这段窗口里跑的孤儿 GC / 手动清理会把它删掉
+      registerInFlightImages(SUBMISSION_OWNER, [maskImageId])
       setCachedImage(maskImageId, maskDraft.maskDataUrl)
       maskTargetImageId = maskDraft.targetImageId
     } catch (err) {
@@ -258,13 +276,15 @@ export async function prepareSubmission(
   const storedInputImageIds: string[] = []
   try {
     for (const img of orderedInputImages) {
-      storedInputImageIds.push(await storeImage(img.dataUrl))
+      const storedId = await storeImage(img.dataUrl)
+      registerInFlightImages(SUBMISSION_OWNER, [storedId])
+      storedInputImageIds.push(storedId)
     }
   } catch (err) {
-    await rollbackStoredImagesSilently([
-      ...storedInputImageIds,
-      ...(maskImageId ? [maskImageId] : []),
-    ])
+    await rollbackStoredImagesSilently(
+      [...storedInputImageIds, ...(maskImageId ? [maskImageId] : [])],
+      SUBMISSION_OWNER,
+    )
     useStore
       .getState()
       .showToast(`保存输入图片失败：${err instanceof Error ? err.message : String(err)}`, 'error')
@@ -293,9 +313,41 @@ export async function prepareSubmission(
 }
 
 /** 提交新任务 */
-export async function submitTask(
+let submissionInFlight = false
+/** prepareSubmission 落库的遮罩/输入图的在途 owner;提交互斥保证同一时刻只有一个提交会话 */
+const SUBMISSION_OWNER = 'submission'
+registerTaskRuntimeTestReset(() => {
+  submissionInFlight = false
+})
+
+/**
+ * 提交互斥:submitTask / submitGridTask 从校验到全部入队之间有多个 await(遮罩落库、输入图哈希去重、
+ * 逐条 putTask),这段窗口里再点发送 / 连按 Ctrl+Enter 会把完整流程再跑一遍——同一提示词入队两次、
+ * 各自调用付费 API。窗口内的重入直接忽略(不 toast:连点本就是无意的)。
+ * 确认弹窗路径不受影响:弹窗弹出时首次调用已经返回、互斥已释放,用户点「继续」再次进入是新的一轮。
+ * 在途态同步到 ui.submitting 供 InputBar 禁用按钮 / 快捷键。
+ */
+export async function runExclusiveSubmission(run: () => Promise<void>): Promise<void> {
+  if (submissionInFlight) return
+  submissionInFlight = true
+  useStore.getState().setSubmitting(true)
+  try {
+    await run()
+  } finally {
+    submissionInFlight = false
+    // 提交会话结束:遮罩/输入图要么已被入队的任务记录引用、要么已回滚
+    releaseInFlightImages(SUBMISSION_OWNER)
+    useStore.getState().setSubmitting(false)
+  }
+}
+
+export function submitTask(
   options: { allowFullMask?: boolean; allowLargeBatch?: boolean } = {},
-) {
+): Promise<void> {
+  return runExclusiveSubmission(() => submitTaskInner(options))
+}
+
+async function submitTaskInner(options: { allowFullMask?: boolean; allowLargeBatch?: boolean }) {
   const { settings, prompt, params, showToast, setConfirmDialog } = useStore.getState()
 
   const activeProfile = getActiveApiProfile(settings)
@@ -441,6 +493,11 @@ interface RetryProgress {
   retriesUsed: number
   /** 入口快照的最大重试次数 */
   max: number
+  /**
+   * 本次 attempt 所处阶段:load = 输入图/遮罩加载(IDB 读),request = 请求已发起。
+   * 仲裁器只在 request 阶段允许超时接管——加载阶段的 await 不观察 signal,abort 对它无效。
+   */
+  phase: 'load' | 'request'
 }
 const retryProgressByTask = new Map<string, RetryProgress>()
 /** watchdog 超时接管标记:置位后本次 attempt 的 AbortError 应判为「超时(可重试)」而非「用户取消」 */
@@ -452,6 +509,11 @@ registerWatchdogTimeoutRetryArbiter((taskId) => {
   // 尝试耗尽/未在执行循环内:交回 watchdog 兜底直落(retriesUsed 供其拼接文案后缀)。
   // 兜底不能挪进循环:循环靠请求 reject 推进,不响应 abort 的挂死请求只有直落能终结。
   if (!progress || progress.retriesUsed >= progress.max) return { kind: 'fail', retriesUsed }
+  // 仍在输入图加载阶段:一律直落,不接管。接管的全部前提是「abort 能让本次 attempt reject 回到循环」,
+  // 而 ensureImageCached 的 IDB 读不接收 signal;IDB 挂起时接管 = 清掉 watchdog 后再无人看护,
+  // 任务永久 running、无 toast 无 error,批量场景该 worker 槽位也随之死占(自动重试轮曾出过此回归)。
+  // 加载阶段也没发过请求,重试本身无收益(重试拿到的仍是同一个挂起的 inFlight load)。
+  if (progress.phase !== 'request') return { kind: 'fail', retriesUsed }
   const task = useStore.getState().tasks.find((t) => t.id === taskId)
   if (!task || task.status !== 'running') return { kind: 'fail', retriesUsed }
   timeoutRetryFlags.add(taskId)
@@ -474,6 +536,17 @@ type AttemptOutcome =
   | { kind: 'failed'; err: unknown }
 
 export async function executeTask(taskId: string) {
+  try {
+    await executeTaskInner(taskId)
+  } finally {
+    // 任务在这里落定(done / error / 早退),租约随之释放;取消/删除路径由 terminateTaskRuntime 释放。
+    releaseTaskLease(taskId)
+    // 输出图要么已写进任务记录、要么已回滚,在途登记到此为止
+    releaseInFlightImages(taskId)
+  }
+}
+
+async function executeTaskInner(taskId: string) {
   const { settings } = useStore.getState()
   const task = useStore.getState().tasks.find((t) => t.id === taskId)
   if (!task) return
@@ -499,7 +572,8 @@ export async function executeTask(taskId: string) {
 
   try {
     for (let retriesUsed = 0; ; retriesUsed++) {
-      retryProgressByTask.set(taskId, { retriesUsed, max: maxAutoRetries })
+      // 每轮从 load 阶段起算,attemptTask 在请求发起前翻到 request
+      retryProgressByTask.set(taskId, { retriesUsed, max: maxAutoRetries, phase: 'load' })
       const outcome = await attemptTask(
         taskId,
         task,
@@ -575,7 +649,8 @@ async function attemptTask(
 ): Promise<AttemptOutcome> {
   if (taskProvider === 'openai' || taskProvider === 'gemini') {
     taskAbortControllers.set(taskId, new AbortController())
-    // 先以完整预算守住输入图加载阶段(IDB 读挂起时任务不会永久卡 running);
+    // 先以完整预算守住输入图加载阶段(IDB 读挂起时任务不会永久卡 running):此阶段超时由仲裁器
+    // 按 phase='load' 交回 watchdog 直落,不进自动重试(见仲裁器注释);
     // 请求发起前会再重置一次,网络阶段同样拿到完整预算。
     scheduleSyncHttpWatchdog(taskId, executionProfile.timeout)
   }
@@ -601,6 +676,11 @@ async function attemptTask(
 
     // 风格预设：把英文修饰词作为前缀拼到 prompt，task.prompt 本身保持用户原始输入不变
     const finalPrompt = buildFinalPrompt(task.prompt, task.params.stylePreset)
+
+    // 进入请求阶段:从这里起超时才允许被重试接管(fetch 响应 abort,attempt 必定 reject 回到循环)。
+    // 必须在下面重置 watchdog 之前翻转,否则新定时器到期时仲裁器仍按 load 阶段直落。
+    const progress = retryProgressByTask.get(taskId)
+    if (progress) retryProgressByTask.set(taskId, { ...progress, phase: 'request' })
 
     // 请求真正发起前重置 watchdog:输入图加载耗时不再蚕食网络阶段预算(批量大图场景)。
     if (taskProvider === 'openai' || taskProvider === 'gemini') {
@@ -629,6 +709,8 @@ async function attemptTask(
     // 存储输出图片
     for (const dataUrl of result.images) {
       const imgId = await storeImage(dataUrl, 'generated')
+      // 落库到写进任务记录之间登记为在途(executeTask 收尾注销):GC / 清理 / 兄弟任务的回滚都不得碰它
+      registerInFlightImages(taskId, [imgId])
       setCachedImage(imgId, dataUrl)
       outputIds.push(imgId)
     }
@@ -671,7 +753,7 @@ async function attemptTask(
     const latestBeforeUpdate = useStore.getState().tasks.find((t) => t.id === taskId)
     if (!latestBeforeUpdate || latestBeforeUpdate.status !== 'running') {
       // 任务在写图期间被删/取消:回滚已存但无引用的输出图,避免孤儿记录泄漏
-      await rollbackStoredImagesSilently(outputIds)
+      await rollbackStoredImagesSilently(outputIds, taskId)
       return { kind: 'settled' }
     }
     const finishedAt = Date.now()
@@ -706,19 +788,23 @@ async function attemptTask(
     } else {
       useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
     }
-    const currentMask = useStore.getState().maskDraft
+    const { maskDraft: currentMask, maskEditorImageId } = useStore.getState()
     if (
       maskDataUrl &&
       currentMask &&
       currentMask.targetImageId === task.maskTargetImageId &&
-      currentMask.maskDataUrl === maskDataUrl
+      currentMask.maskDataUrl === maskDataUrl &&
+      // 遮罩编辑器开着就不动:clearMaskDraft 会连带置空 maskEditorImageId,等于在用户涂抹到一半时
+      // 把编辑器整个卸掉、未保存的笔画全部丢失(保存中则被静默回滚)。留着这份「已消费」草稿无害——
+      // 用户保存会覆盖它、关闭不保存则维持提交前的状态,与任务完成前的体验一致。
+      maskEditorImageId === null
     ) {
       useStore.getState().clearMaskDraft()
     }
     return { kind: 'completed' }
   } catch (err) {
     clearSyncHttpWatchdogTimer(taskId)
-    await rollbackStoredImagesSilently(outputIds)
+    await rollbackStoredImagesSilently(outputIds, taskId)
     // 落不落 error、重不重试由 executeTask 循环统一裁决(任务命运单一所有权)
     return { kind: 'failed', err }
   } finally {

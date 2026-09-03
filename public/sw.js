@@ -70,8 +70,15 @@ if (KILL_SWITCH) {
 
     if (request.mode === 'navigate') {
       // HTML 不写回缓存：在线时永远拿网络版本，避免旧 HTML 引用已删除的 hashed assets 文件名导致白屏。
-      // 离线兜底由 install 阶段的 cache.addAll(['./index.html', ...]) 提供，会在下次部署的 activate 时随 CACHE_NAME 切换而刷新。
-      event.respondWith(fetch(request).catch(() => caches.match('./index.html')))
+      // 离线兜底由 install 阶段的 cache.addAll(APP_SHELL) 提供，会在下次部署的 activate 时随 CACHE_NAME 切换而刷新。
+      // 键用 './'(scope 根)而不是 './index.html':Cloudflare Workers 的静态资源路由会把 /index.html 307 到 /,
+      // addAll 缓存下来的是 redirected=true 的响应,浏览器拒绝用它响应导航请求(net::ERR_FAILED),
+      // 离线打开 PWA 直接失败;'./' 在 Workers / nginx / Caddy 上都是直出 200。仍保留 './index.html' 作二级兜底。
+      event.respondWith(
+        fetch(request).catch(() =>
+          caches.match('./').then((cached) => cached ?? caches.match('./index.html')),
+        ),
+      )
       return
     }
 
@@ -82,7 +89,13 @@ if (KILL_SWITCH) {
         return fetch(request).then((response) => {
           // 仅缓存内容寻址的 hashed 静态资源(/assets/);其余同源 GET 只走网络不写缓存,
           // 避免运行时缓存对所有同源 GET 无限 cache.put(单次部署生命周期内只增不减、可能逼近配额)。
-          if (response.ok && url.pathname.startsWith(ASSETS_PATH)) {
+          // 托管层对缺失路径可能回 index.html 200(SPA 回退):HTML 绝不能以 asset 之名进缓存。
+          const contentType = response.headers.get('content-type') ?? ''
+          if (
+            response.ok &&
+            url.pathname.startsWith(ASSETS_PATH) &&
+            !contentType.toLowerCase().startsWith('text/html')
+          ) {
             const copy = response.clone()
             caches
               .open(CACHE_NAME)

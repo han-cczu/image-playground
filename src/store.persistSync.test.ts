@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PERSIST_STORAGE_KEY, useStore } from './store'
 import { DEFAULT_PARAMS } from './types'
 import { DEFAULT_SETTINGS } from './lib/api/apiProfiles'
+import { MAX_TASKS } from './lib/tasks'
 import type { TaskRecord } from './types'
 
 vi.mock('./lib/db', () => ({
@@ -16,6 +17,7 @@ vi.mock('./lib/db', () => ({
   storeImage: vi.fn(async () => 'generated-image-id'),
   storedImageToDataUrl: vi.fn(async () => undefined),
   deleteImage: vi.fn(async () => undefined),
+  deleteTask: vi.fn(async () => undefined),
 }))
 
 vi.mock('./lib/api', () => ({
@@ -39,13 +41,15 @@ import {
   getAllTasks,
   getImage,
   putTask,
+  deleteTask,
+  putConversation,
   storeImage,
   storedImageToDataUrl,
 } from './lib/db'
 import { callImageApi } from './lib/api'
 import { resetTaskRuntimeForTest } from './lib/taskRuntime'
 import { refreshIndexedDbBackedStoreState } from './store/idbSync'
-import { submitTask } from './store'
+import { removeTask, submitTask, updateTaskInStore } from './store'
 
 function dispatchStorageEvent(init: StorageEventInit) {
   window.dispatchEvent(new StorageEvent('storage', init))
@@ -320,12 +324,10 @@ describe('store persist cross-tab sync', () => {
     const showToast = vi.fn()
     useStore.setState({ showToast })
     vi.mocked(getImage).mockImplementation((id: string) =>
-      id === 'input-a'
-        ? (oldRestore.promise as never)
-        : Promise.resolve({ id } as never),
+      id === 'input-a' ? (oldRestore.promise as never) : Promise.resolve({ id } as never),
     )
-    vi.mocked(storedImageToDataUrl).mockImplementation(async (image: { id: string }) =>
-      `data:image/png;base64,${image.id}`,
+    vi.mocked(storedImageToDataUrl).mockImplementation(
+      async (image: { id: string }) => `data:image/png;base64,${image.id}`,
     )
     const firstPersistedValue = JSON.stringify({
       state: {
@@ -627,6 +629,27 @@ describe('store persist cross-tab sync', () => {
     expect(useStore.getState().detailTaskId).toBeNull()
   })
 
+  it('跨标签刷新时库内任务超过 MAX_TASKS 条也全部进 store,不丢最新任务', async () => {
+    // 与 initStore 同一条回归:刷新快照若被导入用的 MAX_TASKS 截断,最新任务会从 UI「消失」
+    const base = 1_700_000_000_000
+    const total = MAX_TASKS + 1
+    const newestId = (base + total - 1).toString(36)
+    vi.mocked(getAllConversations).mockResolvedValue([
+      { id: 'fresh-conv', title: 'Fresh', createdAt: 2, updatedAt: 2, sortOrder: 0, color: null },
+    ])
+    vi.mocked(getAllTasks).mockResolvedValue(
+      Array.from({ length: total }, (_, index) =>
+        task({ id: (base + index).toString(36), createdAt: base + index }),
+      ),
+    )
+    useStore.setState({ tasks: [], activeConversationId: 'fresh-conv' })
+
+    await refreshIndexedDbBackedStoreState()
+
+    expect(useStore.getState().tasks).toHaveLength(total)
+    expect(useStore.getState().tasks.some((item) => item.id === newestId)).toBe(true)
+  })
+
   it('aborts local API requests for running tasks removed by refreshed IndexedDB snapshot', async () => {
     let signal: AbortSignal | undefined
     vi.mocked(callImageApi).mockImplementation(
@@ -766,6 +789,98 @@ function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
     ...overrides,
   }
 }
+
+describe('跨标签页刷新不回滚本地未落盘变更(idbSyncState 总账)', () => {
+  const baseTask: TaskRecord = {
+    id: 'task-1',
+    prompt: 'prompt',
+    params: { ...DEFAULT_PARAMS },
+    inputImageIds: [],
+    maskTargetImageId: null,
+    maskImageId: null,
+    outputImages: [],
+    status: 'running',
+    error: null,
+    createdAt: 1,
+    finishedAt: null,
+    elapsed: null,
+    conversationId: 'conv-a',
+  }
+  const conv = { id: 'conv-a', title: 'A', createdAt: 1, updatedAt: 1, sortOrder: 0, color: null }
+
+  afterEach(() => {
+    resetTaskRuntimeForTest()
+    vi.mocked(putTask).mockReset()
+    vi.mocked(putTask).mockResolvedValue('task-id')
+    vi.mocked(deleteTask).mockReset()
+    vi.mocked(deleteTask).mockResolvedValue(undefined)
+    vi.mocked(putConversation).mockReset()
+    vi.mocked(putConversation).mockResolvedValue('conversation-id')
+    vi.mocked(getAllTasks).mockReset()
+    vi.mocked(getAllTasks).mockResolvedValue([])
+    vi.mocked(getAllConversations).mockReset()
+    vi.mocked(getAllConversations).mockResolvedValue([])
+    useStore.setState(useStore.getInitialState(), true)
+  })
+
+  it('完成落 done 尚未落盘时,读到陈旧 running 快照的刷新保留本地 done', async () => {
+    const persist = createDeferred<IDBValidKey>()
+    vi.mocked(putTask).mockReturnValueOnce(persist.promise)
+    vi.mocked(getAllTasks).mockResolvedValue([baseTask])
+    vi.mocked(getAllConversations).mockResolvedValue([conv])
+    useStore.setState({ tasks: [baseTask], conversations: [conv], activeConversationId: 'conv-a' })
+
+    const writing = updateTaskInStore('task-1', {
+      status: 'done',
+      outputImages: ['img'],
+      finishedAt: 5,
+      elapsed: 4,
+    })
+    await refreshIndexedDbBackedStoreState()
+
+    expect(useStore.getState().tasks[0]).toMatchObject({ status: 'done', outputImages: ['img'] })
+    persist.resolve('task-id')
+    await writing
+
+    // 落盘后总账已清:之后的刷新以库为准(另一标签页的合法修改要能生效)
+    vi.mocked(getAllTasks).mockResolvedValue([
+      { ...baseTask, status: 'error', error: '已取消生成', finishedAt: 9, elapsed: 8 },
+    ])
+    await refreshIndexedDbBackedStoreState()
+    expect(useStore.getState().tasks[0]).toMatchObject({ status: 'error', error: '已取消生成' })
+  })
+
+  it('删除尚未落盘时,仍含该记录的快照不能把它复活', async () => {
+    const deleting = createDeferred<undefined>()
+    vi.mocked(deleteTask).mockReturnValueOnce(deleting.promise)
+    const doneTask: TaskRecord = { ...baseTask, status: 'done', finishedAt: 2, elapsed: 1 }
+    vi.mocked(getAllTasks).mockResolvedValue([doneTask])
+    vi.mocked(getAllConversations).mockResolvedValue([conv])
+    useStore.setState({ tasks: [doneTask], conversations: [conv], activeConversationId: 'conv-a' })
+
+    const removing = removeTask(doneTask)
+    await refreshIndexedDbBackedStoreState()
+
+    expect(useStore.getState().tasks).toEqual([])
+    deleting.resolve(undefined)
+    await removing
+  })
+
+  it('新建对话尚未落盘时,刷新不把它连同 activeConversationId 一起抹掉', async () => {
+    const persist = createDeferred<IDBValidKey>()
+    vi.mocked(putConversation).mockReturnValueOnce(persist.promise)
+    vi.mocked(getAllConversations).mockResolvedValue([conv])
+    useStore.setState({ tasks: [], conversations: [conv], activeConversationId: 'conv-a' })
+
+    const id = useStore.getState().createConversation()
+    await refreshIndexedDbBackedStoreState()
+
+    expect(useStore.getState().conversations.some((c) => c.id === id)).toBe(true)
+    expect(useStore.getState().activeConversationId).toBe(id)
+    persist.resolve('conversation-id')
+    await Promise.resolve()
+  })
+})
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void

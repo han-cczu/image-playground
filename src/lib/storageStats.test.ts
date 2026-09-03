@@ -42,7 +42,12 @@ beforeEach(() => {
 describe('collectReferencedImageIds', () => {
   it('unions input/mask/output ids across tasks, with dedup and null tolerance', () => {
     const tasks = [
-      { inputImageIds: ['a', 'b'], maskTargetImageId: 'target', maskImageId: 'm', outputImages: ['o1'] } as TaskRecord,
+      {
+        inputImageIds: ['a', 'b'],
+        maskTargetImageId: 'target',
+        maskImageId: 'm',
+        outputImages: ['o1'],
+      } as TaskRecord,
       { inputImageIds: ['b'], outputImages: ['o2'] } as TaskRecord, // b 重复
       {} as TaskRecord, // 缺字段:空值兜底,不抛
     ]
@@ -108,6 +113,21 @@ describe('pruneOrphanImages', () => {
     expect(pruneImagesViaCursor).toHaveBeenCalledTimes(1)
     expect(deleteCachedImage).toHaveBeenCalledTimes(1)
     expect(deleteCachedImage).toHaveBeenCalledWith('old')
+  })
+
+  it('用 storedAt(写入本库时刻)而不是备份携带的 createdAt 判断是否早于 cutoff', async () => {
+    stubPrune([
+      // 导入的老图:createdAt 很旧,但 storedAt 是刚刚 → 不能删(导入写图窗口里跑的 GC 会碰到它)
+      { id: 'imported-fresh', blob: new Blob(['1']), createdAt: 1, storedAt: 9999 },
+      // 老图且早已落库 → 删
+      { id: 'imported-old', blob: new Blob(['12']), createdAt: 1, storedAt: 1 },
+    ] satisfies StoredImage[])
+
+    const res = await pruneOrphanImages(new Set(), 5000)
+
+    expect(res.deletedCount).toBe(1)
+    expect(deleteCachedImage).toHaveBeenCalledWith('imported-old')
+    expect(deleteCachedImage).not.toHaveBeenCalledWith('imported-fresh')
   })
 
   it('treats missing createdAt as 0 (always deletable when unreferenced)', async () => {

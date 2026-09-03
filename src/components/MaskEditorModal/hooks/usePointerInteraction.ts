@@ -22,7 +22,10 @@ interface PanGesture {
   startTransform: ViewTransform
 }
 
-function getCanvasPoint(canvas: HTMLCanvasElement, event: ReactPointerEvent<HTMLCanvasElement>): Point {
+function getCanvasPoint(
+  canvas: HTMLCanvasElement,
+  event: ReactPointerEvent<HTMLCanvasElement>,
+): Point {
   return clientPointToCanvasPoint(
     canvas.getBoundingClientRect(),
     { x: event.clientX, y: event.clientY },
@@ -146,17 +149,19 @@ export function usePointerInteraction(args: {
 
     const rect = frame.getBoundingClientRect()
     const nextCentroid = centroid(pointers[0], pointers[1])
-    commitViewTransform(getPinchTransform({
-      startTransform: gesture.startTransform,
-      startCentroid: gesture.startCentroid,
-      nextCentroid: {
-        x: nextCentroid.x - rect.left,
-        y: nextCentroid.y - rect.top,
-      },
-      startDistance: gesture.startDistance,
-      nextDistance: distance(pointers[0], pointers[1]),
-      viewportSize: { width: frame.clientWidth, height: frame.clientHeight },
-    }))
+    commitViewTransform(
+      getPinchTransform({
+        startTransform: gesture.startTransform,
+        startCentroid: gesture.startCentroid,
+        nextCentroid: {
+          x: nextCentroid.x - rect.left,
+          y: nextCentroid.y - rect.top,
+        },
+        startDistance: gesture.startDistance,
+        nextDistance: distance(pointers[0], pointers[1]),
+        viewportSize: { width: frame.clientWidth, height: frame.clientHeight },
+      }),
+    )
   }
 
   function drawAt(point: Point, nextTool = tool) {
@@ -284,7 +289,13 @@ export function usePointerInteraction(args: {
       updatePinchGesture()
       return
     }
-    if (activePointerIdRef.current !== event.pointerId || !lastPointRef.current || !isReady || isSaving) return
+    if (
+      activePointerIdRef.current !== event.pointerId ||
+      !lastPointRef.current ||
+      !isReady ||
+      isSaving
+    )
+      return
     event.preventDefault()
     drawStroke(lastPointRef.current, point)
     lastPointRef.current = point
@@ -301,13 +312,12 @@ export function usePointerInteraction(args: {
     if (!frame || !imageId) return
 
     const handleWheel = (event: WheelEvent) => {
-      if (!event.altKey || !isReady || isSaving) return
-
+      if (!event.altKey) return
+      // 先于状态判断 preventDefault:Firefox 默认把 Alt+滚轮当历史前进/后退,加载或保存瞬间滚一下就会离开页面
       event.preventDefault()
-      zoomAtPoint(
-        { x: event.clientX, y: event.clientY },
-        Math.exp(-event.deltaY * 0.002),
-      )
+      if (!isReady || isSaving) return
+
+      zoomAtPoint({ x: event.clientX, y: event.clientY }, Math.exp(-event.deltaY * 0.002))
     }
 
     frame.addEventListener('wheel', handleWheel, { passive: false })
@@ -333,6 +343,8 @@ export function usePointerInteraction(args: {
     if (activePointerIdRef.current === event.pointerId) {
       activePointerIdRef.current = null
       lastPointRef.current = null
+      // 这一笔真正落定:pushSnapshot 暂存的旧重做链到此作废(转捏合取消的笔画不会走到这里)
+      history.commitActiveStroke()
       setIsStrokeActive(false)
       if (hoverPoint) updateCursor(hoverPoint)
     }

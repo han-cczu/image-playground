@@ -10,6 +10,10 @@
  * 取消/删除路径(cancel / mutations)消费。**仅限 taskRuntime 内部导入**,index 不导出。
  */
 
+import { releaseAllTaskLeasesForTest, releaseTaskLease } from './lease'
+import { resetInFlightImagesForTest } from '../inFlightImages'
+import { resetIndexedDbSyncStateForTest } from '../../store/idbSyncState'
+
 export const syncHttpWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
 export const taskAbortControllers = new Map<string, AbortController>()
 
@@ -33,6 +37,11 @@ export function sleepForRetryBackoff(taskId: string, delayMs: number): Promise<v
     }, delayMs)
     retryBackoffSleeps.set(taskId, { timer, wake: resolve })
   })
+}
+
+/** 是否正处于自动重试的退避睡眠中(此时没有 AbortController,但它是在途任务而非排队成员)。 */
+export function isTaskInRetryBackoff(taskId: string): boolean {
+  return retryBackoffSleeps.has(taskId)
 }
 
 export function wakeRetryBackoffSleep(taskId: string): void {
@@ -63,6 +72,9 @@ export function resetTaskRuntimeForTest(): void {
   taskAbortControllers.clear()
   // 先唤醒再清:悬挂的退避 promise 不落定会让上一个用例的 executeTask 泄漏到下一个用例
   for (const taskId of [...retryBackoffSleeps.keys()]) wakeRetryBackoffSleep(taskId)
+  releaseAllTaskLeasesForTest()
+  resetInFlightImagesForTest()
+  resetIndexedDbSyncStateForTest()
   for (const callback of testResetCallbacks) callback()
 }
 
@@ -86,10 +98,12 @@ function abortTaskRequest(taskId: string) {
   if (controller && !controller.signal.aborted) controller.abort()
 }
 
-/** 统一收口在途任务的运行期资源:中止请求 + 清 watchdog 定时器 + 清 AbortController + 唤醒退避睡眠。 */
+/** 统一收口在途任务的运行期资源:中止请求 + 清 watchdog 定时器 + 清 AbortController + 唤醒退避睡眠 + 释放租约。 */
 export function terminateTaskRuntime(taskId: string) {
   abortTaskRequest(taskId)
   clearSyncHttpWatchdogTimer(taskId)
   clearTaskAbortController(taskId)
   wakeRetryBackoffSleep(taskId)
+  // 取消/删除/跨标签页终止后本页不再执行它,租约随之释放(留着会让别的标签页误以为它还在跑)
+  releaseTaskLease(taskId)
 }

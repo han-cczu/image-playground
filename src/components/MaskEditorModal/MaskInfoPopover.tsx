@@ -31,12 +31,18 @@ export default function MaskInfoPopover({ open, onOpenChange }: MaskInfoPopoverP
 
   return (
     <div className="flex items-center gap-1.5">
-      <h2 className="text-sm font-medium text-gray-700 dark:text-gray-200" id="mask-editor-title">编辑遮罩</h2>
+      <h2 className="text-sm font-medium text-gray-700 dark:text-gray-200" id="mask-editor-title">
+        编辑遮罩
+      </h2>
       <div className="relative flex items-center">
         <button
           ref={anchorRef}
           type="button"
-          onClick={() => onOpenChange(!open)}
+          // 鼠标设备 hover 已把说明层打开,再点击是「固定」意图;若按 toggle 处理会把刚打开的层关掉。
+          // 关闭一律交给 usePopoverDismiss(外点 / Esc)与 mouseleave;触屏没有 hover,点击仍需能开合
+          onClick={() => {
+            if (isSyntheticMouse() || !open) onOpenChange(!open)
+          }}
           onMouseEnter={() => {
             if (!isSyntheticMouse()) onOpenChange(true)
           }}
@@ -50,8 +56,19 @@ export default function MaskInfoPopover({ open, onOpenChange }: MaskInfoPopoverP
           aria-expanded={open}
           aria-controls={open ? 'mask-info-popover' : undefined}
         >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
           </svg>
         </button>
         {open && (

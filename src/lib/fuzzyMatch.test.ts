@@ -70,3 +70,10 @@ describe('fuzzyMatch', () => {
     expect(fuzzyMatch('istanbul', 'İstanbul')!.indices).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
   })
 })
+
+describe('fuzzyMatch query 侧逐码点折叠', () => {
+  it("query 含 'İ'(折叠后扩成两个码点)时仍能命中 text 中的 'İ' 与 'i'", () => {
+    expect(fuzzyMatch('İst', 'İstanbul')?.indices).toEqual([0, 1, 2])
+    expect(fuzzyMatch('İ', 'image')?.indices).toEqual([0])
+  })
+})

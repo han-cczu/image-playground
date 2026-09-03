@@ -22,6 +22,7 @@ import {
   prepareSubmission,
   resolveExecutionProfile,
   runEnqueuedTasks,
+  runExclusiveSubmission,
 } from './submit'
 
 export interface GridSubmitConfig {
@@ -30,9 +31,17 @@ export interface GridSubmitConfig {
 }
 
 /** 提交 XY 参数网格:笛卡尔积 + 复用 batchId/enqueueTask/runEnqueuedTasks。 */
-export async function submitGridTask(
+export function submitGridTask(
   gridConfig: GridSubmitConfig,
   options: { allowFullMask?: boolean; allowLargeBatch?: boolean } = {},
+): Promise<void> {
+  // 与 submitTask 共用同一把提交互斥(见 runExclusiveSubmission):网格提交的入队窗口更长,重入更容易撞上
+  return runExclusiveSubmission(() => submitGridTaskInner(gridConfig, options))
+}
+
+async function submitGridTaskInner(
+  gridConfig: GridSubmitConfig,
+  options: { allowFullMask?: boolean; allowLargeBatch?: boolean },
 ) {
   const { settings, prompt, params, showToast, setConfirmDialog } = useStore.getState()
 

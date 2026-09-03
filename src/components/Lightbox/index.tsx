@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
 import { useLockBodyScroll } from '../../hooks/useLockBodyScroll'
@@ -22,13 +22,21 @@ export default function Lightbox() {
   const { src, maskPreviewSrc, prompt } = useLightboxImage(lightboxImageId)
 
   // 列表导航 + 键盘左右切换
-  const { currentIndex, total, showNav, goPrev, goNext } = useLightboxNavigation(lightboxImageId)
+  // 记录最近一次切图方向:LightboxInner 按 src 重挂载(缩放/手势状态随之复位),焦点陷阱会把焦点
+  // 拉回首个可聚焦的「上一张」按钮,键盘上连按 Enter「下一张」会前后跳;重挂载后把焦点还给同一个按钮。
+  // 用 state 而不是 ref:render 期间读 ref 违反 react-hooks/refs,且方向变化本就该驱动一次渲染
+  const [lastNav, setLastNav] = useState<'prev' | 'next' | null>(null)
+  const { currentIndex, total, showNav, goPrev, goNext } = useLightboxNavigation(
+    lightboxImageId,
+    setLastNav,
+  )
 
   if (!lightboxImageId || !src) return null
 
   return (
     <LightboxInner
       key={src}
+      restoreFocusTo={lastNav}
       src={src}
       maskPreviewSrc={maskPreviewSrc}
       prompt={prompt}
@@ -53,6 +61,8 @@ interface LightboxInnerProps {
   total: number
   onPrev: () => void
   onNext: () => void
+  /** 上一次切图的方向:重挂载后把焦点还给同方向的按钮(见外层 lastNavRef 注释) */
+  restoreFocusTo: 'prev' | 'next' | null
 }
 
 /** 内部组件：保证挂载时 DOM 已经存在，所有 ref / effect 都可靠 */
@@ -66,10 +76,17 @@ function LightboxInner({
   total,
   onPrev,
   onNext,
+  restoreFocusTo,
 }: LightboxInnerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // LightboxInner 仅在打开时挂载,焦点陷阱常驻 true;作用在 containerRef(根节点带 tabIndex={-1} 承接焦点)。
   useFocusTrap(true, containerRef)
+  // 声明在 useFocusTrap 之后,同一次挂载里后执行、覆盖它的初始移焦:键盘切图后焦点留在同方向按钮上
+  useEffect(() => {
+    if (!restoreFocusTo) return
+    const label = restoreFocusTo === 'prev' ? '上一张' : '下一张'
+    containerRef.current?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)?.focus()
+  }, [restoreFocusTo])
 
   // 缩放:scale/tx/ty ref + apply(边界 clamp)+ 滚轮缩放 + 缩放徽标计时
   const { scaleRef, txRef, tyRef, apply, showZoomBadge, scale, tx, ty } =

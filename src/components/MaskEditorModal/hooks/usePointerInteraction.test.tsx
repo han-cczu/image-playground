@@ -27,6 +27,7 @@ function makeHistory(): MaskHistory {
     redo: vi.fn(),
     clear: vi.fn(),
     cancelActiveStroke: vi.fn(),
+    commitActiveStroke: vi.fn(),
   }
 }
 

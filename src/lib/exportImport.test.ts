@@ -1,6 +1,6 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_SETTINGS } from './api/apiProfiles'
+import { DEFAULT_SETTINGS, mergeImportedSettings, normalizeSettings } from './api/apiProfiles'
 import type { ExportData, TaskRecord } from '../types'
 import { DEFAULT_PARAMS } from '../types'
 import { useStore } from '../store'
@@ -50,6 +50,7 @@ vi.mock('./storageStats', async (importOriginal) => {
     collectReferencedImageIds: vi.fn(actual.collectReferencedImageIds),
   }
 })
+const actualStorageStats = await vi.importActual<typeof import('./storageStats')>('./storageStats')
 
 vi.mock('./imageCache', () => ({
   clearImageCache: vi.fn(),
@@ -190,7 +191,11 @@ describe('export/import reliability', () => {
       for (const byte of bytes) binary += String.fromCharCode(byte)
       return `data:${blob.type || fallbackMime || 'application/octet-stream'};base64,${btoa(binary)}`
     })
-    vi.mocked(collectReferencedImageIds).mockClear()
+    // mockReset 而不是 mockClear:某些用例用 mockReturnValue 换掉实现,只清调用记录会让它泄漏到后续用例
+    vi.mocked(collectReferencedImageIds).mockReset()
+    vi.mocked(collectReferencedImageIds).mockImplementation(
+      actualStorageStats.collectReferencedImageIds,
+    )
     vi.mocked(putTask).mockImplementation(async () => {
       dbCalls.push('putTask')
       return 'task-id'
@@ -294,6 +299,49 @@ describe('export/import reliability', () => {
     expect(redacted.optimizerProfiles.every((p) => p.apiKey === '')).toBe(true)
     expect(JSON.stringify(redacted)).not.toContain('captioner-profile-secret')
     expect(redacted.captionerProfiles.every((p) => p.apiKey === '')).toBe(true)
+  })
+
+  it('合并导入 redactSettingsForExport 抹空密钥后的自身备份不产生同名无密钥的重复配置', () => {
+    // 导出→导入往返:redact 与 mergeImportedSettings 各自单测都对,拼起来却会给每个配置堆一份
+    // 空 key 幽灵副本——这里用真实 redact 结果锁住两端的契约,防止某一端改了字段而另一端不知情。
+    const current = normalizeSettings({
+      profiles: [
+        {
+          ...DEFAULT_SETTINGS.profiles[0],
+          id: 'my-openai',
+          baseUrl: 'https://current.example.com/v1',
+          apiKey: 'sk-live',
+        },
+        {
+          id: 'my-gemini',
+          name: 'Gemini',
+          provider: 'gemini',
+          baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+          apiKey: 'g-key',
+          model: 'gemini-2.5-flash-image',
+          timeout: 600,
+        },
+      ],
+      activeProfileId: 'my-gemini',
+      optimizerProfiles: [
+        { ...DEFAULT_SETTINGS.optimizerProfiles[0], id: 'my-opt', apiKey: 'sk-opt' },
+      ],
+      activeOptimizerProfileId: 'my-opt',
+      captionerProfiles: [
+        { ...DEFAULT_SETTINGS.captionerProfiles[0], id: 'my-cap', apiKey: 'sk-cap' },
+      ],
+      activeCaptionerProfileId: 'my-cap',
+    })
+
+    const merged = mergeImportedSettings(current, redactSettingsForExport(current))
+
+    expect(merged.profiles.map((p) => [p.id, p.apiKey])).toEqual([
+      ['my-openai', 'sk-live'],
+      ['my-gemini', 'g-key'],
+    ])
+    expect(merged.activeProfileId).toBe('my-gemini')
+    expect(merged.optimizerProfiles.map((p) => [p.id, p.apiKey])).toEqual([['my-opt', 'sk-opt']])
+    expect(merged.captionerProfiles.map((p) => [p.id, p.apiKey])).toEqual([['my-cap', 'sk-cap']])
   })
 
   it('rejects malformed manifest shapes before touching the database', async () => {
@@ -1453,7 +1501,11 @@ describe('export/import reliability', () => {
     const exportedTask = { ...createTask('task-svg'), outputImages: ['svg-image'] }
     vi.mocked(getAllTasks).mockResolvedValue([exportedTask])
     vi.mocked(getAllImages).mockResolvedValue([
-      { id: 'svg-image', blob: new Blob(['<svg/>'], { type: 'image/svg+xml' }), mime: 'image/svg+xml' },
+      {
+        id: 'svg-image',
+        blob: new Blob(['<svg/>'], { type: 'image/svg+xml' }),
+        mime: 'image/svg+xml',
+      },
     ])
     vi.mocked(storedImageToBytes).mockResolvedValue({
       bytes: new TextEncoder().encode('<svg/>'),
@@ -1684,6 +1736,127 @@ describe('export/import reliability', () => {
     )
   })
 
+  it('替换导入自身抹空密钥的备份后保留图像/优化器/反推三套已有密钥', async () => {
+    // 导出侧 redactSettingsForExport 把备份里所有 apiKey 抹空,而确认弹窗承诺「已有密钥不会被空密钥
+    // 覆盖」。c6b41bf 曾让 replace 路径在合并前把 settings 重置为默认——合并时「当前」已是纯默认态,
+    // mergeImportedSettings 整包采用空密钥备份,三套密钥在成功 toast 下静默归零。用真实备份往返锁死承诺。
+    const current = normalizeSettings({
+      profiles: [
+        {
+          ...DEFAULT_SETTINGS.profiles[0],
+          id: 'my-openai',
+          baseUrl: 'https://current.example.com/v1',
+          apiKey: 'sk-live',
+        },
+        {
+          id: 'my-gemini',
+          name: 'Gemini',
+          provider: 'gemini',
+          baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+          apiKey: 'g-key',
+          model: 'gemini-2.5-flash-image',
+          timeout: 600,
+        },
+      ],
+      activeProfileId: 'my-gemini',
+      optimizerProfiles: [
+        { ...DEFAULT_SETTINGS.optimizerProfiles[0], id: 'my-opt', apiKey: 'sk-opt' },
+      ],
+      activeOptimizerProfileId: 'my-opt',
+      captionerProfiles: [
+        { ...DEFAULT_SETTINGS.captionerProfiles[0], id: 'my-cap', apiKey: 'sk-cap' },
+      ],
+      activeCaptionerProfileId: 'my-cap',
+    })
+    useStore.setState({ settings: current, showToast: vi.fn() })
+    const file = createImportFile({
+      version: 5,
+      exportedAt: new Date(0).toISOString(),
+      settings: redactSettingsForExport(current),
+      tasks: [createTask('imported-task')],
+      imageFiles: {},
+      conversations: [],
+    })
+
+    await expect(importData(file, { mode: 'replace' })).resolves.toBe(true)
+
+    const settings = useStore.getState().settings
+    expect(settings.profiles.find((p) => p.id === 'my-openai')?.apiKey).toBe('sk-live')
+    expect(settings.profiles.find((p) => p.id === 'my-gemini')?.apiKey).toBe('g-key')
+    expect(settings.activeProfileId).toBe('my-gemini')
+    expect(settings.optimizerProfiles.find((p) => p.id === 'my-opt')?.apiKey).toBe('sk-opt')
+    expect(settings.activeOptimizerProfileId).toBe('my-opt')
+    expect(settings.captionerProfiles.find((p) => p.id === 'my-cap')?.apiKey).toBe('sk-cap')
+    expect(settings.activeCaptionerProfileId).toBe('my-cap')
+  })
+
+  it('替换导入缺少 settings 字段的旧备份时不把已有供应商配置重置为默认', async () => {
+    // 旧备份没有 settings 可合并:replace 路径若先把 settings 重置为默认,这里就没有任何回填机会,
+    // 所有 profile 连同密钥停在默认态——与 merge 模式「缺失/非法 settings 不动当前配置」必须对称。
+    const current = normalizeSettings({
+      profiles: [
+        {
+          id: 'my-gemini',
+          name: 'Gemini',
+          provider: 'gemini',
+          baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+          apiKey: 'g-key',
+          model: 'gemini-2.5-flash-image',
+          timeout: 600,
+        },
+      ],
+      activeProfileId: 'my-gemini',
+      optimizerProfiles: [
+        { ...DEFAULT_SETTINGS.optimizerProfiles[0], id: 'my-opt', apiKey: 'sk-opt' },
+      ],
+      activeOptimizerProfileId: 'my-opt',
+    })
+    useStore.setState({ settings: current, showToast: vi.fn() })
+    const file = createImportFile({
+      version: 2,
+      exportedAt: new Date(0).toISOString(),
+      tasks: [createTask('legacy-task')],
+      imageFiles: {},
+    } as ExportData)
+
+    await expect(importData(file, { mode: 'replace' })).resolves.toBe(true)
+
+    expect(useStore.getState().settings).toEqual(current)
+  })
+
+  it('全新默认配置下替换导入整包采用备份里的供应商配置', async () => {
+    // 回归护栏:replace 不再重置 settings 后,「当前仍是纯默认」这一分支要继续走 mergeImportedSettings
+    // 的整包采用路径(否则新浏览器恢复备份时供应商列表会丢)。
+    useStore.setState({ settings: normalizeSettings(DEFAULT_SETTINGS), showToast: vi.fn() })
+    const file = createImportFile({
+      version: 2,
+      exportedAt: new Date(0).toISOString(),
+      settings: {
+        ...DEFAULT_SETTINGS,
+        profiles: [
+          {
+            id: 'backup-gemini',
+            name: 'Gemini',
+            provider: 'gemini',
+            baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+            apiKey: 'g-key',
+            model: 'gemini-2.5-flash-image',
+            timeout: 600,
+          },
+        ],
+        activeProfileId: 'backup-gemini',
+      },
+      tasks: [],
+      imageFiles: {},
+    })
+
+    await expect(importData(file, { mode: 'replace' })).resolves.toBe(true)
+
+    const settings = useStore.getState().settings
+    expect(settings.profiles.map((p) => [p.id, p.apiKey])).toEqual([['backup-gemini', 'g-key']])
+    expect(settings.activeProfileId).toBe('backup-gemini')
+  })
+
   it('restores visible data when replace import fails while clearing the database', async () => {
     vi.mocked(clearTasks).mockRejectedValue(new Error('clear failed'))
     const showToast = vi.fn()
@@ -1808,7 +1981,9 @@ describe('export/import reliability', () => {
     ])
     expect(useStore.getState().snippets).toEqual([])
     expect(useStore.getState().batchNotes).toEqual({})
-    expect(useStore.getState().settings.apiKey).toBe('')
+    // settings 走 localStorage、不在被清空的三张表里:替换导入无论成败都不重置它,密钥必须留在原地
+    // (「清空所有数据」才承诺连供应商配置一起清,见 clearAllData 用例)。
+    expect(useStore.getState().settings.apiKey).toBe('old-key')
     expect(useStore.getState().params).toEqual(DEFAULT_PARAMS)
     expect(useStore.getState().dismissedCodexCliPrompts).toEqual([])
     expect(useStore.getState()).toMatchObject({
@@ -1971,6 +2146,170 @@ describe('export/import reliability', () => {
         conversationId: '__archive__',
       },
     )
+  })
+
+  it('合并导入期间完成的在途任务与新提交的任务不会在导入结束时被开始时的 DB 快照回退或抹掉', async () => {
+    // 导入是秒级 await(解压 + 逐张 putImage),merge 模式不终止在途任务:期间完成的任务已被
+    // updateTaskInStore 写成 done,若尾部用导入开始时的快照整体 setTasks,它会被打回 running 且无输出图
+    //(没有 watchdog 永远转圈,用户再点「取消」会用这份陈旧记录覆写 DB 里真实的 done,输出图被启动 GC 删);
+    // 期间新提交的任务则直接从 store 消失,executeTask 完成时找不到记录即丢弃结果(配额已耗)。
+    const runningTask: TaskRecord = {
+      ...createTask('running-task'),
+      status: 'running',
+      finishedAt: null,
+      elapsed: null,
+      conversationId: 'conv-a',
+    }
+    const removedTask: TaskRecord = {
+      ...createTask('removed-during-import'),
+      conversationId: 'conv-a',
+    }
+    const completedTask: TaskRecord = {
+      ...runningTask,
+      status: 'done',
+      outputImages: ['img-out'],
+      finishedAt: 5,
+      elapsed: 4,
+    }
+    const submittedTask: TaskRecord = {
+      ...createTask('submitted-during-import'),
+      status: 'running',
+      finishedAt: null,
+      elapsed: null,
+      conversationId: 'conv-a',
+    }
+    vi.mocked(getAllTasks).mockResolvedValue([runningTask, removedTask])
+    useStore.setState({
+      tasks: [runningTask, removedTask],
+      conversations: [{ id: 'conv-a', title: '会话', createdAt: 1, updatedAt: 1 }],
+      activeConversationId: 'conv-a',
+      showToast: vi.fn(),
+    })
+    vi.mocked(persistConversationMigration).mockImplementation(async () => {
+      // 模拟写库 await 期间 store 的真实变化:在途任务完成、用户删掉一条旧记录并提交了一条新任务
+      useStore.setState({ tasks: [submittedTask, completedTask] })
+    })
+    const file = createImportFile({
+      version: 4,
+      exportedAt: new Date(0).toISOString(),
+      settings: DEFAULT_SETTINGS,
+      conversations: [{ id: 'conv-imported', title: '导入', createdAt: 2, updatedAt: 2 }],
+      tasks: [{ ...createTask('imported-task'), conversationId: 'conv-imported' }],
+      imageFiles: {},
+    })
+
+    await expect(importData(file, { mode: 'merge' })).resolves.toBe(true)
+
+    const tasks = useStore.getState().tasks
+    expect(tasks.find((task) => task.id === 'running-task')).toMatchObject({
+      status: 'done',
+      outputImages: ['img-out'],
+      finishedAt: 5,
+    })
+    expect(tasks.some((task) => task.id === 'submitted-during-import')).toBe(true)
+    expect(tasks.some((task) => task.id === 'imported-task')).toBe(true)
+    // 导入开始后被用户删除的记录不能借快照「复活」
+    expect(tasks.some((task) => task.id === 'removed-during-import')).toBe(false)
+  })
+
+  it('既有任务的 reseed 只把 conversationId 补到写库时刻的实时记录上,不用导入开始时的快照整条覆写 DB', async () => {
+    // 旧数据里没有 conversationId 的在途任务会进 reseed 的 dirtyTasks;若整条沿用快照写库,
+    // 它在 putImage 循环期间完成的 done/outputImages 会在 DB 里被直接打回 running——不需要用户再点任何按钮。
+    const legacyRunningTask: TaskRecord = {
+      ...createTask('legacy-running'),
+      status: 'running',
+      finishedAt: null,
+      elapsed: null,
+    }
+    const legacyCompletedTask: TaskRecord = {
+      ...legacyRunningTask,
+      status: 'done',
+      outputImages: ['img-out'],
+      finishedAt: 5,
+      elapsed: 4,
+    }
+    vi.mocked(getAllTasks).mockResolvedValue([legacyRunningTask])
+    useStore.setState({
+      tasks: [legacyRunningTask],
+      conversations: [],
+      activeConversationId: null,
+      showToast: vi.fn(),
+    })
+    vi.mocked(putImage).mockImplementation(async () => {
+      dbCalls.push('putImage')
+      // 逐张写图期间在途任务完成
+      useStore.setState({ tasks: [legacyCompletedTask] })
+      return 'image-id'
+    })
+    const file = createImportFileWithImages(
+      {
+        version: 2,
+        exportedAt: new Date(0).toISOString(),
+        settings: DEFAULT_SETTINGS,
+        tasks: [{ ...createTask('imported-task'), outputImages: ['live-image'] }],
+        imageFiles: { 'live-image': { path: 'images/live-image.png' } },
+      },
+      { 'images/live-image.png': new Uint8Array([1]) },
+    )
+
+    await expect(importData(file, { mode: 'merge' })).resolves.toBe(true)
+
+    expectPersistedTask('legacy-running').toMatchObject({
+      status: 'done',
+      outputImages: ['img-out'],
+      conversationId: '__archive__',
+    })
+    expectPersistedTask('imported-task').toMatchObject({ conversationId: '__archive__' })
+    expect(useStore.getState().tasks.find((task) => task.id === 'legacy-running')).toMatchObject({
+      status: 'done',
+      outputImages: ['img-out'],
+      conversationId: '__archive__',
+    })
+  })
+
+  it('替换导入在解析阶段失败(本地数据未触碰)时只提示「导入失败」,不吓用户「数据可能不完整」', async () => {
+    const showToast = vi.fn()
+    useStore.setState({ tasks: [createTask('old-task')], showToast })
+    const bogus = new File([new Uint8Array([1, 2, 3])], 'bogus.zip', { type: 'application/zip' })
+
+    await expect(importData(bogus, { mode: 'replace' })).resolves.toBe(false)
+
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/^导入失败：/), 'error')
+    expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('数据可能不完整'), 'error')
+    expect(useStore.getState().tasks.map((task) => task.id)).toEqual(['old-task'])
+  })
+
+  it('替换导入清库之后、写回之前新提交的任务不会在导入结束时被抹掉', async () => {
+    // replace 分支先 terminate + 清 store 再 await 写库;设置面板此时可关闭、InputBar 无导入互斥,
+    // 这个窗口里提交的任务若被「导入集」整体 setTasks 覆盖,同样会在完成时找不到记录而丢结果。
+    const submittedTask: TaskRecord = {
+      ...createTask('submitted-after-clear'),
+      status: 'running',
+      finishedAt: null,
+      elapsed: null,
+      conversationId: '__archive__',
+    }
+    useStore.setState({ tasks: [createTask('old-task')], showToast: vi.fn() })
+    vi.mocked(persistConversationMigration).mockImplementation(async () => {
+      useStore.setState({ tasks: [...useStore.getState().tasks, submittedTask] })
+    })
+    const file = createImportFile({
+      version: 4,
+      exportedAt: new Date(0).toISOString(),
+      settings: DEFAULT_SETTINGS,
+      conversations: [{ id: 'conv-imported', title: '导入', createdAt: 2, updatedAt: 2 }],
+      tasks: [{ ...createTask('imported-task'), conversationId: 'conv-imported' }],
+      imageFiles: {},
+    })
+
+    await expect(importData(file, { mode: 'replace' })).resolves.toBe(true)
+
+    expect(
+      useStore
+        .getState()
+        .tasks.map((task) => task.id)
+        .sort(),
+    ).toEqual(['imported-task', 'submitted-after-clear'])
   })
 })
 

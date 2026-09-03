@@ -1,6 +1,13 @@
 import { Fragment, memo, useCallback, useMemo, useState } from 'react'
 import type { TaskRecord } from '../types'
-import { useStore, reuseConfig, editOutputs, retryGridCell, retryGridMissing, cancelBatch } from '../store'
+import {
+  useStore,
+  reuseConfig,
+  editOutputs,
+  retryGridCell,
+  retryGridMissing,
+  cancelBatch,
+} from '../store'
 import { reconstructMatrix, getGridAxisDef } from '../lib/gridExperiment'
 import { MAX_BATCH_NOTE_LEN, pickCellRepresentative } from '../lib/gridSheet'
 import { exportGridSheet } from '../lib/gridSheetRender'
@@ -14,7 +21,8 @@ interface Props {
 
 const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
-const HEADER_CLASS = 'flex items-center justify-center px-2 py-1 text-center text-xs font-medium text-gray-500 dark:text-gray-400'
+const HEADER_CLASS =
+  'flex items-center justify-center px-2 py-1 text-center text-xs font-medium text-gray-500 dark:text-gray-400'
 
 interface MatrixCellProps {
   task: TaskRecord
@@ -24,8 +32,16 @@ interface MatrixCellProps {
 }
 
 // memo + 稳定回调:本组件订阅 selectedTaskIds,框选/Ctrl 点选时只有 isSelected 翻转的格重渲染
-const MatrixCell = memo(function MatrixCell({ task, isSelected, onCellClick, onDelete }: MatrixCellProps) {
-  const onClick = useCallback((e: React.MouseEvent | React.TouchEvent) => onCellClick(task, e), [onCellClick, task])
+const MatrixCell = memo(function MatrixCell({
+  task,
+  isSelected,
+  onCellClick,
+  onDelete,
+}: MatrixCellProps) {
+  const onClick = useCallback(
+    (e: React.MouseEvent | React.TouchEvent) => onCellClick(task, e),
+    [onCellClick, task],
+  )
   const onReuseCb = useCallback(() => {
     void reuseConfig(task).catch(() => {
       /* reuseConfig surfaces recoverable errors via toast */
@@ -108,16 +124,19 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
   }, [matrix, repByCell])
 
   // 稳定回调(store action 引用稳定),供 MatrixCell 的 memo 依赖
-  const handleCellClick = useCallback((task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => {
-    const isCtrl = isMac ? (e as React.MouseEvent).metaKey : (e as React.MouseEvent).ctrlKey
-    const state = useStore.getState()
-    if (isCtrl) {
-      state.toggleTaskSelection(task.id)
-    } else {
-      if (state.selectedTaskIds.length > 0) state.clearSelection()
-      state.setDetailTaskId(task.id)
-    }
-  }, [])
+  const handleCellClick = useCallback(
+    (task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => {
+      const isCtrl = isMac ? (e as React.MouseEvent).metaKey : (e as React.MouseEvent).ctrlKey
+      const state = useStore.getState()
+      if (isCtrl) {
+        state.toggleTaskSelection(task.id)
+      } else {
+        if (state.selectedTaskIds.length > 0) state.clearSelection()
+        state.setDetailTaskId(task.id)
+      }
+    },
+    [],
+  )
 
   if (!matrix) return null
   const { axes, cols, rows } = matrix
@@ -135,7 +154,9 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
     exportGridSheet({ tasks, batchId, note: batchNote?.text })
       .then(() => useStore.getState().showToast('对照图已导出', 'success'))
       .catch((err) => {
-        useStore.getState().showToast(`导出失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+        useStore
+          .getState()
+          .showToast(`导出失败：${err instanceof Error ? err.message : String(err)}`, 'error')
       })
       .finally(() => setExporting(false))
   }
@@ -155,7 +176,12 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
         if (aborted + skipped === 0) {
           useStore.getState().showToast('该批次已全部完成,无可取消任务', 'info')
         } else {
-          useStore.getState().showToast(`已取消 ${aborted + skipped} 条:中止 ${aborted} 条在途、跳过 ${skipped} 条排队`, 'success')
+          useStore
+            .getState()
+            .showToast(
+              `已取消 ${aborted + skipped} 条:中止 ${aborted} 条在途、跳过 ${skipped} 条排队`,
+              'success',
+            )
         }
       },
     })
@@ -196,7 +222,12 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
         </span>
         <div className="flex items-center gap-3">
           <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-            <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="h-3.5 w-3.5 accent-blue-500" />
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={toggleSelectAll}
+              className="h-3.5 w-3.5 accent-blue-500"
+            />
             选中整批
           </label>
           <button
@@ -281,10 +312,12 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
       )}
 
       {/* 矩阵:第一列为行表头(无 Y 轴时占位),其余为 X 列 */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" data-selection-clip>
         <div
           className="grid gap-2"
-          style={{ gridTemplateColumns: `${hasY ? 'minmax(56px,auto)' : '0'} repeat(${cols.length}, minmax(220px, 1fr))` }}
+          style={{
+            gridTemplateColumns: `${hasY ? 'minmax(56px,auto)' : '0'} repeat(${cols.length}, minmax(220px, 1fr))`,
+          }}
         >
           {/* 表头行 */}
           <div />
@@ -297,11 +330,7 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
           {/* 数据行 */}
           {rows.map((row) => (
             <Fragment key={row.key || '__single__'}>
-              {hasY ? (
-                <div className={`${HEADER_CLASS} justify-end`}>{row.label}</div>
-              ) : (
-                <div />
-              )}
+              {hasY ? <div className={`${HEADER_CLASS} justify-end`}>{row.label}</div> : <div />}
               {cols.map((col) => {
                 const task = repTask(col.key, row.key)
                 if (!task) {
@@ -309,7 +338,9 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
                     <button
                       key={col.key}
                       type="button"
-                      onClick={() => retryGridCell(batchId, { x: col.key, ...(hasY ? { y: row.key } : {}) })}
+                      onClick={() =>
+                        retryGridCell(batchId, { x: col.key, ...(hasY ? { y: row.key } : {}) })
+                      }
                       className="flex min-h-[120px] w-full items-center justify-center rounded-xl border border-dashed border-gray-300 text-xs text-gray-400 transition hover:border-blue-300 hover:text-blue-500 dark:border-white/[0.12] dark:text-gray-500 dark:hover:border-blue-500/40"
                     >
                       补跑此格

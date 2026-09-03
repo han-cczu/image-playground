@@ -1,6 +1,6 @@
 import type { TaskRecord } from '../types'
 import { reconstructMatrix } from './gridExperiment'
-import { ensureImageCached } from './imageCache'
+import { acquireImageObjectUrl, releaseImageObjectUrl } from './objectUrlCache'
 import {
   computeSafeCellSize,
   computeSheetLayout,
@@ -15,11 +15,12 @@ const HEADER_FONT = '600 20px system-ui, sans-serif'
 /** measureText 截断:超宽时去尾加 …(不命中返回原文) */
 function truncateToWidth(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
   if (ctx.measureText(text).width <= maxWidth) return text
-  let truncated = text
-  while (truncated && ctx.measureText(truncated + '…').width > maxWidth) {
-    truncated = truncated.slice(0, -1)
+  // 按码点回退(与 gridSheet.wrapText 同口径),避免把 emoji 的代理对切成一半
+  const truncated = Array.from(text)
+  while (truncated.length && ctx.measureText(truncated.join('') + '…').width > maxWidth) {
+    truncated.pop()
   }
-  return truncated + '…'
+  return truncated.join('') + '…'
 }
 
 /** 居中绘制单行文本(带截断) */
@@ -31,7 +32,11 @@ function drawCenteredText(ctx: CanvasRenderingContext2D, text: string, rect: She
 }
 
 /** contain 居中绘制图片 */
-function drawContainedImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement, rect: SheetRect): void {
+function drawContainedImage(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  rect: SheetRect,
+): void {
   const scale = Math.min(rect.w / img.naturalWidth, rect.h / img.naturalHeight)
   const w = img.naturalWidth * scale
   const h = img.naturalHeight * scale
@@ -78,18 +83,14 @@ export async function exportGridSheet(args: {
     }),
   )
 
-  // 并发取缓存 URL 并加载为 Image(去重;单图失败置 null)
-  const uniqueIds = [...new Set(cellImageIds.flat().filter((id): id is string => Boolean(id)))]
-  const urlById = new Map<string, string | null>()
-  await Promise.all(
-    uniqueIds.map(async (id) => {
-      urlById.set(id, (await ensureImageCached(id).catch(() => null)) ?? null)
-    }),
-  )
-  const imageById = new Map<string, HTMLImageElement | null>()
-  await Promise.all(
-    uniqueIds.map(async (id) => {
-      imageById.set(id, await loadImage(urlById.get(id) ?? null))
+  // 同一张图被多格引用时按 id 分组,一次加载画完所有引用格
+  const cellsByImageId = new Map<string, Array<{ colIndex: number; rowIndex: number }>>()
+  cellImageIds.forEach((row, rowIndex) =>
+    row.forEach((id, colIndex) => {
+      if (!id) return
+      const cells = cellsByImageId.get(id) ?? []
+      cells.push({ colIndex, rowIndex })
+      cellsByImageId.set(id, cells)
     }),
   )
 
@@ -132,24 +133,40 @@ export async function exportGridSheet(args: {
     rows.forEach((row, i) => drawCenteredText(ctx, row.label, layout.rowHeaderRect(i)))
   }
 
-  // 单元格
+  const drawEmptyCell = (rect: ReturnType<typeof layout.cellRect>) => {
+    ctx.fillStyle = '#f3f4f6'
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h)
+    ctx.font = HEADER_FONT
+    ctx.fillStyle = '#9ca3af'
+    drawCenteredText(ctx, '无', rect)
+    ctx.fillStyle = '#374151'
+  }
+
+  // 空格子先画
   rows.forEach((_, rowIndex) => {
     cols.forEach((__, colIndex) => {
-      const rect = layout.cellRect(colIndex, rowIndex)
-      const id = cellImageIds[rowIndex][colIndex]
-      const img = id ? imageById.get(id) : null
-      if (img) {
-        drawContainedImage(ctx, img, rect)
-      } else {
-        ctx.fillStyle = '#f3f4f6'
-        ctx.fillRect(rect.x, rect.y, rect.w, rect.h)
-        ctx.font = HEADER_FONT
-        ctx.fillStyle = '#9ca3af'
-        drawCenteredText(ctx, '无', rect)
-        ctx.fillStyle = '#374151'
-      }
+      if (!cellImageIds[rowIndex][colIndex]) drawEmptyCell(layout.cellRect(colIndex, rowIndex))
     })
   })
+
+  // 有图的格子逐张加载、画完即释放:200 格上限下若先把全部格子的 dataUrl 与解码位图同时驻留内存,
+  // 峰值可达 GB 级(移动端直接 OOM)。走 objectUrlCache 而不是 imageCache 的 dataUrl:object URL 不经 base64、
+  // 不进 JS 堆,画完 release 后位图随即可回收;同一时刻堆里只有一张图。
+  for (const [id, cells] of cellsByImageId) {
+    let img: HTMLImageElement | null
+    try {
+      const url = await acquireImageObjectUrl(id).catch(() => null)
+      img = await loadImage(url)
+    } finally {
+      // 位图已解码进 img 元素,object URL 此时即可归还;单图加载失败也要配对释放
+      releaseImageObjectUrl(id)
+    }
+    for (const { colIndex, rowIndex } of cells) {
+      const rect = layout.cellRect(colIndex, rowIndex)
+      if (img) drawContainedImage(ctx, img, rect)
+      else drawEmptyCell(rect)
+    }
+  }
 
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
   if (!blob) throw new Error('生成 PNG 失败')

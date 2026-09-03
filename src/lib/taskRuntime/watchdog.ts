@@ -43,10 +43,24 @@ export function isRunningSyncHttpTask(task: TaskRecord) {
   return task.status === 'running' && isSyncHttpTask(task)
 }
 
-export function markInterruptedSyncHttpTasks(tasks: TaskRecord[], now = Date.now()) {
+/**
+ * 把无执行体的 running 同步 HTTP 任务翻成「请求中断」。
+ * @param ownedElsewhere 仍被某个活着的标签页持有租约(见 lease.ts)的任务 id:它们不是孤儿,原样保留并
+ *   收进 skippedOwnedTasks,由调用方挂租约释放观察者兜底。导入路径不传(备份里的 running 永远没有执行体)。
+ */
+export function markInterruptedSyncHttpTasks(
+  tasks: TaskRecord[],
+  now = Date.now(),
+  ownedElsewhere: ReadonlySet<string> = new Set(),
+) {
   const interruptedTasks: TaskRecord[] = []
+  const skippedOwnedTasks: TaskRecord[] = []
   const updatedTasks = tasks.map((task) => {
     if (!isRunningSyncHttpTask(task)) return task
+    if (ownedElsewhere.has(task.id)) {
+      skippedOwnedTasks.push(task)
+      return task
+    }
 
     const updated: TaskRecord = {
       ...task,
@@ -59,7 +73,7 @@ export function markInterruptedSyncHttpTasks(tasks: TaskRecord[], now = Date.now
     return updated
   })
 
-  return { tasks: updatedTasks, interruptedTasks }
+  return { tasks: updatedTasks, interruptedTasks, skippedOwnedTasks }
 }
 
 function failSyncHttpTaskIfStillRunning(

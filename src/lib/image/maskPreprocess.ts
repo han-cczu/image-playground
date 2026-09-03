@@ -1,5 +1,5 @@
 import type { InputImage } from '../../types'
-import { canvasToBlob, loadImage } from './canvasImage'
+import { canvasToBlob, loadImage, releaseCanvasBitmap } from './canvasImage'
 
 export const DEFAULT_MASK_WORKING_MAX_EDGE = 1920
 export const MASK_WORKING_DIMENSION_MULTIPLE = 16
@@ -74,11 +74,22 @@ export async function prepareMaskTargetDataUrl(dataUrl: string): Promise<Prepare
   const canvas = document.createElement('canvas')
   canvas.width = size.width
   canvas.height = size.height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('当前浏览器不支持 Canvas')
-  ctx.drawImage(image, 0, 0, size.width, size.height)
-
-  const blob = await canvasToBlob(canvas, 'image/png')
+  let blob: Blob
+  try {
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('当前浏览器不支持 Canvas')
+    // 工作尺寸按轴各自向下取到 16 的倍数,与原图比例最多差 15px:按比例从原图中心裁出对应区域再缩放,
+    // 而不是把整图拉伸进去——拉伸会把替换掉用户参考图的工作图非等比压扁
+    const sourceWidth = Math.min(image.naturalWidth, size.width / size.scale)
+    const sourceHeight = Math.min(image.naturalHeight, size.height / size.scale)
+    const sourceX = (image.naturalWidth - sourceWidth) / 2
+    const sourceY = (image.naturalHeight - sourceHeight) / 2
+    ctx.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, size.width, size.height)
+    blob = await canvasToBlob(canvas, 'image/png')
+  } finally {
+    // 与同文件其它 helper 的约定一致:位图已进 blob,画布立即归零释放
+    releaseCanvasBitmap(canvas)
+  }
   return {
     ...size,
     dataUrl: await blobToDataUrl(blob),

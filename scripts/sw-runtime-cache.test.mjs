@@ -142,3 +142,120 @@ describe('service worker runtime cache', () => {
   })
 
 })
+
+describe('service worker runtime cache scope', () => {
+  // 原 sw-routing.mjs 是与 sw.js 手工复制的镜像逻辑,测试只在验证镜像本身;
+  // 这里直接加载 public/sw.js 断言真实路由行为,镜像文件已删除。
+  function cachesWithSpy() {
+    const cache = { put: vi.fn(() => Promise.resolve()) }
+    return {
+      cache,
+      caches: {
+        match: vi.fn(() => Promise.resolve(undefined)),
+        open: vi.fn(() => Promise.resolve(cache)),
+        keys: vi.fn(),
+        delete: vi.fn(),
+      },
+    }
+  }
+
+  async function fetchThrough(listeners, url, extra = {}) {
+    let responsePromise
+    const handled = listeners.get('fetch')({
+      request: new Request(url, { method: 'GET', ...extra }),
+      respondWith: vi.fn((promise) => {
+        responsePromise = promise
+      }),
+    })
+    return { handled, responsePromise }
+  }
+
+  it('跨域 GET 不拦截、不写缓存', async () => {
+    const { caches, cache } = cachesWithSpy()
+    const fetch = vi.fn(() => Promise.resolve(new Response('asset', { status: 200 })))
+    const { listeners } = loadServiceWorker({ caches, fetch })
+    const { responsePromise } = await fetchThrough(listeners, 'https://cdn.example.test/assets/index-abc.js')
+
+    expect(responsePromise).toBeUndefined()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(cache.put).not.toHaveBeenCalled()
+  })
+
+  it('同源非 /assets/ 路径与 scope 之外的 /assets/ 只走网络不写缓存', async () => {
+    const { caches, cache } = cachesWithSpy()
+    const fetch = vi.fn(() => Promise.resolve(new Response('body', { status: 200 })))
+    const { listeners } = loadServiceWorker({ caches, fetch, location: 'https://example.test/app/sw.js' })
+
+    const api = await fetchThrough(listeners, 'https://example.test/api/tasks')
+    await api.responsePromise
+    const otherScope = await fetchThrough(listeners, 'https://example.test/other/assets/index-abc.js')
+    await otherScope.responsePromise
+
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(cache.put).not.toHaveBeenCalled()
+  })
+
+  it('托管层对缺失 /assets/* 回 index.html 200 时不把 HTML 当静态资源缓存', async () => {
+    const { caches, cache } = cachesWithSpy()
+    const fetch = vi.fn(() =>
+      Promise.resolve(
+        new Response('<!doctype html>', { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }),
+      ),
+    )
+    const { listeners } = loadServiceWorker({ caches, fetch })
+    const { responsePromise } = await fetchThrough(listeners, 'https://example.test/assets/missing-abc.js')
+    await responsePromise
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(cache.put).not.toHaveBeenCalled()
+  })
+})
+
+describe('service worker offline navigation fallback', () => {
+  function navigateEvent() {
+    let responsePromise
+    const event = {
+      request: { method: 'GET', mode: 'navigate', url: 'https://example.test/' },
+      respondWith: vi.fn((promise) => {
+        responsePromise = promise
+      }),
+    }
+    return { event, response: () => responsePromise }
+  }
+
+  it('离线导航优先用 scope 根 "./" 的缓存(Workers 上 /index.html 是 307 重定向,缓存条目不能用于响应导航)', async () => {
+    const shell = new Response('<html>shell</html>', { status: 200 })
+    const caches = {
+      match: vi.fn((key) => Promise.resolve(key === './' ? shell : undefined)),
+      open: vi.fn(),
+      keys: vi.fn(),
+      delete: vi.fn(),
+    }
+    const fetch = vi.fn(() => Promise.reject(new TypeError('offline')))
+    const { listeners } = loadServiceWorker({ caches, fetch })
+    const { event, response } = navigateEvent()
+
+    listeners.get('fetch')(event)
+
+    await expect(response()).resolves.toBe(shell)
+    expect(caches.match.mock.calls[0][0]).toBe('./')
+  })
+
+  it('scope 根缓存缺失时才回退到 "./index.html"', async () => {
+    const legacyShell = new Response('<html>legacy</html>', { status: 200 })
+    const caches = {
+      match: vi.fn((key) => Promise.resolve(key === './index.html' ? legacyShell : undefined)),
+      open: vi.fn(),
+      keys: vi.fn(),
+      delete: vi.fn(),
+    }
+    const fetch = vi.fn(() => Promise.reject(new TypeError('offline')))
+    const { listeners } = loadServiceWorker({ caches, fetch })
+    const { event, response } = navigateEvent()
+
+    listeners.get('fetch')(event)
+
+    await expect(response()).resolves.toBe(legacyShell)
+    expect(caches.match.mock.calls.map((call) => call[0])).toEqual(['./', './index.html'])
+  })
+})

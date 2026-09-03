@@ -1,6 +1,12 @@
 import type { TaskRecord, TaskStatus } from '../types'
 
 /**
+ * TaskGrid 单次最多渲染的任务数(极端大库兜底)。放在这里而不是组件里:InputBar 的「全选当前可见」
+ * 要用同一上限截断,否则会选中并批量删除用户从未看到的记录。
+ */
+export const TASK_GRID_RENDER_CAP = 2000
+
+/**
  * 参数搜索文本缓存:JSON.stringify(params) 在大库 + 搜索词逐键触发下是过滤热路径的大头。
  * 以 params 对象引用为键——store 对 task 的更新是不可变替换({...t, ...patch}),
  * params 未变时引用保留、缓存命中;params 被替换则新引用自然失效。WeakMap 随对象回收,无泄漏。

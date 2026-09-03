@@ -218,7 +218,9 @@ describe('ImageContextMenu', () => {
 
   it('does not copy an image when fetching the menu target fails', async () => {
     const showToast = vi.fn()
-    clipboardMocks.copyBlobToClipboard.mockResolvedValue(undefined)
+    clipboardMocks.copyBlobToClipboard.mockImplementation(async (source: Blob | Promise<Blob>) => {
+      await source
+    })
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => imageResponse('missing', { status: 404 })),
@@ -242,12 +244,15 @@ describe('ImageContextMenu', () => {
     await waitFor(() => {
       expect(showToast).toHaveBeenCalledWith('复制失败', 'error')
     })
-    expect(clipboardMocks.copyBlobToClipboard).not.toHaveBeenCalled()
+    // 新契约:取图链作为 Promise 传入 copyBlobToClipboard(clipboard.write 须留在手势同步段),失败由它抛出
+    expect(clipboardMocks.copyBlobToClipboard).toHaveBeenCalledTimes(1)
   })
 
   it('does not copy a non-image response from the menu target', async () => {
     const showToast = vi.fn()
-    clipboardMocks.copyBlobToClipboard.mockResolvedValue(undefined)
+    clipboardMocks.copyBlobToClipboard.mockImplementation(async (source: Blob | Promise<Blob>) => {
+      await source
+    })
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => htmlResponse()),
@@ -271,13 +276,16 @@ describe('ImageContextMenu', () => {
     await waitFor(() => {
       expect(showToast).toHaveBeenCalledWith('复制失败', 'error')
     })
-    expect(clipboardMocks.copyBlobToClipboard).not.toHaveBeenCalled()
+    // 新契约:取图链作为 Promise 传入 copyBlobToClipboard(clipboard.write 须留在手势同步段),失败由它抛出
+    expect(clipboardMocks.copyBlobToClipboard).toHaveBeenCalledTimes(1)
   })
 
   it('does not copy an oversized image response from the menu target', async () => {
     const showToast = vi.fn()
     const blob = vi.fn(async () => new Blob(['huge'], { type: 'image/png' }))
-    clipboardMocks.copyBlobToClipboard.mockResolvedValue(undefined)
+    clipboardMocks.copyBlobToClipboard.mockImplementation(async (source: Blob | Promise<Blob>) => {
+      await source
+    })
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({
@@ -307,26 +315,30 @@ describe('ImageContextMenu', () => {
       expect(showToast).toHaveBeenCalledWith('复制失败', 'error')
     })
     expect(blob).not.toHaveBeenCalled()
-    expect(clipboardMocks.copyBlobToClipboard).not.toHaveBeenCalled()
+    // 新契约:取图链作为 Promise 传入 copyBlobToClipboard(clipboard.write 须留在手势同步段),失败由它抛出
+    expect(clipboardMocks.copyBlobToClipboard).toHaveBeenCalledTimes(1)
   })
 
   it('stops copying a streaming menu target once the body exceeds the image size cap', async () => {
     const showToast = vi.fn()
     let pulls = 0
-    clipboardMocks.copyBlobToClipboard.mockResolvedValue(undefined)
+    clipboardMocks.copyBlobToClipboard.mockImplementation(async (source: Blob | Promise<Blob>) => {
+      await source
+    })
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(
-          new ReadableStream<Uint8Array>({
-            pull(controller) {
-              pulls += 1
-              controller.enqueue(new Uint8Array(1024 * 1024))
-              if (pulls >= 100) controller.close()
-            },
-          }),
-          { headers: { 'Content-Type': 'image/png' } },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              pull(controller) {
+                pulls += 1
+                controller.enqueue(new Uint8Array(1024 * 1024))
+                if (pulls >= 100) controller.close()
+              },
+            }),
+            { headers: { 'Content-Type': 'image/png' } },
+          ),
       ),
     )
     vi.stubGlobal(
@@ -349,7 +361,8 @@ describe('ImageContextMenu', () => {
       expect(showToast).toHaveBeenCalledWith('复制失败', 'error')
     })
     expect(pulls).toBeLessThan(100)
-    expect(clipboardMocks.copyBlobToClipboard).not.toHaveBeenCalled()
+    // 新契约:取图链作为 Promise 传入 copyBlobToClipboard(clipboard.write 须留在手势同步段),失败由它抛出
+    expect(clipboardMocks.copyBlobToClipboard).toHaveBeenCalledTimes(1)
   })
 
   it('reports delayed copy success through the latest toast handler', async () => {
@@ -433,7 +446,9 @@ describe('ImageContextMenu', () => {
   it('shows copy failure when the menu target image body keeps hanging', async () => {
     vi.useFakeTimers()
     const showToast = vi.fn()
-    clipboardMocks.copyBlobToClipboard.mockResolvedValue(undefined)
+    clipboardMocks.copyBlobToClipboard.mockImplementation(async (source: Blob | Promise<Blob>) => {
+      await source
+    })
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({
@@ -464,7 +479,8 @@ describe('ImageContextMenu', () => {
     await Promise.resolve()
 
     expect(showToast).toHaveBeenCalledWith('复制失败', 'error')
-    expect(clipboardMocks.copyBlobToClipboard).not.toHaveBeenCalled()
+    // 新契约:取图链作为 Promise 传入 copyBlobToClipboard(clipboard.write 须留在手势同步段),失败由它抛出
+    expect(clipboardMocks.copyBlobToClipboard).toHaveBeenCalledTimes(1)
   })
 
   it('rejects oversized caption source URLs before reading the response body', async () => {

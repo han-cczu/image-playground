@@ -6,7 +6,9 @@
     "enabled": true
   },
   "assets": {
-    "not_found_handling": "single-page-application"
+    // 应用没有客户端路由(App 只处理 /),SPA 回退只会让缺失的 /assets/* 命中 index.html 200,
+    // 再被 _headers 的 immutable 一年缓存与 SW 的 runtime cache 当成静态资源缓存下来。
+    "not_found_handling": "none"
   },
   "compatibility_flags": [
     "nodejs_compat"

@@ -156,8 +156,10 @@ export async function pruneOrphanImages(
   const pendingCacheDeletes: string[] = []
 
   // 单 readwrite 事务内游标原地删(cursor.delete),替代逐张 deleteImage 的 N 个独立事务
+  // 用 storedAt(写入本库的时刻)而不是 createdAt 比较 cutoff:导入的备份图 createdAt 是备份里的旧值,
+  // GC 若与导入写图窗口重叠,会把「刚写入、任务记录还没落库」的图整批删掉;存量无 storedAt 的记录退回 createdAt。
   await pruneImagesViaCursor(
-    (img) => !referencedIds.has(img.id) && (img.createdAt ?? 0) < cutoff,
+    (img) => !referencedIds.has(img.id) && (img.storedAt ?? img.createdAt ?? 0) < cutoff,
     (img) => {
       deletedBytes += storedImageByteSize(img)
       deletedCount++

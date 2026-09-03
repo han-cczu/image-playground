@@ -64,6 +64,12 @@ export function useLightboxPointer({
   // 判断本次 mousedown → mouseup 是否发生了拖拽，用于区分点击和拖拽
   const didDragRef = useRef(false)
   const suppressNextClickRef = useRef(false)
+  /**
+   * 触屏单指轻点结束后浏览器会补发一次兼容 click:若放行,onClick 会立刻 onClose,
+   * 下方为双击检测预留的 TAP_CLOSE_DELAY_MS 延迟关闭形同虚设、1x 下双击放大永远触发不了。
+   * 用定时器兜底复位:轻点没有后续兼容 click(如手指移动过)时标志不能残留去吞掉下一次真实鼠标点击。
+   */
+  const compatClickResetTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     const suppressClick = () => {
@@ -268,6 +274,15 @@ export function useLightboxPointer({
         if (scaleRef.current <= 1 || !touchStartedOnImageRef.current) {
           const prev = tapRef.current
           if (prev.time > 0 && Date.now() - prev.time < DOUBLE_TAP_INTERVAL_MS) {
+            // 吞掉这次轻点补发的兼容 click,关闭只能走下面的延迟定时器(给双击留出判定窗口)
+            suppressNextClickRef.current = true
+            if (compatClickResetTimerRef.current != null) {
+              window.clearTimeout(compatClickResetTimerRef.current)
+            }
+            compatClickResetTimerRef.current = window.setTimeout(() => {
+              compatClickResetTimerRef.current = null
+              suppressNextClickRef.current = false
+            }, TAP_CLOSE_DELAY_MS)
             clearTapCloseTimer()
             tapCloseTimerRef.current = window.setTimeout(() => {
               tapCloseTimerRef.current = null
@@ -301,6 +316,10 @@ export function useLightboxPointer({
       el.removeEventListener('touchend', onTouchEnd)
       el.removeEventListener('touchcancel', onTouchCancel)
       clearTapCloseTimer()
+      if (compatClickResetTimerRef.current != null) {
+        window.clearTimeout(compatClickResetTimerRef.current)
+        compatClickResetTimerRef.current = null
+      }
     }
   }, [apply, getCenter, onClose, containerRef, scaleRef, txRef, tyRef])
 

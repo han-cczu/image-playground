@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
-import { normalizeSettings } from '../../../lib/api/apiProfiles'
+import { MAX_NAMED_PROFILES, normalizeSettings } from '../../../lib/api/apiProfiles'
+import { useStore } from '../../../store'
 import type { AppSettings } from '../../../types'
 
 /** 某一组配置在 AppSettings 中的切片视图 */
@@ -65,6 +66,14 @@ export function useNamedProfileManager<P extends { id: string }>(
   }
 
   const create = () => {
+    // normalizeSettings 会把超过 MAX_NAMED_PROFILES 的配置静默切掉并把激活项跳到第一个:满额时直接拒绝并提示
+    if (profiles.length >= MAX_NAMED_PROFILES) {
+      useStore
+        .getState()
+        .showToast(`配置数量已达上限（${MAX_NAMED_PROFILES} 套），请先删除不用的配置`, 'error')
+      setShowMenu(false)
+      return
+    }
     const profile = createProfile()
     setDraft(
       normalizeSettings({

@@ -39,7 +39,8 @@ export function useSwipeSelection(taskId: string, isSelected: boolean | undefine
     // 如果主要是水平滑动
     if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
       horizontalSwipeRef.current = true
-      e.preventDefault()
+      // 不调 preventDefault:React 根监听把 touchmove 注册为 passive,调用无效且每次滑动都刷控制台错误;
+      // 方向冲突由 TaskCard 的 touch-action: pan-y 抑制(touchend 非 passive,那里的 preventDefault 保留)
       // 限制滑动距离，例如最大 60px
       const boundedOffset = Math.max(-60, Math.min(60, deltaX))
       setSwipeOffset(boundedOffset)
@@ -79,11 +80,14 @@ export function useSwipeSelection(taskId: string, isSelected: boolean | undefine
     setSwipeActionActive(false)
   }
 
-  useEffect(() => () => {
-    if (swipeResetTimerRef.current != null) {
-      window.clearTimeout(swipeResetTimerRef.current)
-    }
-  }, [])
+  useEffect(
+    () => () => {
+      if (swipeResetTimerRef.current != null) {
+        window.clearTimeout(swipeResetTimerRef.current)
+      }
+    },
+    [],
+  )
 
   return {
     swipeOffset,

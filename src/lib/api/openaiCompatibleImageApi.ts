@@ -22,10 +22,12 @@ import {
   normalizeRevisedPrompt,
   pickActualParams,
   readJsonWithAbort,
+  getImagesApiJsonLimit,
   summarizeConcurrentFailures,
 } from './imageApiShared'
 
-const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:'
+const PROMPT_REWRITE_GUARD_PREFIX =
+  'Use the following text as the complete prompt. Do not rewrite it:'
 
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) {
@@ -89,7 +91,10 @@ function createResponsesInput(prompt: string, inputImageDataUrls: string[]): unk
   ]
 }
 
-function parseResponsesImageResults(payload: ResponsesApiResponse, fallbackMime: string): Array<{
+function parseResponsesImageResults(
+  payload: ResponsesApiResponse,
+  fallbackMime: string,
+): Array<{
   image: string
   actualParams?: Partial<TaskParams>
   revisedPrompt?: string
@@ -99,7 +104,11 @@ function parseResponsesImageResults(payload: ResponsesApiResponse, fallbackMime:
     throw new Error('接口未返回图片数据')
   }
 
-  const results: Array<{ image: string; actualParams?: Partial<TaskParams>; revisedPrompt?: string }> = []
+  const results: Array<{
+    image: string
+    actualParams?: Partial<TaskParams>
+    revisedPrompt?: string
+  }> = []
 
   for (const item of output) {
     if (item?.type !== 'image_generation_call') continue
@@ -142,7 +151,10 @@ function assertOpenAIImageInputDataUrls(inputImageDataUrls: string[], maskDataUr
   }
 }
 
-export async function callOpenAICompatibleImageApi(opts: CallApiOptions, profile: OpenAIProfile): Promise<CallApiResult> {
+export async function callOpenAICompatibleImageApi(
+  opts: CallApiOptions,
+  profile: OpenAIProfile,
+): Promise<CallApiResult> {
   return profile.apiMode === 'responses'
     ? callResponsesImageApi(opts, profile)
     : callImagesApi(opts, profile)
@@ -157,13 +169,22 @@ async function callImagesApi(opts: CallApiOptions, profile: OpenAIProfile): Prom
   return callImagesApiSingle(opts, profile)
 }
 
-async function callImagesApiConcurrent(opts: CallApiOptions, profile: OpenAIProfile, n: number): Promise<CallApiResult> {
+async function callImagesApiConcurrent(
+  opts: CallApiOptions,
+  profile: OpenAIProfile,
+  n: number,
+): Promise<CallApiResult> {
   const singleOpts = { ...opts, params: { ...opts.params, n: 1, quality: 'auto' as const } }
+  // 编辑请求的输入图/遮罩 Blob 只准备一次:各路子请求若各自 dataUrl→Blob(遮罩主图还要 canvas 重编码 PNG),
+  // 内存与 CPU 都是 n 倍放大。FormData 可以多次 append 同一个 Blob 对象。
+  const prepared =
+    opts.inputImageDataUrls.length > 0 ? await prepareImagesEditBlobs(opts, opts.signal) : undefined
   const results = await Promise.allSettled(
-    Array.from({ length: n }).map(() => callImagesApiSingle(singleOpts, profile)),
+    Array.from({ length: n }).map(() => callImagesApiSingle(singleOpts, profile, prepared)),
   )
 
-  const { successfulResults, partialFailureCount, partialFailureMessage } = summarizeConcurrentFailures(results)
+  const { successfulResults, partialFailureCount, partialFailureMessage } =
+    summarizeConcurrentFailures(results)
 
   if (successfulResults.length === 0) {
     const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
@@ -178,15 +199,65 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: OpenAIProf
   const revisedPrompts = successfulResults.flatMap((r) =>
     r.revisedPrompts?.length ? r.revisedPrompts : r.images.map(() => undefined),
   )
-  const actualParams = mergeActualParams(
-    successfulResults[0]?.actualParams ?? {},
-    { n: images.length },
-  )
+  const actualParams = mergeActualParams(successfulResults[0]?.actualParams ?? {}, {
+    n: images.length,
+  })
 
-  return { images, actualParams, actualParamsList, revisedPrompts, partialFailureCount, partialFailureMessage }
+  return {
+    images,
+    actualParams,
+    actualParamsList,
+    revisedPrompts,
+    partialFailureCount,
+    partialFailureMessage,
+  }
 }
 
-async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile): Promise<CallApiResult> {
+interface PreparedImagesEditBlobs {
+  imageBlobs: Blob[]
+  maskBlob: Blob | null
+}
+
+/** 编辑请求的输入图/遮罩校验 + dataUrl→Blob 转换(含体积护栏),抽出来供并发拆单路径只做一次 */
+async function prepareImagesEditBlobs(
+  opts: CallApiOptions,
+  signal?: AbortSignal,
+): Promise<PreparedImagesEditBlobs> {
+  const { inputImageDataUrls } = opts
+  throwIfAborted(signal)
+  assertOpenAIImageInputDataUrls(inputImageDataUrls, opts.maskDataUrl)
+  assertImagesEditPayloadSize(inputImageDataUrls, opts.maskDataUrl)
+
+  const imageBlobs: Blob[] = []
+  for (let i = 0; i < inputImageDataUrls.length; i++) {
+    throwIfAborted(signal)
+    const dataUrl = inputImageDataUrls[i]
+    const blob =
+      opts.maskDataUrl && i === 0
+        ? await imageDataUrlToPngBlob(dataUrl)
+        : await dataUrlToBlob(dataUrl)
+    throwIfAborted(signal)
+    imageBlobs.push(blob)
+  }
+
+  throwIfAborted(signal)
+  const maskBlob = opts.maskDataUrl ? await maskDataUrlToPngBlob(opts.maskDataUrl) : null
+  throwIfAborted(signal)
+  if (opts.maskDataUrl) {
+    assertMaskEditFileSize('遮罩主图文件', imageBlobs[0]?.size ?? 0)
+    assertMaskEditFileSize('遮罩文件', maskBlob?.size ?? 0)
+  }
+  assertImageInputPayloadSize(
+    imageBlobs.reduce((sum, blob) => sum + blob.size, 0) + (maskBlob?.size ?? 0),
+  )
+  return { imageBlobs, maskBlob }
+}
+
+async function callImagesApiSingle(
+  opts: CallApiOptions,
+  profile: OpenAIProfile,
+  preparedBlobs?: PreparedImagesEditBlobs,
+): Promise<CallApiResult> {
   const { prompt: originalPrompt, params, inputImageDataUrls } = opts
   const prompt = profile.codexCli
     ? `${PROMPT_REWRITE_GUARD_PREFIX}\n${originalPrompt}`
@@ -198,7 +269,10 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
   const requestHeaders = createRequestHeaders(profile)
 
   const controller = new AbortController()
-  const { signal: requestSignal, dispose: disposeSignals } = mergeAbortSignals(opts.signal, controller.signal)
+  const { signal: requestSignal, dispose: disposeSignals } = mergeAbortSignals(
+    opts.signal,
+    controller.signal,
+  )
   const timeoutId = setTimeout(
     () => controller.abort(),
     resolveChatTimeoutMs(profile.timeout, DEFAULT_API_TIMEOUT),
@@ -209,8 +283,9 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
 
     if (isEdit) {
       throwIfAborted(requestSignal)
-      assertOpenAIImageInputDataUrls(inputImageDataUrls, opts.maskDataUrl)
-      assertImagesEditPayloadSize(inputImageDataUrls, opts.maskDataUrl)
+      const { imageBlobs, maskBlob } =
+        preparedBlobs ?? (await prepareImagesEditBlobs(opts, requestSignal))
+      throwIfAborted(requestSignal)
 
       const formData = new FormData()
       formData.append('model', profile.model)
@@ -230,28 +305,6 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
         formData.append('n', String(params.n))
       }
 
-      const imageBlobs: Blob[] = []
-      for (let i = 0; i < inputImageDataUrls.length; i++) {
-        throwIfAborted(requestSignal)
-        const dataUrl = inputImageDataUrls[i]
-        const blob = opts.maskDataUrl && i === 0
-          ? await imageDataUrlToPngBlob(dataUrl)
-          : await dataUrlToBlob(dataUrl)
-        throwIfAborted(requestSignal)
-        imageBlobs.push(blob)
-      }
-
-      throwIfAborted(requestSignal)
-      const maskBlob = opts.maskDataUrl ? await maskDataUrlToPngBlob(opts.maskDataUrl) : null
-      throwIfAborted(requestSignal)
-      if (opts.maskDataUrl) {
-        assertMaskEditFileSize('遮罩主图文件', imageBlobs[0]?.size ?? 0)
-        assertMaskEditFileSize('遮罩文件', maskBlob?.size ?? 0)
-      }
-      assertImageInputPayloadSize(
-        imageBlobs.reduce((sum, blob) => sum + blob.size, 0) + (maskBlob?.size ?? 0),
-      )
-
       for (let i = 0; i < imageBlobs.length; i++) {
         const blob = imageBlobs[i]
         const ext = blob.type.split('/')[1] || 'png'
@@ -263,13 +316,16 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
       }
 
       throwIfAborted(requestSignal)
-      response = await fetch(buildApiUrl(profile.baseUrl, 'images/edits', proxyConfig, useApiProxy), {
-        method: 'POST',
-        headers: requestHeaders,
-        cache: 'no-store',
-        body: formData,
-        signal: requestSignal,
-      })
+      response = await fetch(
+        buildApiUrl(profile.baseUrl, 'images/edits', proxyConfig, useApiProxy),
+        {
+          method: 'POST',
+          headers: requestHeaders,
+          cache: 'no-store',
+          body: formData,
+          signal: requestSignal,
+        },
+      )
     } else {
       const body: Record<string, unknown> = {
         model: profile.model,
@@ -290,23 +346,31 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
         body.n = params.n
       }
 
-      response = await fetch(buildApiUrl(profile.baseUrl, 'images/generations', proxyConfig, useApiProxy), {
-        method: 'POST',
-        headers: {
-          ...requestHeaders,
-          'Content-Type': 'application/json',
+      response = await fetch(
+        buildApiUrl(profile.baseUrl, 'images/generations', proxyConfig, useApiProxy),
+        {
+          method: 'POST',
+          headers: {
+            ...requestHeaders,
+            'Content-Type': 'application/json',
+          },
+          cache: 'no-store',
+          body: JSON.stringify(body),
+          signal: requestSignal,
         },
-        cache: 'no-store',
-        body: JSON.stringify(body),
-        signal: requestSignal,
-      })
+      )
     }
 
     if (!response.ok) {
       throw await createApiHttpError(response, requestSignal)
     }
 
-    const payload = await readJsonWithAbort<ImageApiResponse>(response, requestSignal)
+    // 上限按本次 n 联动:默认 128MiB 是单图口径,n 张合法结果就能超限、白烧配额(见 getImagesApiJsonLimit)
+    const payload = await readJsonWithAbort<ImageApiResponse>(
+      response,
+      requestSignal,
+      getImagesApiJsonLimit(params.n),
+    )
     const data = payload.data
     if (!Array.isArray(data) || !data.length) {
       throw new Error('接口未返回图片数据')
@@ -332,9 +396,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
       throw new Error('接口未返回可用图片数据')
     }
 
-    const actualParams = mergeActualParams(
-      pickActualParams(payload),
-    )
+    const actualParams = mergeActualParams(pickActualParams(payload))
     return {
       images,
       actualParams,
@@ -351,7 +413,10 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: OpenAIProfile)
   }
 }
 
-async function callResponsesImageApi(opts: CallApiOptions, profile: OpenAIProfile): Promise<CallApiResult> {
+async function callResponsesImageApi(
+  opts: CallApiOptions,
+  profile: OpenAIProfile,
+): Promise<CallApiResult> {
   const n = opts.params.n > 0 ? opts.params.n : 1
   if (n === 1) {
     return callResponsesImageApiSingle(opts, profile)
@@ -365,9 +430,12 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: OpenAIProfil
   // 上限会直接抛 RangeError,友好报错被替换成晦涩异常)
   assertResponsesPayloadSize(opts)
   const sharedBody = buildResponsesRequestBody(opts, profile)
-  const promises = Array.from({ length: n }).map(() => callResponsesImageApiSingle(opts, profile, sharedBody))
+  const promises = Array.from({ length: n }).map(() =>
+    callResponsesImageApiSingle(opts, profile, sharedBody),
+  )
   const results = await Promise.allSettled(promises)
-  const { successfulResults, partialFailureCount, partialFailureMessage } = summarizeConcurrentFailures(results)
+  const { successfulResults, partialFailureCount, partialFailureMessage } =
+    summarizeConcurrentFailures(results)
 
   if (successfulResults.length === 0) {
     const firstError = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
@@ -387,13 +455,23 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: OpenAIProfil
     images.length === opts.params.n ? { n: opts.params.n } : { n: images.length },
   )
 
-  return { images, actualParams, actualParamsList, revisedPrompts, partialFailureCount, partialFailureMessage }
+  return {
+    images,
+    actualParams,
+    actualParamsList,
+    revisedPrompts,
+    partialFailureCount,
+    partialFailureMessage,
+  }
 }
 
 /** Responses 输入体积断言(单点):mask 体积 + 参考图总载荷,必须在任何 JSON.stringify 之前执行。 */
 function assertResponsesPayloadSize(opts: CallApiOptions) {
   if (opts.maskDataUrl) {
-    assertMaskEditFileSize('遮罩主图文件', getDataUrlDecodedByteSize(opts.inputImageDataUrls[0] ?? ''))
+    assertMaskEditFileSize(
+      '遮罩主图文件',
+      getDataUrlDecodedByteSize(opts.inputImageDataUrls[0] ?? ''),
+    )
     assertMaskEditFileSize('遮罩文件', getDataUrlDecodedByteSize(opts.maskDataUrl))
   }
   assertImageInputPayloadSize(
@@ -407,7 +485,14 @@ function buildResponsesRequestBody(opts: CallApiOptions, profile: OpenAIProfile)
   return JSON.stringify({
     model: profile.model,
     input: createResponsesInput(opts.prompt, opts.inputImageDataUrls),
-    tools: [createResponsesImageTool(opts.params, opts.inputImageDataUrls.length > 0, profile, opts.maskDataUrl)],
+    tools: [
+      createResponsesImageTool(
+        opts.params,
+        opts.inputImageDataUrls.length > 0,
+        profile,
+        opts.maskDataUrl,
+      ),
+    ],
     tool_choice: 'required',
   })
 }
@@ -423,7 +508,10 @@ async function callResponsesImageApiSingle(
   const useApiProxy = profile.apiProxy && isApiProxyAvailable(proxyConfig)
   const requestHeaders = createRequestHeaders(profile)
   const controller = new AbortController()
-  const { signal: requestSignal, dispose: disposeSignals } = mergeAbortSignals(opts.signal, controller.signal)
+  const { signal: requestSignal, dispose: disposeSignals } = mergeAbortSignals(
+    opts.signal,
+    controller.signal,
+  )
   const timeoutId = setTimeout(
     () => controller.abort(),
     resolveChatTimeoutMs(profile.timeout, DEFAULT_API_TIMEOUT),
@@ -434,16 +522,19 @@ async function callResponsesImageApiSingle(
     assertOpenAIImageInputDataUrls(opts.inputImageDataUrls, opts.maskDataUrl)
     assertResponsesPayloadSize(opts)
 
-    const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
-      method: 'POST',
-      headers: {
-        ...requestHeaders,
-        'Content-Type': 'application/json',
+    const response = await fetch(
+      buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy),
+      {
+        method: 'POST',
+        headers: {
+          ...requestHeaders,
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        body: prebuiltBody ?? buildResponsesRequestBody(opts, profile),
+        signal: requestSignal,
       },
-      cache: 'no-store',
-      body: prebuiltBody ?? buildResponsesRequestBody(opts, profile),
-      signal: requestSignal,
-    })
+    )
 
     if (!response.ok) {
       throw await createApiHttpError(response, requestSignal)
@@ -451,15 +542,11 @@ async function callResponsesImageApiSingle(
 
     const payload = await readJsonWithAbort<ResponsesApiResponse>(response, requestSignal)
     const imageResults = parseResponsesImageResults(payload, mime)
-    const actualParams = mergeActualParams(
-      imageResults[0]?.actualParams ?? {},
-    )
+    const actualParams = mergeActualParams(imageResults[0]?.actualParams ?? {})
     return {
       images: imageResults.map((result) => result.image),
       actualParams,
-      actualParamsList: imageResults.map((result) =>
-        mergeActualParams(result.actualParams ?? {}),
-      ),
+      actualParamsList: imageResults.map((result) => mergeActualParams(result.actualParams ?? {})),
       revisedPrompts: imageResults.map((result) => result.revisedPrompt),
     }
   } catch (err) {

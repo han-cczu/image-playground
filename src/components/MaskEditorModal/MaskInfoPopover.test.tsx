@@ -17,12 +17,27 @@ describe('MaskInfoPopover', () => {
     cleanup()
   })
 
-  it('点击切换打开/关闭,并同步 aria-expanded', () => {
+  it('鼠标点击打开并同步 aria-expanded;已打开(hover 打开)时再点击是「固定」,不会把说明层关掉', () => {
     render(<Harness />)
     expect(anchor().getAttribute('aria-expanded')).toBe('false')
+    fireEvent.mouseEnter(anchor())
+    expect(screen.queryByText(INFO_TEXT)).not.toBeNull()
     fireEvent.click(anchor())
     expect(screen.queryByText(INFO_TEXT)).not.toBeNull()
     expect(anchor().getAttribute('aria-expanded')).toBe('true')
+    // 关闭走外点 / Esc(usePopoverDismiss)
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByText(INFO_TEXT)).toBeNull()
+  })
+
+  it('触屏(无 hover)点击仍可开合', () => {
+    render(<Harness />)
+    fireEvent.touchStart(anchor())
+    fireEvent.touchEnd(anchor())
+    fireEvent.click(anchor())
+    expect(screen.queryByText(INFO_TEXT)).not.toBeNull()
+    fireEvent.touchStart(anchor())
+    fireEvent.touchEnd(anchor())
     fireEvent.click(anchor())
     expect(screen.queryByText(INFO_TEXT)).toBeNull()
   })

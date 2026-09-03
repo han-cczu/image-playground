@@ -6,7 +6,9 @@ import { installMobileViewportGuards } from './lib/image/viewport'
 import {
   createServiceWorkerUpdateScheduler,
   unregisterExistingServiceWorkers,
+  watchServiceWorkerControllerChange,
 } from './lib/serviceWorkerUpdate'
+import { useStore } from './store'
 
 installMobileViewportGuards()
 
@@ -16,6 +18,13 @@ installMobileViewportGuards()
 if ('serviceWorker' in navigator && window.isSecureContext) {
   if (import.meta.env.PROD) {
     window.addEventListener('load', () => {
+      // 新版本静默接管后旧页面的懒加载 chunk 会 404(见 watchServiceWorkerControllerChange 注释):
+      // 只提示、不自动刷新,让用户自己挑在途任务结束后的时机。须在 register 之前挂,首装判定才准确。
+      watchServiceWorkerControllerChange(navigator.serviceWorker, () => {
+        useStore
+          .getState()
+          .showToast('应用已发布新版本，请在当前任务完成后刷新页面以加载新内容', 'success')
+      })
       navigator.serviceWorker
         .register(`${import.meta.env.BASE_URL}sw.js`)
         .then((registration) => {

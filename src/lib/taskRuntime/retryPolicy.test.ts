@@ -21,6 +21,16 @@ describe('isTransientTaskError(D2 分类白名单)', () => {
     expect(isTransientTaskError(new TypeError('Failed to fetch'))).toBe(true)
   })
 
+  it('结果图下载阶段降级后的普通 Error 不可重试(cause 是 TypeError 也不放行)', () => {
+    // fetchImageUrlAsDataUrl 把下载阶段的 TypeError 包成普通 Error 正是为了绕开上一条分支:
+    // 上游已计费出图,重跑整轮生成只会再烧配额;这里守住分类器不会顺着 cause 链把它翻回瞬时错误。
+    expect(
+      isTransientTaskError(
+        new Error('图片 URL 下载失败：网络或跨域错误', { cause: new TypeError('Failed to fetch') }),
+      ),
+    ).toBe(false)
+  })
+
   it('AbortError(用户取消)绝不重试', () => {
     expect(isTransientTaskError(new DOMException('aborted', 'AbortError'))).toBe(false)
   })

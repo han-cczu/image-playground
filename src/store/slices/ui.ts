@@ -43,6 +43,9 @@ export interface UiSlice {
   setLightboxImageId: (id: string | null, list?: string[]) => void
   showSettings: boolean
   setShowSettings: (v: boolean) => void
+  /** 提交流程在途(submitTask / submitGridTask 从校验到全部入队之间),瞬态不持久化;由 taskRuntime 维护 */
+  submitting: boolean
+  setSubmitting: (v: boolean) => void
   showPromptOptimizer: boolean
   setShowPromptOptimizer: (v: boolean) => void
   /** 命令面板（Ctrl/⌘+K），瞬态不持久化 */
@@ -77,6 +80,7 @@ export interface UiSlice {
     messageAlign?: 'left' | 'center'
     tone?: 'danger' | 'warning'
     action: () => void | Promise<void>
+    /** 「取消」按钮、Esc、点遮罩三条关闭路径都会触发(只有「确认」不会);showCancel=false 时 Esc/遮罩仍会触发 */
     cancelAction?: () => void
   } | null
   setConfirmDialog: (d: AppState['confirmDialog']) => void
@@ -152,13 +156,14 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
     })),
   showSettings: false,
   setShowSettings: (showSettings) => set({ showSettings }),
+  submitting: false,
+  setSubmitting: (submitting) => set({ submitting }),
   showPromptOptimizer: false,
   setShowPromptOptimizer: (showPromptOptimizer) => set({ showPromptOptimizer }),
   showCommandPalette: false,
   setShowCommandPalette: (showCommandPalette) => set({ showCommandPalette }),
   compareTaskIds: null,
-  setCompareTaskIds: (compareTaskIds) =>
-    set({ compareTaskIds: normalizeUiIds(compareTaskIds, 4) }),
+  setCompareTaskIds: (compareTaskIds) => set({ compareTaskIds: normalizeUiIds(compareTaskIds, 4) }),
   lineageTaskId: null,
   setLineageTaskId: (lineageTaskId) => set({ lineageTaskId: normalizeUiId(lineageTaskId) }),
   captionBatchImageIds: null,
@@ -173,9 +178,12 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
     const id = ++toastSeq
     set({ toast: { id, message: message.slice(0, MAX_TASK_TEXT_LEN), type } })
     // 错误停留更久:错误文案常含需要读完/复制的关键信息,3 秒来不及
-    setTimeout(() => {
-      if (get().toast?.id === id) set({ toast: null })
-    }, type === 'error' ? 6000 : 3000)
+    setTimeout(
+      () => {
+        if (get().toast?.id === id) set({ toast: null })
+      },
+      type === 'error' ? 6000 : 3000,
+    )
   },
   dismissToast: () => set({ toast: null }),
 

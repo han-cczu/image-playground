@@ -3,6 +3,7 @@ import type { TaskRecord } from '../types'
 import { MAX_TASK_PARAM_STRING_LEN } from './api/paramCompatibility'
 import { MAX_PROMPT_EXPANSION_HARD } from './promptExpand'
 import {
+  normalizeStoredTasks,
   normalizeTask,
   normalizeTasks,
   MAX_IMAGE_IDS_PER_TASK,
@@ -214,9 +215,27 @@ describe('normalizeTask', () => {
     expect(tasks[tasks.length - 1].id).toBe(`t-${MAX_TASKS - 1}`)
   })
 
+  it('normalizeStoredTasks 不截断条数(自家 IndexedDB 读取不能丢最新任务),但仍做字段归一化与去重', () => {
+    const input: unknown[] = Array.from({ length: MAX_TASKS + 10 }, (_, index) => ({
+      id: `t-${index}`,
+    }))
+    input.push(null, { id: '' }, { id: 't-0', prompt: 'newer', status: 'weird' })
+
+    const tasks = normalizeStoredTasks(input)
+
+    expect(tasks).toHaveLength(MAX_TASKS + 10)
+    expect(tasks.some((task) => task.id === `t-${MAX_TASKS + 9}`)).toBe(true)
+    // 去重保留后出现的记录,且非法字段照常兜底
+    const duplicated = tasks.find((task) => task.id === 't-0')
+    expect(duplicated?.prompt).toBe('newer')
+    expect(duplicated?.status).toBe('done')
+  })
+
   it('非数组输入返回空数组', () => {
     expect(normalizeTasks(undefined)).toEqual([])
     expect(normalizeTasks({})).toEqual([])
+    expect(normalizeStoredTasks(undefined)).toEqual([])
+    expect(normalizeStoredTasks({})).toEqual([])
   })
 
   it('保留批量/网格结构字段 batchId/gridAxes/gridCoord(备份恢复不丢网格与批次笔记关联)', () => {

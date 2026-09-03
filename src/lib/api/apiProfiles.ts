@@ -13,7 +13,7 @@ import type {
 import { isOpenAIProfile } from '../../types'
 import { readRuntimeEnv } from './runtimeEnv'
 
-const DEFAULT_BASE_URL =
+export const DEFAULT_BASE_URL =
   readRuntimeEnv(import.meta.env.VITE_DEFAULT_API_URL) || 'https://api.openai.com/v1'
 export const DEFAULT_IMAGES_MODEL = 'gpt-image-2'
 export const DEFAULT_RESPONSES_MODEL = 'gpt-5.5'
@@ -543,10 +543,23 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
   return { ...profile, ...baseOverrides }
 }
 
+/** HTTP 头值只能是 ByteString:含换行 / NUL / 非 Latin-1 字符时 fetch 直接抛 TypeError */
+function isInvalidHeaderValue(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    if (code === 0 || code === 10 || code === 13 || code > 0xff) return true
+  }
+  return false
+}
+
 export function validateApiProfile(profile: ApiProfile): string | null {
   if (!profile.name.trim()) return '缺少名称'
   if (!profile.baseUrl.trim()) return '缺少 API URL'
   if (!profile.apiKey.trim()) return '缺少 API Key'
+  // 粘贴时带进换行/全角字符的 key,发请求时 fetch 会抛 TypeError,自动重试把它当网络故障退避 3 轮才报错;
+  // 这里提前拦下并说清原因
+  if (isInvalidHeaderValue(profile.apiKey.trim()))
+    return 'API Key 含换行或非法字符，请检查是否粘贴出错'
   if (!profile.model.trim()) return '缺少模型 ID'
   return null
 }
@@ -583,11 +596,37 @@ function createImportedProfileId(provider: ApiProvider, usedIds: Set<string>): s
   return id
 }
 
-function getApiProfileDedupKey(profile: ApiProfile): string {
+type ProfileDedupKeyOptions = {
+  /** 把 apiKey 当作空串参与计算,用途见 collectMergeDedupKeys。 */
+  ignoreApiKey?: boolean
+}
+
+/**
+ * 合并导入时用来判断「导入项本地是否已有」的键集合:每个本地 profile 放两把键——全字段键,以及把
+ * apiKey 抹空后的键。导出(redactSettingsForExport)会把备份里所有 apiKey 抹空,只按全字段键比较的话,
+ * 本地已填密钥的 profile 与自己备份里的同一条永远不相等,在已配置好的浏览器里合并导入自己的备份就会
+ * 给每个配置追加一份同名、无密钥的幽灵副本(选中即报「缺少 API Key」)。
+ * 导入项 apiKey 非空时其键的 apiKey 槽位非空,不可能命中抹空键,所以同端点同模型不同密钥的多账号配置
+ * 仍按全字段判重、照常追加。不直接把 apiKey 从键里去掉也是为此——dedupe*Profiles 对导入列表内部去重
+ * 复用同一把键,去掉会把多账号配置折叠丢失。
+ */
+function collectMergeDedupKeys<T>(
+  profiles: T[],
+  getDedupKey: (profile: T, options?: ProfileDedupKeyOptions) => string,
+): Set<string> {
+  const keys = new Set<string>()
+  for (const profile of profiles) {
+    keys.add(getDedupKey(profile))
+    keys.add(getDedupKey(profile, { ignoreApiKey: true }))
+  }
+  return keys
+}
+
+function getApiProfileDedupKey(profile: ApiProfile, options?: ProfileDedupKeyOptions): string {
   return JSON.stringify([
     profile.provider,
     profile.baseUrl.trim().replace(/\/+$/, '').toLowerCase(),
-    profile.apiKey.trim(),
+    options?.ignoreApiKey ? '' : profile.apiKey.trim(),
     profile.model.trim(),
     isOpenAIProfile(profile) ? profile.apiMode : null,
   ])
@@ -603,11 +642,14 @@ function dedupeApiProfiles(profiles: ApiProfile[]): ApiProfile[] {
   })
 }
 
-function getOptimizerProfileDedupKey(profile: PromptOptimizerProfile): string {
+function getOptimizerProfileDedupKey(
+  profile: PromptOptimizerProfile,
+  options?: ProfileDedupKeyOptions,
+): string {
   return JSON.stringify([
     profile.provider ?? 'openai',
     profile.baseUrl.trim().replace(/\/+$/, '').toLowerCase(),
-    profile.apiKey.trim(),
+    options?.ignoreApiKey ? '' : profile.apiKey.trim(),
     profile.model.trim(),
     // 纳入 systemPrompt + name:导出会抹空 apiKey,否则同 baseUrl+model 的多套配置往返导入时会被折叠丢失
     profile.systemPrompt.trim(),
@@ -655,11 +697,14 @@ function createImportedOptimizerProfileId(usedIds: Set<string>): string {
   return id
 }
 
-function getCaptionerProfileDedupKey(profile: CaptionerProfile): string {
+function getCaptionerProfileDedupKey(
+  profile: CaptionerProfile,
+  options?: ProfileDedupKeyOptions,
+): string {
   return JSON.stringify([
     profile.provider ?? 'openai',
     profile.baseUrl.trim().replace(/\/+$/, '').toLowerCase(),
-    profile.apiKey.trim(),
+    options?.ignoreApiKey ? '' : profile.apiKey.trim(),
     profile.model.trim(),
     // 纳入 systemPrompt + name:导出会抹空 apiKey,否则同 baseUrl+model 的多套配置往返导入时会被折叠丢失
     profile.systemPrompt.trim(),
@@ -725,7 +770,7 @@ export function mergeImportedSettings(
   }
 
   const usedIds = new Set(current.profiles.map((profile) => profile.id))
-  const existingKeys = new Set(current.profiles.map(getApiProfileDedupKey))
+  const existingKeys = collectMergeDedupKeys(current.profiles, getApiProfileDedupKey)
   const importedProfiles = imported.profiles
     .filter((profile) => !existingKeys.has(getApiProfileDedupKey(profile)))
     .map((profile) => ({
@@ -741,8 +786,9 @@ export function mergeImportedSettings(
     mergedActiveOptimizerProfileId = imported.activeOptimizerProfileId
   } else {
     const usedOptimizerIds = new Set(current.optimizerProfiles.map((p) => p.id))
-    const existingOptimizerKeys = new Set(
-      current.optimizerProfiles.map(getOptimizerProfileDedupKey),
+    const existingOptimizerKeys = collectMergeDedupKeys(
+      current.optimizerProfiles,
+      getOptimizerProfileDedupKey,
     )
     const importedOptimizerProfiles = imported.optimizerProfiles
       .filter((p) => !existingOptimizerKeys.has(getOptimizerProfileDedupKey(p)))
@@ -758,8 +804,9 @@ export function mergeImportedSettings(
     mergedActiveCaptionerProfileId = imported.activeCaptionerProfileId
   } else {
     const usedCaptionerIds = new Set(current.captionerProfiles.map((p) => p.id))
-    const existingCaptionerKeys = new Set(
-      current.captionerProfiles.map(getCaptionerProfileDedupKey),
+    const existingCaptionerKeys = collectMergeDedupKeys(
+      current.captionerProfiles,
+      getCaptionerProfileDedupKey,
     )
     const importedCaptionerProfiles = imported.captionerProfiles
       .filter((p) => !existingCaptionerKeys.has(getCaptionerProfileDedupKey(p)))

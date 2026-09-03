@@ -22,6 +22,22 @@ export const MAX_IMAGE_INPUT_PAYLOAD_BYTES = 512 * 1024 * 1024
 export const MAX_REMOTE_IMAGE_BYTES = 64 * 1024 * 1024
 const MAX_API_ERROR_BODY_BYTES = 64 * 1024
 const MAX_API_JSON_BODY_BYTES = 128 * 1024 * 1024
+/**
+ * 多图 JSON 响应上限的封顶值。readCappedTextWithAbort 把整包累成一个字符串再 JSON.parse,
+ * V8 单字符串上限约 2^29 字符,再加 parse 结果与 data URL 三份共存,不能按 n×64MiB 线性放开。
+ */
+const MAX_API_JSON_BODY_BYTES_CAP = 512 * 1024 * 1024
+const MiB = 1024 * 1024
+
+/**
+ * Images API 一次请求返回 n 张图时的 JSON 上限:默认 128MiB 是按单图设计的,n 张 4K PNG 的 b64_json
+ * 合法响应就能超过它——配额已经消耗,结果却被整体丢弃。按 n 放大(base64 约 4/3 膨胀 + 元数据余量),封顶 512MiB。
+ */
+export function getImagesApiJsonLimit(n: number): number {
+  const count = Number.isFinite(n) && n > 0 ? Math.floor(n) : 1
+  const scaled = Math.ceil((count * MAX_REMOTE_IMAGE_BYTES * 4) / 3) + MiB
+  return Math.min(MAX_API_JSON_BODY_BYTES_CAP, Math.max(MAX_API_JSON_BODY_BYTES, scaled))
+}
 
 export interface CallApiOptions {
   settings: AppSettings
@@ -228,6 +244,25 @@ function createAbortError(): DOMException {
   return new DOMException('aborted', 'AbortError')
 }
 
+/**
+ * 结果图 URL 下载阶段的网络层失败降级为普通 Error(cause 保留原错误供详情面板/调试追溯)。
+ *
+ * 浏览器对 fetch 拒绝(DNS/断网/CDN 无 CORS 头)与读 body 中途断连统一抛 TypeError,而
+ * retryPolicy 把 TypeError 当作「主请求网络层失败」判为瞬时错误——若在这里原样冒泡,executeTask
+ * 会把**整轮生成**重跑到自动重试上限:此时上游已经计费出图,只是浏览器拿不到字节;最常见的
+ * CORS 拒绝还是确定性失败,每次重试都是再烧一份配额、再拿到一个同样下不动的 URL。
+ * 只降级 TypeError:AbortError 必须原样放行(调用方靠它区分「已取消 / 请求超时」,watchdog 超时
+ * 重试也依赖 abort 语义);「响应过大」等已是普通 Error 的业务错误不改写,保住既有文案。
+ * 不从 chatCompletionsShared 复用 isAbortError/wrapCause:该模块反向 import 本文件,会成环。
+ */
+function toImageDownloadError(err: unknown): unknown {
+  if ((err as { name?: string } | null)?.name === 'AbortError') return err
+  if (err instanceof TypeError) {
+    return new Error('图片 URL 下载失败：网络或跨域错误', { cause: err })
+  }
+  return err
+}
+
 function readBodyWithAbort<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return read()
   if (signal.aborted) throw createAbortError()
@@ -302,10 +337,15 @@ export async function fetchImageUrlAsDataUrl(
     return url
   }
 
-  const response = await fetch(url, {
-    cache: 'no-store',
-    signal,
-  })
+  let response: Response
+  try {
+    response = await fetch(url, {
+      cache: 'no-store',
+      signal,
+    })
+  } catch (err) {
+    throw toImageDownloadError(err)
+  }
 
   if (!response.ok) {
     throw new Error(`图片 URL 下载失败：HTTP ${response.status}`)
@@ -316,7 +356,12 @@ export async function fetchImageUrlAsDataUrl(
     assertMaxBytes('图片 URL 响应', contentLength, MAX_REMOTE_IMAGE_BYTES)
   }
 
-  const blob = await readBlobWithAbort(response, signal, MAX_REMOTE_IMAGE_BYTES, '图片 URL 响应')
+  let blob: Blob
+  try {
+    blob = await readBlobWithAbort(response, signal, MAX_REMOTE_IMAGE_BYTES, '图片 URL 响应')
+  } catch (err) {
+    throw toImageDownloadError(err)
+  }
   // 上游(可能是用户可配/被注入的半信任主机)返回的图片 URL:按单图上限设防并校验确为图片,
   // 避免把任意/超大响应体整块读入内存(arrayBuffer + binary 串 + btoa 三重放大)导致内存暴涨 / 页面卡死。
   assertMaxBytes('图片 URL 响应', blob.size, MAX_REMOTE_IMAGE_BYTES)
@@ -490,7 +535,10 @@ const RETRY_AFTER_MAX_MS = 60_000
  * 解析 Retry-After 头(RFC 9110:非负秒数或 HTTP 日期),clamp 到 [1s, 60s]。
  * 负数秒/垃圾串返回 undefined(视作无头);过去的日期 clamp 到下限。
  */
-export function parseRetryAfterMs(headerValue: string | null, now = Date.now()): number | undefined {
+export function parseRetryAfterMs(
+  headerValue: string | null,
+  now = Date.now(),
+): number | undefined {
   if (headerValue === null) return undefined
   const trimmed = headerValue.trim()
   if (!trimmed) return undefined

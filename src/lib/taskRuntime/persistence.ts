@@ -8,26 +8,37 @@ import { useStore } from '../../store'
 import { putTask, deleteImage } from '../db'
 import { deleteCachedImage } from '../imageCache'
 import { collectReferencedImageIds } from '../storageStats'
+import { getInFlightImageIds } from '../inFlightImages'
+import {
+  clearPendingIndexedDbTaskWrite,
+  markPendingIndexedDbTaskWrite,
+} from '../../store/idbSyncState'
 
 /**
- * 回滚一组刚 storeImage 的图片(成对删 DB + 内存缓存),但只删当前没有任何 task / inputImage 引用的,
- * 避免误删内容寻址去重命中的在用图。供 executeTask 写图后早退、蒙版保存竞态复用。
+ * 回滚一组刚 storeImage 的图片(成对删 DB + 内存缓存),但只删当前没有任何 task / inputImage 引用、
+ * 也没有被其它 owner 登记为在途的,避免误删内容寻址去重命中的在用图(并发兄弟任务已 storeImage 但
+ * 尚未 commit 到任务记录的同 hash 输出图,过去会被取消任务的回滚误删)。
+ * @param owner 发起回滚的 owner(taskId / 提交会话),它自己登记的在途图正是要回滚的对象,不计入保护。
  */
-export async function rollbackStoredImages(imageIds: string[]): Promise<void> {
+export async function rollbackStoredImages(imageIds: string[], owner?: string): Promise<void> {
   if (!imageIds.length) return
   const { tasks, inputImages } = useStore.getState()
   const stillUsed = collectReferencedImageIds(tasks, inputImages)
+  const inFlightElsewhere = getInFlightImageIds(owner)
   for (const id of imageIds) {
-    if (!stillUsed.has(id)) {
+    if (!stillUsed.has(id) && !inFlightElsewhere.has(id)) {
       await deleteImage(id)
       deleteCachedImage(id)
     }
   }
 }
 
-export async function rollbackStoredImagesSilently(imageIds: string[]): Promise<void> {
+export async function rollbackStoredImagesSilently(
+  imageIds: string[],
+  owner?: string,
+): Promise<void> {
   try {
-    await rollbackStoredImages(imageIds)
+    await rollbackStoredImages(imageIds, owner)
   } catch (err) {
     useStore
       .getState()
@@ -42,6 +53,7 @@ export function updateTaskInStoreSilently(taskId: string, patch: Partial<TaskRec
 }
 
 export async function persistTaskSilently(task: TaskRecord) {
+  markPendingIndexedDbTaskWrite(task.id)
   try {
     await putTask(task)
   } catch (err) {
@@ -53,15 +65,19 @@ export async function persistTaskSilently(task: TaskRecord) {
       ),
     )
     state.showToast(`保存任务失败：${message}`, 'error')
+  } finally {
+    clearPendingIndexedDbTaskWrite(task.id)
   }
 }
 
 export async function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>): Promise<void> {
   const { tasks, setTasks } = useStore.getState()
   const updated = tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t))
-  setTasks(updated)
   const task = updated.find((t) => t.id === taskId)
   if (!task) return
+  // 登记必须先于 setTasks(同一同步段):跨标签页刷新在落盘前到达时,以本地版本为准而不是被快照回退
+  markPendingIndexedDbTaskWrite(taskId)
+  setTasks(updated)
 
   try {
     await putTask(task)
@@ -75,5 +91,7 @@ export async function updateTaskInStore(taskId: string, patch: Partial<TaskRecor
     )
     state.showToast(`保存任务失败：${message}`, 'error')
     throw err
+  } finally {
+    clearPendingIndexedDbTaskWrite(taskId)
   }
 }

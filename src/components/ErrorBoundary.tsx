@@ -17,6 +17,11 @@ export interface ErrorBoundaryProps {
   region: ErrorBoundaryRegion
   /** 外部 reset key：变化时 boundary 自动清除错误。 */
   resetKey?: unknown
+  /**
+   * 可选的 fallback 覆盖:返回 null 表示「这个错误我不接管」,继续走 region 默认形态。
+   * 给懒加载弹层用——chunk 加载失败时默认的「重试/清空数据」都不对症,需要换成「刷新/关闭」。
+   */
+  renderFallback?: (actions: FallbackActions) => ReactNode
 }
 
 interface ErrorBoundaryState {
@@ -43,7 +48,7 @@ const REGION_LABEL: Record<ErrorBoundaryRegion, string> = {
   modal: '弹层',
 }
 
-interface FallbackActions {
+export interface FallbackActions {
   onRetry: () => void
   onReload: () => void
   onClearAndReload: () => void
@@ -291,7 +296,9 @@ function FallbackModal(props: FallbackActions) {
   const brief = getErrorBrief(error)
 
   return (
-    <div role="alert" className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+    // z-[108]:高于 CommandPalette(z-105)与全部普通弹层,但低于 ConfirmDialog(z-110)——
+    // 「清空数据并重载」要弹确认框,曾经的 z-[200] 会把确认框盖在下面,按钮看似无响应
+    <div role="alert" className="fixed inset-0 z-[108] flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-black/30 backdrop-blur-md dark:bg-black/50"
         aria-hidden="true"
@@ -448,6 +455,8 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
       toggleDetail: this.toggleDetail,
     }
 
+    const override = this.props.renderFallback?.(actions)
+    if (override != null) return override
     const Fallback = FALLBACK_BY_REGION[region]
     return <Fallback {...actions} />
   }

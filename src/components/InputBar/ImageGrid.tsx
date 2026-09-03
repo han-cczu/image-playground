@@ -14,6 +14,7 @@ export interface ImageGridProps {
   isMobile: boolean
   /** 外层容器 ref：供自适应高度计算缩略图区域高度使用 */
   imagesRef: React.RefObject<HTMLDivElement | null>
+  /** to 是「移除前数组」的插入缝隙(0..length),即指示线所在位置;下标换算由 store 侧完成,这里不要减 1 */
   onMove: (from: number, to: number) => void
   onRemove: (index: number) => void
   onClearAll: () => void
@@ -228,7 +229,8 @@ export default function ImageGrid({
       touchDrag.moved = true
       hideImageHint()
       suppressImageClickRef.current = true
-      e.preventDefault()
+      // 这里不能 preventDefault:React 根监听把 touchmove 注册为 passive,调用无效且每次都刷「Unable to
+      // preventDefault inside passive event listener」;滚动抑制由缩略图的 touch-action: none 负责
       setImageDragIndex(touchDrag.index)
       setTouchDragPreview({ src: displaySrc, x: touch.clientX, y: touch.clientY })
       const dropIndex = getTouchDropIndex(touch)

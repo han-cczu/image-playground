@@ -10,6 +10,8 @@ export interface DataManagementSectionProps {
   onImport: (file: File, mode: ImportMode) => Promise<void>
   onClearAll: () => void | Promise<void>
   onConfirmReplaceImport: (proceed: () => void | Promise<void>) => void
+  /** 合并导入前的确认门(面板有未保存改动时提示会被覆盖;无改动直接 proceed) */
+  onConfirmMergeImport: (proceed: () => void | Promise<void>) => void
   onConfirmClearAll: (proceed: () => void | Promise<void>) => void
 }
 
@@ -28,6 +30,7 @@ export function DataManagementSection({
   onImport,
   onClearAll,
   onConfirmReplaceImport,
+  onConfirmMergeImport,
   onConfirmClearAll,
 }: DataManagementSectionProps) {
   const importInputRef = useRef<HTMLInputElement>(null)
@@ -163,7 +166,9 @@ export function DataManagementSection({
                   </span>
                   <button
                     onClick={onPruneOrphans}
-                    className="rounded-lg bg-amber-50 px-2.5 py-1 text-xs text-amber-600 transition hover:bg-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:hover:bg-amber-500/20"
+                    // 导入/导出/清空进行中禁用:导入写图与任务落库不在一个事务,此时清理会删掉刚导入的图
+                    disabled={busy !== null}
+                    className="rounded-lg bg-amber-50 px-2.5 py-1 text-xs text-amber-600 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-amber-500/10 dark:text-amber-400 dark:hover:bg-amber-500/20"
                   >
                     清理
                   </button>
@@ -193,7 +198,7 @@ export function DataManagementSection({
           {busy === 'export' ? '导出中…' : '导出'}
         </button>
         <button
-          onClick={() => selectImportFile('merge')}
+          onClick={() => onConfirmMergeImport(() => selectImportFile('merge'))}
           disabled={busy !== null}
           className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
         >

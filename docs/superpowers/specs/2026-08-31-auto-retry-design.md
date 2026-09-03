@@ -37,6 +37,9 @@
   ∪ `TypeError`(fetch 网络层失败) ∪ watchdog 超时标记。其余一律不重试:4xx、
   AbortError、业务错误(「接口未返回图片数据」「Gemini 安全拦截/finishReason」等)。
   取向:**宁可漏重试,不可误重试**——安全拦截/参数错误重试只会烧配额。
+  `TypeError` 仅指**主请求**的网络层失败:Images 模式结果图以 url 形态返回时,下载阶段
+  的 TypeError(CDN 无 CORS 头 / 读 body 断连)由 `fetchImageUrlAsDataUrl` 降级为普通
+  Error——上游已计费出图,重跑整轮生成只会再烧配额(审计 2026-09-02 #19)。
 - **D3 收口位置**:executeTask 内 attempt 循环(评审指定边界)。退避等待**占住并发闸
   worker 槽位是刻意的**:429 场景占槽即天然背压,整批自动降速,不会形成重试风暴;
   调度器(runEnqueuedTasks/mapWithConcurrency)零改动。
@@ -91,8 +94,10 @@ fail 分支前经注册制回调仲裁:有剩余尝试 → 设标记 + terminate
 
 - **退避中取消/删除**:timer 被 terminate 清除;即便回调已入队,醒来后 status 守卫
   早退(与 cancelBatch「排队跳过」同构)。
-- **输入图加载段超时**:IDB await 不可中断;标记 + abort 后,加载完成继续到请求发起
-  即因 signal aborted 快速 reject,循环正常接管。
+- **输入图加载段超时**:IDB await 不可中断,abort 对它无效;仲裁器按阶段判定
+  (RetryProgress.phase),加载阶段超时一律交回 watchdog 直落 error,不进重试——
+  否则 IDB 永不完成时接管会清掉 watchdog 且再无人看护,任务永久 running(审计 #18 回归)。
+  超时接管只在请求阶段(callImageApi 发起后)生效。
 - **总耗时上界**:≤ 尝试数×timeout + Σ退避,批量场景由占槽背压自然串行化,不额外放大。
 - **部分成功不重试**:拆单路径部分成功仍按现行 partialFailure 落 done(见非目标)。
 - **重试徽标与 cv-auto**:徽标只改卡片内文本节点,不影响 content-visibility 测高。

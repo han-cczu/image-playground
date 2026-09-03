@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { createPortal } from 'react-dom'
 import type { FavoriteCategory } from '../types'
 import { useStore } from '../store'
+import { useModalFocusScopeMember } from './modalFocusScope'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePopoverPlacement } from '../hooks/usePopoverPlacement'
 import {
@@ -70,6 +71,8 @@ export default function FavoriteCategoryMenu({
   const triggerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  // 菜单 portal 到 body、在 Modal 面板之外:打开时并入所在 Modal(如 DetailModal)的焦点环
+  useModalFocusScopeMember(isOpen, menuRef)
 
   const categories = useMemo(() => {
     const hasDefault = favoriteCategories.some(
@@ -145,6 +148,11 @@ export default function FavoriteCategoryMenu({
     }
     const nextCategoryId =
       categoryId === DEFAULT_FAVORITE_CATEGORY_ID ? ensureDefaultFavoriteCategory() : categoryId
+    // 分类满额建不出默认分类时(已 toast)直接收起:onSelect(null) 的语义是「取消收藏」,不能误触发
+    if (!nextCategoryId) {
+      closeMenu()
+      return
+    }
     onSelect(nextCategoryId)
     closeMenu()
   }
@@ -156,6 +164,10 @@ export default function FavoriteCategoryMenu({
       name,
       color: createDraft?.color ?? pickNextDefaultColor(),
     })
+    if (!categoryId) {
+      closeMenu()
+      return
+    }
     onSelect(categoryId)
     closeMenu()
   }

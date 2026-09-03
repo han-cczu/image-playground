@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from '../../types'
 import { DEFAULT_SETTINGS } from './apiProfiles'
+import { isTransientTaskError } from '../taskRuntime/retryPolicy'
 import { callImageApi } from '.'
 
 describe('callImageApi', () => {
@@ -13,15 +14,22 @@ describe('callImageApi', () => {
   it.each([false, true])(
     'adds the prompt rewrite guard on Responses API when Codex CLI mode is %s',
     async (codexCli) => {
-      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-        output: [{
-          type: 'image_generation_call',
-          result: 'aW1hZ2U=',
-        }],
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }))
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            output: [
+              {
+                type: 'image_generation_call',
+                result: 'aW1hZ2U=',
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
 
       await callImageApi({
         settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', apiMode: 'responses', codexCli },
@@ -32,7 +40,9 @@ describe('callImageApi', () => {
 
       const [, init] = fetchMock.mock.calls[0]
       const body = JSON.parse(String((init as RequestInit).body))
-      expect(body.input).toBe('Use the following text as the complete prompt. Do not rewrite it:\nprompt')
+      expect(body.input).toBe(
+        'Use the following text as the complete prompt. Do not rewrite it:\nprompt',
+      )
     },
   )
 
@@ -111,18 +121,25 @@ describe('callImageApi', () => {
   })
 
   it('records actual params returned on Images API responses in Codex CLI mode', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      output_format: 'png',
-      quality: 'medium',
-      size: '1033x1522',
-      data: [{
-        b64_json: 'aW1hZ2U=',
-        revised_prompt: '移除靴子',
-      }],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_format: 'png',
+          quality: 'medium',
+          size: '1033x1522',
+          data: [
+            {
+              b64_json: 'aW1hZ2U=',
+              revised_prompt: '移除靴子',
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
 
     const result = await callImageApi({
       settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', codexCli: true },
@@ -137,23 +154,30 @@ describe('callImageApi', () => {
       quality: 'medium',
       size: '1033x1522',
     })
-    expect(result.actualParamsList).toEqual([{
-      output_format: 'png',
-      quality: 'medium',
-      size: '1033x1522',
-    }])
+    expect(result.actualParamsList).toEqual([
+      {
+        output_format: 'png',
+        quality: 'medium',
+        size: '1033x1522',
+      },
+    ])
     expect(result.revisedPrompts).toEqual(['移除靴子'])
   })
 
   it('does not synthesize actual quality in Codex CLI mode when the API omits it', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      output_format: 'png',
-      size: '1033x1522',
-      data: [{ b64_json: 'aW1hZ2U=' }],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_format: 'png',
+          size: '1033x1522',
+          data: [{ b64_json: 'aW1hZ2U=' }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
 
     const result = await callImageApi({
       settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', codexCli: true },
@@ -167,19 +191,26 @@ describe('callImageApi', () => {
       size: '1033x1522',
     })
     expect(result.actualParams?.quality).toBeUndefined()
-    expect(result.actualParamsList).toEqual([{
-      output_format: 'png',
-      size: '1033x1522',
-    }])
+    expect(result.actualParamsList).toEqual([
+      {
+        output_format: 'png',
+        size: '1033x1522',
+      },
+    ])
   })
 
   it('normalizes image params at the API boundary before building OpenAI Images requests', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      data: [{ b64_json: 'aW1hZ2U=' }],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ b64_json: 'aW1hZ2U=' }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
 
     await callImageApi({
       settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
@@ -207,12 +238,17 @@ describe('callImageApi', () => {
   })
 
   it('trims OpenAI API keys before sending authorization headers', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      data: [{ b64_json: 'aW1hZ2U=' }],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ b64_json: 'aW1hZ2U=' }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
 
     await callImageApi({
       settings: { ...DEFAULT_SETTINGS, apiKey: '  test-key  ' },
@@ -229,12 +265,17 @@ describe('callImageApi', () => {
 
   it('caps huge OpenAI image API timeouts before passing them to setTimeout', async () => {
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      data: [{ b64_json: 'aW1hZ2U=' }],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ b64_json: 'aW1hZ2U=' }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
 
     await callImageApi({
       settings: {
@@ -251,12 +292,17 @@ describe('callImageApi', () => {
   })
 
   it('normalizes image params against the execution profile override even when settings contain a stale same-id profile', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      data: [{ b64_json: 'aW1hZ2U=' }],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ b64_json: 'aW1hZ2U=' }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
     const storedProfile = {
       ...DEFAULT_SETTINGS.profiles[0],
       id: 'profile-a',
@@ -289,12 +335,17 @@ describe('callImageApi', () => {
 
   it('uses the same-origin API proxy path when API proxy is enabled', async () => {
     vi.stubEnv('VITE_API_PROXY_AVAILABLE', 'true')
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      data: [{ b64_json: 'aW1hZ2U=' }],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ b64_json: 'aW1hZ2U=' }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
 
     await callImageApi({
       settings: {
@@ -316,12 +367,17 @@ describe('callImageApi', () => {
 
   it('ignores stored API proxy settings when the current deployment has no proxy', async () => {
     vi.stubEnv('VITE_API_PROXY_AVAILABLE', 'false')
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      data: [{ b64_json: 'aW1hZ2U=' }],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ b64_json: 'aW1hZ2U=' }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
 
     await callImageApi({
       settings: {
@@ -346,20 +402,26 @@ describe('callImageApi', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       callIndex += 1
       if (callIndex === 2) {
-        return new Response(JSON.stringify({
-          error: { message: 'second request failed' },
-        }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        })
+        return new Response(
+          JSON.stringify({
+            error: { message: 'second request failed' },
+          }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        )
       }
 
-      return new Response(JSON.stringify({
-        data: [{ b64_json: `aW1hZ2Ut${callIndex}` }],
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      return new Response(
+        JSON.stringify({
+          data: [{ b64_json: `aW1hZ2Ut${callIndex}` }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      )
     })
 
     const result = await callImageApi({
@@ -381,21 +443,22 @@ describe('callImageApi', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       callIndex += 1
       if (callIndex === 1) {
-        return new Response(JSON.stringify({
-          data: [{ b64_json: 'aW1hZ2U=' }],
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
+        return new Response(
+          JSON.stringify({
+            data: [{ b64_json: 'aW1hZ2U=' }],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        )
       }
 
       const signal = (init as RequestInit).signal as AbortSignal
       return new Promise<Response>((_resolve, reject) => {
-        signal.addEventListener(
-          'abort',
-          () => reject(new DOMException('Aborted', 'AbortError')),
-          { once: true },
-        )
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), {
+          once: true,
+        })
       })
     })
 
@@ -417,23 +480,31 @@ describe('callImageApi', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       callIndex += 1
       if (callIndex === 1) {
-        return new Response(JSON.stringify({
-          error: { message: 'first responses request failed' },
-        }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        })
+        return new Response(
+          JSON.stringify({
+            error: { message: 'first responses request failed' },
+          }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        )
       }
 
-      return new Response(JSON.stringify({
-        output: [{
-          type: 'image_generation_call',
-          result: `aW1hZ2Ut${callIndex}`,
-        }],
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      return new Response(
+        JSON.stringify({
+          output: [
+            {
+              type: 'image_generation_call',
+              result: `aW1hZ2Ut${callIndex}`,
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      )
     })
 
     const result = await callImageApi({
@@ -455,24 +526,27 @@ describe('callImageApi', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       callIndex += 1
       if (callIndex === 1) {
-        return new Response(JSON.stringify({
-          output: [{
-            type: 'image_generation_call',
-            result: 'aW1hZ2U=',
-          }],
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
+        return new Response(
+          JSON.stringify({
+            output: [
+              {
+                type: 'image_generation_call',
+                result: 'aW1hZ2U=',
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        )
       }
 
       const signal = (init as RequestInit).signal as AbortSignal
       return new Promise<Response>((_resolve, reject) => {
-        signal.addEventListener(
-          'abort',
-          () => reject(new DOMException('Aborted', 'AbortError')),
-          { once: true },
-        )
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), {
+          once: true,
+        })
       })
     })
 
@@ -494,12 +568,17 @@ describe('callImageApi', () => {
     // 调用前即取消:合并后的请求 signal 应反映 caller 的取消,验证 caller→fetch 的接线。
     // (请求完成后 mergeAbortSignals 的 dispose 会解绑监听以防泄漏,故不再断言「完成后再 abort 仍传播」。)
     controller.abort()
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      data: [{ b64_json: 'aW1hZ2U=' }],
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ b64_json: 'aW1hZ2U=' }],
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
 
     await callImageApi({
       settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
@@ -521,7 +600,11 @@ describe('callImageApi', () => {
       (_input, init) =>
         new Promise((_resolve, reject) => {
           const signal = (init as RequestInit).signal as AbortSignal
-          signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+          signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          )
         }),
     )
 
@@ -543,7 +626,11 @@ describe('callImageApi', () => {
       (_input, init) =>
         new Promise((_resolve, reject) => {
           const signal = (init as RequestInit).signal as AbortSignal
-          signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+          signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          )
         }),
     )
 
@@ -591,9 +678,12 @@ describe('callImageApi', () => {
       ok: true,
       status: 200,
       headers: new Headers(),
-      text: vi.fn(() => new Promise<string>((_resolve, reject) => {
-        rejectText = reject
-      })),
+      text: vi.fn(
+        () =>
+          new Promise<string>((_resolve, reject) => {
+            rejectText = reject
+          }),
+      ),
     } as unknown as Response)
 
     const request = callImageApi({
@@ -610,10 +700,7 @@ describe('callImageApi', () => {
     await vi.advanceTimersByTimeAsync(1000)
 
     try {
-      const result = await Promise.race([
-        observed,
-        Promise.resolve('pending'),
-      ])
+      const result = await Promise.race([observed, Promise.resolve('pending')])
       expect(result).toMatchObject({ message: '请求超时' })
     } finally {
       rejectText(new Error('cleanup'))
@@ -625,12 +712,17 @@ describe('callImageApi', () => {
   it('reports provider timeout while reading a hanging OpenAI Images result URL body', async () => {
     vi.useFakeTimers()
     vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        data: [{ url: 'https://cdn.example.com/result.png' }],
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [{ url: 'https://cdn.example.com/result.png' }],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -650,6 +742,40 @@ describe('callImageApi', () => {
 
     await rejection
     vi.useRealTimers()
+  })
+
+  it('OpenAI Images 结果图 URL 下载被网络/跨域拒绝时抛普通 Error,不会被判为瞬时错误触发整轮重试', async () => {
+    // 生成请求成功(上游已计费),结果图托管在无 CORS 头的 CDN:浏览器以 TypeError 拒绝下载。
+    const cause = new TypeError('Failed to fetch')
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [{ url: 'https://cdn.example.com/result.png' }],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      .mockRejectedValueOnce(cause)
+
+    const error = await callImageApi({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key' },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    }).catch((err: unknown) => err)
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1][0]).toBe('https://cdn.example.com/result.png')
+    expect(error).not.toBeInstanceOf(TypeError)
+    expect((error as Error).message).toBe('图片 URL 下载失败：网络或跨域错误')
+    expect((error as Error).cause).toBe(cause)
+    // 关键断言:executeTask 的重试判定不会把它当成主请求断网而重新提交生成
+    expect(isTransientTaskError(error)).toBe(false)
   })
 
   it('reports provider timeout while reading a hanging OpenAI Responses error body', async () => {
@@ -681,9 +807,12 @@ describe('callImageApi', () => {
       ok: true,
       status: 200,
       headers: new Headers(),
-      text: vi.fn(() => new Promise<string>((_resolve, reject) => {
-        rejectText = reject
-      })),
+      text: vi.fn(
+        () =>
+          new Promise<string>((_resolve, reject) => {
+            rejectText = reject
+          }),
+      ),
     } as unknown as Response)
 
     const request = callImageApi({
@@ -700,10 +829,7 @@ describe('callImageApi', () => {
     await vi.advanceTimersByTimeAsync(1000)
 
     try {
-      const result = await Promise.race([
-        observed,
-        Promise.resolve('pending'),
-      ])
+      const result = await Promise.race([observed, Promise.resolve('pending')])
       expect(result).toMatchObject({ message: '请求超时' })
     } finally {
       rejectText(new Error('cleanup'))

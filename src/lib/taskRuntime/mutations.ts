@@ -6,10 +6,14 @@ import { useStore } from '../../store'
 import { deleteTask as dbDeleteTask, deleteImage } from '../db'
 import { deleteCachedImage } from '../imageCache'
 import { collectReferencedImageIds } from '../storageStats'
-import { SORT_STEP, SORT_EPSILON, computeReorderedSortOrders } from '../taskSort'
+import { SORT_STEP, computeReorderedSortOrders, isSortGapExhausted } from '../taskSort'
 import { terminateTaskRuntime } from './shared'
 import { createCancelledTask } from './cancel'
 import { persistTaskSilently, updateTaskInStore, updateTaskInStoreSilently } from './persistence'
+import {
+  clearPendingIndexedDbTaskDelete,
+  markPendingIndexedDbTaskDelete,
+} from '../../store/idbSyncState'
 
 function getTaskImageIds(task: TaskRecord): string[] {
   return [
@@ -113,7 +117,7 @@ export function reorderTask(taskId: string, prevTaskId: string | null, nextTaskI
   // 中点与邻居差逼近浮点精度(反复同隙插入耗尽精度):对「被拖动任务所属对话」子集整数化重排自愈,再放置被拖动项。
   // 只在同对话子集内重排,避免一次普通拖拽就重写并落库其它所有对话的 sortOrder(整表写放大);
   // 拖拽本就限定在无筛选/同对话视图,prev/next 也来自当前对话,故子集已足够。
-  if (prev && next && Math.abs(getTaskSortKey(prev) - getTaskSortKey(next)) < SORT_EPSILON) {
+  if (prev && next && isSortGapExhausted(getTaskSortKey(prev), getTaskSortKey(next))) {
     const dragged = tasks.find((t) => t.id === taskId)
     const scoped = dragged
       ? tasks.filter((t) => t.conversationId === dragged.conversationId)
@@ -191,6 +195,8 @@ export async function removeMultipleTasks(taskIds: string[]) {
     }
   }
 
+  // 登记「正在删」与 setTasks 同一同步段:跨标签页刷新读到的快照可能仍含这些记录,不得借快照复活
+  for (const id of deleteTaskIds) markPendingIndexedDbTaskDelete(id)
   setTasks(remaining)
   const confirmedDeletedIds = new Set<string>()
   try {
@@ -199,6 +205,8 @@ export async function removeMultipleTasks(taskIds: string[]) {
       confirmedDeletedIds.add(id)
     }
   } catch (err) {
+    // 先撤销未确认删除的登记,再恢复记录——否则恢复期间的刷新又会把它们剔掉
+    for (const id of deleteTaskIds) clearPendingIndexedDbTaskDelete(id)
     const message = err instanceof Error ? err.message : String(err)
     const latest = useStore.getState()
     const presentIds = new Set(latest.tasks.map((t) => t.id))
@@ -219,6 +227,7 @@ export async function removeMultipleTasks(taskIds: string[]) {
     await Promise.all(cancelledRestores.map((t) => persistTaskSilently(t)))
     throw err
   }
+  for (const id of deleteTaskIds) clearPendingIndexedDbTaskDelete(id)
 
   clearTransientUiReferencesForDeletedTasks(tasks.filter((task) => toDelete.has(task.id)))
   const afterConfirmedDelete = useStore.getState()
@@ -275,12 +284,14 @@ export async function removeTask(task: TaskRecord) {
   // 收集此任务关联的图片
   const taskImageIds = new Set(getTaskImageIds(currentTask))
 
-  // 从列表移除
+  // 从列表移除(删除登记与 setTasks 同一同步段,见 removeMultipleTasks)
   const remaining = tasks.filter((t) => t.id !== currentTask.id)
+  markPendingIndexedDbTaskDelete(currentTask.id)
   setTasks(remaining)
   try {
     await dbDeleteTask(currentTask.id)
   } catch (err) {
+    clearPendingIndexedDbTaskDelete(currentTask.id)
     const message = err instanceof Error ? err.message : String(err)
     const latest = useStore.getState()
     latest.setTasks(
@@ -292,6 +303,7 @@ export async function removeTask(task: TaskRecord) {
     if (currentTask.status === 'running') await persistTaskSilently(restoreAfterFailedDelete)
     throw err
   }
+  clearPendingIndexedDbTaskDelete(currentTask.id)
 
   clearTransientUiReferencesForDeletedTasks([currentTask])
 

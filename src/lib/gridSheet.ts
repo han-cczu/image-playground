@@ -51,7 +51,7 @@ export interface BatchNote {
  * 贪心折行:按 measureWidth 把文本切成 ≤ maxWidth 的行,最多 maxLines 行(末行截断加 …)。
  * 逐字符累加(中英混排无空格分词,字符粒度最稳)。
  */
-function wrapText(
+export function wrapText(
   text: string,
   maxWidth: number,
   maxLines: number,
@@ -75,12 +75,12 @@ function wrapText(
     return lines
   }
   // 已到行数上限且仍有剩余 → 末行截断加省略号
-  const last = lines[maxLines - 1]
-  let truncated = last
-  while (truncated && measureWidth(truncated + '…') > maxWidth) {
-    truncated = truncated.slice(0, -1)
+  // 按码点回退而不是 UTF-16 单元:末尾是 emoji 等代理对时 slice(0, -1) 会切出孤立代理项渲染成 �
+  const truncated = Array.from(lines[maxLines - 1])
+  while (truncated.length && measureWidth(truncated.join('') + '…') > maxWidth) {
+    truncated.pop()
   }
-  lines[maxLines - 1] = truncated + '…'
+  lines[maxLines - 1] = truncated.join('') + '…'
   return lines
 }
 
@@ -140,11 +140,18 @@ export function computeSheetLayout(opts: {
     cols * cellSize +
     (cols - 1) * SHEET_GAP
 
-  const noteLines = note ? wrapText(note, width - SHEET_PADDING * 2, SHEET_NOTE_MAX_LINES, measureWidth) : []
+  const noteLines = note
+    ? wrapText(note, width - SHEET_PADDING * 2, SHEET_NOTE_MAX_LINES, measureWidth)
+    : []
   const noteHeight = noteLines.length > 0 ? noteLines.length * SHEET_NOTE_LINE_H + SHEET_GAP : 0
   const noteRect: SheetRect | null =
     noteLines.length > 0
-      ? { x: SHEET_PADDING, y: SHEET_PADDING, w: width - SHEET_PADDING * 2, h: noteLines.length * SHEET_NOTE_LINE_H }
+      ? {
+          x: SHEET_PADDING,
+          y: SHEET_PADDING,
+          w: width - SHEET_PADDING * 2,
+          h: noteLines.length * SHEET_NOTE_LINE_H,
+        }
       : null
 
   const gridTop = SHEET_PADDING + noteHeight
@@ -193,7 +200,9 @@ export function normalizeBatchNotes(value: unknown, now = Date.now()): Record<st
     result[id] = {
       text,
       updatedAt:
-        typeof item.updatedAt === 'number' && Number.isFinite(item.updatedAt) ? item.updatedAt : now,
+        typeof item.updatedAt === 'number' && Number.isFinite(item.updatedAt)
+          ? item.updatedAt
+          : now,
     }
   }
 

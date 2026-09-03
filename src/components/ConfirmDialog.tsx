@@ -62,11 +62,10 @@ function ConfirmDialogPanel({
     return () => window.clearTimeout(timer)
   }, [delay])
 
-  // 冷静期(minConfirmDelayMs)只锁「确认」:防的是惯性秒点破坏性操作;取消/Esc/遮罩是逃生门,任何时刻都可关
-  const handleClose = () => {
-    setConfirmDialog(null)
-  }
-
+  // 冷静期(minConfirmDelayMs)只锁「确认」:防的是惯性秒点破坏性操作;取消/Esc/遮罩是逃生门,任何时刻都可关。
+  // 三条逃生门共用同一个 handler、都触发 cancelAction:Esc/遮罩在语义上就是「不要」,若只关不记,
+  // Codex CLI 提示(靠 cancelAction 记「不再询问」)会在每个任务完成时重弹并抢走输入框焦点,只有鼠标点「取消」才能止住。
+  // 不存在双调:setConfirmDialog(null) 卸载面板后 ESC 栈同步出栈,遮罩也随之消失。
   const handleCancel = () => {
     setConfirmDialog(null)
     try {
@@ -102,7 +101,7 @@ function ConfirmDialogPanel({
 
   return (
     <Modal
-      onClose={handleClose}
+      onClose={handleCancel}
       ariaLabel={confirmDialog.title}
       containerClassName="z-[110] items-center"
       panelClassName="w-full max-w-sm p-6"

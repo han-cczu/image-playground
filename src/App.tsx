@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { initStore } from './store'
 import { useStore } from './store'
-import { normalizeSettings, switchApiProfileProvider } from './lib/api/apiProfiles'
 import { maybeStartTour } from './lib/tour/autoStart'
-import { readUrlBootstrap } from './lib/urlBootstrap'
+import { applyUrlBootstrapToSettings, readUrlBootstrap } from './lib/urlBootstrap'
+import { getActiveApiProfile } from './lib/api/apiProfiles'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import AmbientGlow from './components/AmbientGlow'
@@ -57,37 +57,12 @@ export default function App() {
     !filterFavoriteCategoryId
 
   useEffect(() => {
-    const bootstrap = readUrlBootstrap(window.location.href)
-    const nextSettings = { ...bootstrap.settings }
-
-    // 加固:引导改了 baseUrl 但没带新 apiKey 时,不复用旧 key——否则旧 key 会随 Authorization 发往新主机
-    //(攻击者用 #apiUrl=evil 不带 key 即可窃取已配置的 key)。置 '' 让 settings 合并层的
-    // `incoming.apiKey ?? profile.apiKey` 解析为空,强制为新主机重填 key。正常分享链 #apiUrl=...&apiKey=...
-    // 同时带 key,nextSettings.apiKey 已定义,不触发此分支,零误伤。
-    if (nextSettings.baseUrl !== undefined && nextSettings.apiKey === undefined) {
-      nextSettings.apiKey = ''
-    }
-
-    const provider = bootstrap.provider
-    if (provider) {
-      const state = useStore.getState()
-      const settings = normalizeSettings(state.settings)
-      const current = settings.profiles.find((profile) => profile.id === settings.activeProfileId) ?? settings.profiles[0]
-      if (current) {
-        nextSettings.profiles = settings.profiles.map((profile) =>
-          profile.id === current.id
-            ? {
-                ...switchApiProfileProvider(profile, provider),
-                ...(nextSettings.baseUrl !== undefined ? { baseUrl: nextSettings.baseUrl } : {}),
-                ...(nextSettings.apiKey !== undefined ? { apiKey: nextSettings.apiKey } : {}),
-                ...(provider === 'openai' && nextSettings.apiMode !== undefined ? { apiMode: nextSettings.apiMode } : {}),
-                ...(provider === 'openai' && nextSettings.codexCli !== undefined ? { codexCli: nextSettings.codexCli } : {}),
-              }
-            : profile,
-        )
-        nextSettings.activeProfileId = current.id
-      }
-    }
+    // settings 来自 zustand-persist 同步恢复,此刻可读:#apiUrl 不带 provider 时按激活 profile 的厂商归一化
+    const activeProvider = getActiveApiProfile(useStore.getState().settings).provider
+    const bootstrap = readUrlBootstrap(window.location.href, { defaultProvider: activeProvider })
+    // 合并规则(#apiUrl 无 key 清 key / 同 provider 不重建 / 换厂商清 key)全在 applyUrlBootstrapToSettings,
+    // 那里有单测;这里只负责取当前 settings、落盘、清地址栏。
+    const nextSettings = applyUrlBootstrapToSettings(useStore.getState().settings, bootstrap)
 
     if (Object.keys(nextSettings).length) setSettings(nextSettings)
     if (bootstrap.changed) window.history.replaceState(null, '', bootstrap.cleanUrl)
@@ -125,7 +100,16 @@ export default function App() {
         // ConfirmDialog(z-110)在面板(z-105)之上：此时打开面板会被遮罩盖住却抢走焦点，
         // 用户看着确认框、键盘却困在不可见面板里——确认框打开期间不响应。
         // 新手引导(z-130)同理:捕获层只吞指针不吞键盘,面板会开在遮罩下偷走焦点
-        if (state.confirmDialog || state.tourActive) return
+        // 遮罩编辑器 / 优化器 / 反推(z-80)同理:面板能开在它们之上,但面板执行的「打开设置」(z-70)会挂在
+        // 这些弹层下面、焦点陷阱却在栈顶——这些弹层打开期间不响应快捷键
+        if (
+          state.confirmDialog ||
+          state.tourActive ||
+          state.maskEditorImageId ||
+          state.captionSource ||
+          state.showPromptOptimizer
+        )
+          return
         state.setShowCommandPalette(!state.showCommandPalette)
       }
     }
@@ -168,10 +152,7 @@ export default function App() {
       </div>
       <div className="flex min-h-screen md:h-screen md:overflow-hidden">
         <ErrorBoundary region="sidebar">
-          <Sidebar
-            mobileOpen={mobileSidebarOpen}
-            onMobileClose={closeMobileSidebar}
-          />
+          <Sidebar mobileOpen={mobileSidebarOpen} onMobileClose={closeMobileSidebar} />
         </ErrorBoundary>
         <div className="flex min-h-screen min-w-0 flex-1 flex-col md:h-screen md:min-h-0">
           <ErrorBoundary region="header">

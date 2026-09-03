@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useStore } from '../../store'
-import { findReusableEmptyConversation, normalizeConversations } from '../../lib/conversations'
+import { normalizeConversations } from '../../lib/conversations'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
 import { useLockBodyScroll } from '../../hooks/useLockBodyScroll'
 import ConversationItem from './ConversationItem'
@@ -106,7 +106,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
   const conversations = useStore((s) => s.conversations)
   const activeConversationId = useStore((s) => s.activeConversationId)
   const setActiveConversation = useStore((s) => s.setActiveConversation)
-  const createConversation = useStore((s) => s.createConversation)
+  const createOrReuseEmptyConversation = useStore((s) => s.createOrReuseEmptyConversation)
   const deleteConversationWithTasks = useStore((s) => s.deleteConversationWithTasks)
   const sidebarCollapsed = useStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
@@ -170,16 +170,9 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
   )
 
   const handleCreate = () => {
-    // 避免连按 + 堆积同名空"新对话"：若已存在可复用的空对话，直接切过去
-    const reusable = findReusableEmptyConversation(sortedConversations, taskCountByConversation)
-    if (reusable) {
-      setGalleryView(false)
-      setActiveConversation(reusable.id)
-      onMobileClose()
-      return
-    }
+    // 复用空「新对话」否则新建:逻辑下沉到 store(命令面板同口径),避免两处判定漂移
     setGalleryView(false)
-    createConversation()
+    createOrReuseEmptyConversation()
     onMobileClose()
   }
 

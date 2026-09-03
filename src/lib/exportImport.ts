@@ -8,6 +8,7 @@ import {
   type Zippable,
   type Unzipped,
 } from 'fflate'
+import { getDataJobInProgress, setDataJobInProgress, type DataJob } from './dataJobState'
 import type {
   AppSettings,
   Conversation,
@@ -170,13 +171,30 @@ function unzipImportArchive(
 
     const unzipper = new Unzip((file) => {
       if (settled) return
-      if (file.name !== 'manifest.json' && !isImportImageEntryName(file.name)) return
+      const isManifest = file.name === 'manifest.json'
+      if (!isManifest && !isImportImageEntryName(file.name)) return
       // 声明尺寸可用时预筛(与旧 filter 同口径:超限静默跳过,不为它解压一个字节);
       // 流式打包的 zip 无 local header 尺寸(数据描述符),此时放行,由下方实际计数兜底。
+      // manifest.json 只受单条上限约束、不计入 totalBytes:导出侧按压缩后体积判上限,导入侧按解压后字节计,
+      // 图片本就不可压缩,两边差额全落在 manifest 上——它被总预算挤掉后会误报「缺少 manifest.json」;
+      // 超过单条上限则显式报错,不能静默跳过。
       if (file.originalSize !== undefined) {
-        if (!Number.isFinite(file.originalSize) || file.originalSize > budget.entryBytes) return
-        if (declaredTotalBytes + file.originalSize > budget.totalBytes) return
-        declaredTotalBytes += file.originalSize
+        if (!Number.isFinite(file.originalSize) || file.originalSize > budget.entryBytes) {
+          if (isManifest) {
+            return finish(() =>
+              reject(
+                new Error(
+                  `manifest.json 超过 ${Math.round(budget.entryBytes / 1024 / 1024)}MB 上限,无法导入`,
+                ),
+              ),
+            )
+          }
+          return
+        }
+        if (!isManifest) {
+          if (declaredTotalBytes + file.originalSize > budget.totalBytes) return
+          declaredTotalBytes += file.originalSize
+        }
       }
       pendingFiles++
       if (typeof file.terminate === 'function') activeTerminators.push(file.terminate)
@@ -187,7 +205,16 @@ function unzipImportArchive(
         if (err) return finish(() => reject(err))
         if (chunk) {
           entryBytes += chunk.length
-          actualTotalBytes += chunk.length
+          if (!isManifest) actualTotalBytes += chunk.length
+          if (isManifest && entryBytes > budget.entryBytes) {
+            return finish(() =>
+              reject(
+                new Error(
+                  `manifest.json 超过 ${Math.round(budget.entryBytes / 1024 / 1024)}MB 上限,无法导入`,
+                ),
+              ),
+            )
+          }
           if (entryBytes > budget.entryBytes || actualTotalBytes > budget.totalBytes) {
             return finish(() =>
               reject(
@@ -250,19 +277,16 @@ export function __unzipImportArchiveForTests(
  * 命令面板仍可触发导出)会与清库/写回交错,产出「任务有、图片缺」的撕裂备份还提示成功。
  * 单一互斥位:任一进行中,其余一律拒绝。
  */
-type DataJob = 'export' | 'import' | 'clear'
 const DATA_JOB_LABEL: Record<DataJob, string> = { export: '导出', import: '导入', clear: '清空' }
-let dataJobInProgress: DataJob | null = null
 
 /** 申请互斥位:成功返回 true;已有任务进行中则 toast 并返回 false。 */
 function acquireDataJob(job: DataJob): boolean {
-  if (dataJobInProgress) {
-    useStore
-      .getState()
-      .showToast(`数据${DATA_JOB_LABEL[dataJobInProgress]}正在进行中,请稍后再试`, 'error')
+  const inProgress = getDataJobInProgress()
+  if (inProgress) {
+    useStore.getState().showToast(`数据${DATA_JOB_LABEL[inProgress]}正在进行中,请稍后再试`, 'error')
     return false
   }
-  dataJobInProgress = job
+  setDataJobInProgress(job)
   return true
 }
 
@@ -367,14 +391,39 @@ function readImportedImageInfo(value: unknown): ExportData['imageFiles'][string]
   }
 }
 
-function mergeTasksForImportPersistence(
-  tasksToWrite: TaskRecord[],
-  dirtyTasks: TaskRecord[],
-): TaskRecord[] {
-  const byId = new Map<string, TaskRecord>()
-  for (const task of tasksToWrite) byId.set(task.id, task)
-  for (const task of dirtyTasks) byId.set(task.id, task)
-  return Array.from(byId.values())
+/**
+ * 把本轮导入集与 reseed 的 conversationId 补丁叠加到「此刻」的实时任务列表上。
+ *
+ * 为什么不用导入开始时的 DB 快照:导入是秒级 await(解压 + 逐张 putImage),merge 模式不终止在途任务、
+ * replace 模式清库后 InputBar 也没有导入互斥——窗口内完成的任务已被 updateTaskInStore 写成 done,
+ * 用户可能删了旧记录或又提交了新任务。若尾部用快照整体 setTasks:done 会被打回 running(没有 watchdog
+ * 永远转圈,再点「取消」会拿这份陈旧记录覆写 DB 里真实的 done,输出图沦为孤儿被启动 GC 删掉),被删记录
+ * 借快照复活,新任务则直接从 store 消失、executeTask 完成时找不到记录即丢弃结果(配额已耗)。
+ *
+ * 同一函数在写库前(取 toPersist)与写 store 前(取 nextTasks)各调一次,两次都以调用时刻的实时列表为基底,
+ * 因此 persistConversationMigration 期间完成的任务也不会被最终 setTasks 回退。
+ * - 导入集里与实时列表同 id 的记录以实时版本为准(不覆写、不重复写库);
+ * - reseed 补丁只改 conversationId,既有记录的其余字段一律取实时版本。
+ */
+function overlayImportOnLiveTasks(
+  liveTasks: TaskRecord[],
+  importedTasks: TaskRecord[],
+  reseedTargets: Map<string, string | undefined>,
+): { nextTasks: TaskRecord[]; toPersist: TaskRecord[] } {
+  const withReseed = (task: TaskRecord): TaskRecord => {
+    if (!reseedTargets.has(task.id)) return task
+    const target = reseedTargets.get(task.id)
+    return task.conversationId === target ? task : { ...task, conversationId: target }
+  }
+  const liveIds = new Set(liveTasks.map((task) => task.id))
+  const imported = importedTasks.filter((task) => !liveIds.has(task.id)).map(withReseed)
+  const dirtyExisting: TaskRecord[] = []
+  const live = liveTasks.map((task) => {
+    const next = withReseed(task)
+    if (next !== task) dirtyExisting.push(next)
+    return next
+  })
+  return { nextTasks: [...live, ...imported], toPersist: [...imported, ...dirtyExisting] }
 }
 
 function createUiClearSnapshot(now = Date.now()) {
@@ -445,7 +494,14 @@ function clearTransientUiForClearedData() {
   })
 }
 
-function applyClearedDefaultState(archive: Conversation) {
+/**
+ * 清库后把 store 复位到「空库默认态」。
+ * resetSettings 区分两个调用方:「清空所有数据」承诺连供应商配置一起清,传 true;「替换导入」只清任务/
+ * 图片/会话,settings 走后续 mergeImportedSettings 合并,必须传 false——否则合并时「当前」已是纯默认态,
+ * mergeImportedSettings 会整包采用备份,而备份经 redactSettingsForExport 抹空了全部 apiKey,三套密钥
+ * 在成功 toast 下静默归零,与确认弹窗「已有密钥不会被空密钥覆盖」相反(c6b41bf 曾因此回归)。
+ */
+function applyClearedDefaultState(archive: Conversation, options: { resetSettings: boolean }) {
   useStore.setState({
     tasks: [],
     prompt: '',
@@ -459,7 +515,7 @@ function applyClearedDefaultState(archive: Conversation) {
     conversations: [archive],
     activeConversationId: archive.id,
     dismissedCodexCliPrompts: [],
-    settings: normalizeSettings(DEFAULT_SETTINGS),
+    ...(options.resetSettings ? { settings: normalizeSettings(DEFAULT_SETTINGS) } : {}),
     params: { ...DEFAULT_PARAMS },
   })
   clearTransientUiForClearedData()
@@ -528,7 +584,7 @@ export async function clearAllData() {
       .showToast(`清空数据失败：${err instanceof Error ? err.message : String(err)}`, 'error')
     throw err
   } finally {
-    dataJobInProgress = null
+    setDataJobInProgress(null)
   }
 }
 
@@ -554,7 +610,7 @@ async function clearAllDataInner() {
   }
   clearImageCache()
   const archive = createArchiveConversation()
-  applyClearedDefaultState(archive)
+  applyClearedDefaultState(archive, { resetSettings: true })
   await persistConversationMigration([archive], [])
   useStore.getState().showToast('所有数据已清空', 'success')
 }
@@ -672,13 +728,16 @@ export async function exportData() {
       .getState()
       .showToast(`导出失败：${e instanceof Error ? e.message : String(e)}`, 'error')
   } finally {
-    dataJobInProgress = null
+    setDataJobInProgress(null)
   }
 }
 
 /** 导入 ZIP 数据 */
 export async function importData(file: File, options: ImportDataOptions = {}): Promise<boolean> {
   if (!acquireDataJob('import')) return false
+  // 替换导入只有走到清库那一步才算「触碰了本地数据」;之前的解析/校验失败本地一字未改,
+  // 不该吓用户「数据可能不完整」
+  let localDataTouched = false
   try {
     if (file.size > MAX_IMPORT_FILE_BYTES) {
       throw new Error(`导入文件过大:超过 ${Math.round(MAX_IMPORT_FILE_BYTES / 1024 / 1024)}MB 上限`)
@@ -767,6 +826,7 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
 
     // 全部待写记录就绪后才清空旧库(replace 模式),最大限度缩小数据丢失窗口。
     if (isReplaceMode) {
+      localDataTouched = true
       // 同 clearAllData:terminate + 同步清 store 必须先于任何 await(契约见
       // terminateRunningTaskRuntimes),否则 abort 异常会把幽灵 error 记录写回刚清空的表,
       // 且本函数末尾的 getAllTasks() 重读会当场把幽灵带回 UI。
@@ -788,7 +848,9 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
         restoreClearedUiSnapshot()
         throw err
       }
-      applyClearedDefaultState(createArchiveConversation())
+      // settings 不在被清空的三张表里(走 localStorage),替换导入自始至终不重置它:成功路径交给下方
+      // mergeImportedSettings 以真实当前配置为基准合并,失败路径也不该顺带把密钥清掉。
+      applyClearedDefaultState(createArchiveConversation(), { resetSettings: false })
     }
 
     const stateBeforeStoreMutation = useStore.getState()
@@ -807,7 +869,8 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
      */
     const hasConversationsMetadata = Array.isArray(data.conversations)
     let finalConversations: Conversation[]
-    let tasksToPersist = tasksToWrite
+    // reseed 只记录「哪条任务要落到哪个对话」;真正写库/写 store 时再叠加到实时记录上(见 overlayImportOnLiveTasks)
+    const reseedTargets = new Map<string, string | undefined>()
     const existingConversations = isReplaceMode ? [] : await getAllConversations()
     if (hasConversationsMetadata) {
       const importedConversations = normalizeConversations(data.conversations)
@@ -843,7 +906,7 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
           existingConversations: finalConversations,
         })
         finalConversations = reseed.conversations
-        tasksToPersist = mergeTasksForImportPersistence(tasksToWrite, reseed.dirtyTasks)
+        for (const task of reseed.dirtyTasks) reseedTargets.set(task.id, task.conversationId)
       }
     } else {
       const reseed = reseedConversationsFromFavoriteCategories({
@@ -852,7 +915,7 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
         existingConversations,
       })
       finalConversations = reseed.conversations
-      tasksToPersist = mergeTasksForImportPersistence(tasksToWrite, reseed.dirtyTasks)
+      for (const task of reseed.dirtyTasks) reseedTargets.set(task.id, task.conversationId)
     }
 
     // 纯写回(已无解码 / 校验)。图片 store 与 tasks/conversations 不在同一 IDB 事务,
@@ -863,9 +926,16 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
         await putImage(image)
         writtenImageIds.push(image.id)
       }
-      await persistConversationMigration(finalConversations, tasksToPersist)
+      // 写库集在逐张写图之后才组装:既有记录要取写库时刻的实时版本,否则写图期间完成的任务会在 DB 里被打回 running
+      const { toPersist } = overlayImportOnLiveTasks(
+        useStore.getState().tasks,
+        tasksToWrite,
+        reseedTargets,
+      )
+      await persistConversationMigration(finalConversations, toPersist)
     } catch (err) {
-      const existingReferencedImageIds = collectReferencedImageIds(existingTasks, [])
+      // 引用集取实时 store 而非快照:导入期间完成的任务若恰好产出了与本轮导入同 hash 的图,也不能被回滚删掉
+      const existingReferencedImageIds = collectReferencedImageIds(useStore.getState().tasks, [])
       const rollbackImageIds = writtenImageIds.filter((id) => !existingReferencedImageIds.has(id))
       try {
         await rollbackStoredImages(rollbackImageIds)
@@ -934,7 +1004,12 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
       useStore.getState().setActiveConversation(nextActive?.id ?? null)
     }
 
-    useStore.getState().setTasks(mergeTasksForImportPersistence(tasksAfterImport, tasksToPersist))
+    // 以此刻的实时列表为基底写回(不是导入开始时的快照):见 overlayImportOnLiveTasks 头注释
+    useStore
+      .getState()
+      .setTasks(
+        overlayImportOnLiveTasks(useStore.getState().tasks, tasksToWrite, reseedTargets).nextTasks,
+      )
     if (missingReferencedImageCount > 0) {
       useStore
         .getState()
@@ -948,7 +1023,7 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
     return true
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
-    const isReplace = (options.mode ?? 'merge') === 'replace'
+    const isReplace = (options.mode ?? 'merge') === 'replace' && localDataTouched
     useStore
       .getState()
       .showToast(
@@ -959,6 +1034,6 @@ export async function importData(file: File, options: ImportDataOptions = {}): P
       )
     return false
   } finally {
-    dataJobInProgress = null
+    setDataJobInProgress(null)
   }
 }

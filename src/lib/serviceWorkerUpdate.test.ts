@@ -3,6 +3,7 @@ import {
   SERVICE_WORKER_UPDATE_INTERVAL_MS,
   createServiceWorkerUpdateScheduler,
   unregisterExistingServiceWorkers,
+  watchServiceWorkerControllerChange,
 } from './serviceWorkerUpdate'
 
 describe('createServiceWorkerUpdateScheduler', () => {
@@ -115,5 +116,33 @@ describe('createServiceWorkerUpdateScheduler', () => {
 
     expect(onError).toHaveBeenCalledWith(getRegistrationsError)
     expect(onError).toHaveBeenCalledWith(unregisterError)
+  })
+})
+
+describe('watchServiceWorkerControllerChange', () => {
+  it('首次安装(注册前无 controller)不通知', () => {
+    const listeners: Array<() => void> = []
+    const onNewVersion = vi.fn()
+    watchServiceWorkerControllerChange(
+      { controller: null, addEventListener: (_type, listener) => listeners.push(listener) },
+      onNewVersion,
+    )
+
+    expect(listeners).toHaveLength(0)
+    expect(onNewVersion).not.toHaveBeenCalled()
+  })
+
+  it('已有 controller 的页面被新版本接管时通知一次(重复 controllerchange 不重复提示)', () => {
+    const listeners: Array<() => void> = []
+    const onNewVersion = vi.fn()
+    watchServiceWorkerControllerChange(
+      { controller: {}, addEventListener: (_type, listener) => listeners.push(listener) },
+      onNewVersion,
+    )
+
+    expect(listeners).toHaveLength(1)
+    listeners[0]()
+    listeners[0]()
+    expect(onNewVersion).toHaveBeenCalledTimes(1)
   })
 })

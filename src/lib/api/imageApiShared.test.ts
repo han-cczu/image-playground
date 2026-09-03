@@ -9,6 +9,7 @@ import {
   normalizeBase64Image,
   normalizeRevisedPrompt,
   pickActualParams,
+  getImagesApiJsonLimit,
   readJsonWithAbort,
 } from './imageApiShared'
 import { MAX_TASK_PARAM_STRING_LEN } from './paramCompatibility'
@@ -106,9 +107,7 @@ describe('assertImageDataUrl', () => {
   })
 
   it('rejects non-image input data URLs', () => {
-    expect(() => assertImageDataUrl('data:text/plain;base64,SGk=')).toThrow(
-      '输入图片不是图片内容',
-    )
+    expect(() => assertImageDataUrl('data:text/plain;base64,SGk=')).toThrow('输入图片不是图片内容')
   })
 
   it('rejects image data URLs with an empty payload', () => {
@@ -424,5 +423,70 @@ describe('fetchImageUrlAsDataUrl', () => {
       fetchImageUrlAsDataUrl('https://cdn.example.com/image.png', 'image/png'),
     ).rejects.toThrow('图片 URL 响应过大')
     expect(pulls).toBeLessThan(100)
+  })
+
+  // 以下三例守住「下载阶段的网络层失败不能以 TypeError 形态冒泡」:上游已计费出图,
+  // 若 TypeError 原样透传,retryPolicy 会判为瞬时错误,executeTask 会把整轮生成重跑到重试上限。
+  it('fetch 被网络/跨域拒绝(TypeError)时降级为普通 Error 并保留 cause', async () => {
+    const cause = new TypeError('Failed to fetch')
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(cause)
+
+    const error = await fetchImageUrlAsDataUrl(
+      'https://cdn.example.com/image.png',
+      'image/png',
+    ).catch((err: unknown) => err)
+
+    expect(error).toBeInstanceOf(Error)
+    expect(error).not.toBeInstanceOf(TypeError)
+    expect((error as Error).message).toBe('图片 URL 下载失败：网络或跨域错误')
+    expect((error as Error).cause).toBe(cause)
+  })
+
+  it('读取响应体中途断连(TypeError)同样降级为普通 Error', async () => {
+    const cause = new TypeError('network error')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            controller.error(cause)
+          },
+        }),
+        {
+          status: 200,
+          headers: new Headers({ 'Content-Type': 'image/png' }),
+        },
+      ),
+    )
+
+    const error = await fetchImageUrlAsDataUrl(
+      'https://cdn.example.com/image.png',
+      'image/png',
+    ).catch((err: unknown) => err)
+
+    expect(error).not.toBeInstanceOf(TypeError)
+    expect((error as Error).message).toBe('图片 URL 下载失败：网络或跨域错误')
+    expect((error as Error).cause).toBe(cause)
+  })
+
+  it('fetch 本身以 AbortError 拒绝时原样抛出,调用方仍能区分「已取消 / 请求超时」', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new DOMException('aborted', 'AbortError'))
+
+    await expect(
+      fetchImageUrlAsDataUrl('https://cdn.example.com/image.png', 'image/png'),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+  })
+})
+
+describe('getImagesApiJsonLimit', () => {
+  it('单图维持 128MiB 默认上限,多图按 n 放大并封顶 512MiB', () => {
+    const MiB = 1024 * 1024
+    expect(getImagesApiJsonLimit(1)).toBe(128 * MiB)
+    expect(getImagesApiJsonLimit(0)).toBe(128 * MiB)
+    expect(getImagesApiJsonLimit(Number.NaN)).toBe(128 * MiB)
+    // 2 张:2 × 64MiB × 4/3 + 1MiB ≈ 171.7MiB,大于默认值即放大
+    expect(getImagesApiJsonLimit(2)).toBeGreaterThan(128 * MiB)
+    expect(getImagesApiJsonLimit(2)).toBeLessThan(200 * MiB)
+    expect(getImagesApiJsonLimit(10)).toBe(512 * MiB)
+    expect(getImagesApiJsonLimit(100)).toBe(512 * MiB)
   })
 })

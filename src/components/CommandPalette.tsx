@@ -88,7 +88,7 @@ function CommandPalettePanel({ close }: { close: () => void }) {
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const conversations = useStore((s) => s.conversations)
   const activeConversationId = useStore((s) => s.activeConversationId)
-  const createConversation = useStore((s) => s.createConversation)
+  const createOrReuseEmptyConversation = useStore((s) => s.createOrReuseEmptyConversation)
   const setActiveConversation = useStore((s) => s.setActiveConversation)
   const settings = useStore((s) => s.settings)
   const setSettings = useStore((s) => s.setSettings)
@@ -113,7 +113,7 @@ function CommandPalettePanel({ close }: { close: () => void }) {
           toggleSidebar,
           conversations,
           activeConversationId,
-          createConversation,
+          createOrReuseEmptyConversation,
           setActiveConversation,
           settings,
           setSettings,
@@ -132,7 +132,7 @@ function CommandPalettePanel({ close }: { close: () => void }) {
       toggleSidebar,
       conversations,
       activeConversationId,
-      createConversation,
+      createOrReuseEmptyConversation,
       setActiveConversation,
       settings,
       setSettings,
@@ -205,126 +205,129 @@ function CommandPalettePanel({ close }: { close: () => void }) {
       panelClassName="flex w-full max-w-xl flex-col overflow-hidden"
       onPanelKeyDown={handleKeyDown}
     >
-        <div className="flex items-center gap-3 border-b border-gray-200/70 px-4 py-3 dark:border-white/[0.08]">
-          <svg
-            className="h-5 w-5 shrink-0 text-gray-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z"
-            />
-          </svg>
-          {/* activedescendant 模式:焦点恒在 input,↑↓ 只移高亮,读屏靠 aria-activedescendant 播报 */}
-          <input
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value)
-              setActiveIndex(0)
-            }}
-            placeholder="输入命令…"
-            aria-label="搜索命令"
-            role="combobox"
-            aria-expanded="true"
-            aria-controls={LISTBOX_ID}
-            aria-autocomplete="list"
-            aria-activedescendant={
-              clampedIndex >= 0 ? optionDomId(flat[clampedIndex].command.id) : undefined
-            }
-            className="w-full bg-transparent text-sm text-gray-800 outline-none placeholder:text-gray-400 dark:text-gray-100"
-          />
-          <kbd className="hidden shrink-0 rounded-md border border-gray-200/80 px-1.5 py-0.5 text-[10px] text-gray-400 sm:block dark:border-white/[0.1]">
-            Esc
-          </kbd>
-        </div>
-
-        {/* 空态放 listbox 外:listbox 的合法子节点只有 group/option;role=status 让零结果对读屏可感知 */}
-        {flat.length === 0 && (
-          <div role="status" className="px-3 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-            无匹配命令
-          </div>
-        )}
-        <div
-          ref={listRef}
-          id={LISTBOX_ID}
-          role="listbox"
-          aria-label="命令列表"
-          className={`max-h-[50vh] overflow-y-auto custom-scrollbar ${flat.length === 0 ? '' : 'p-2'}`}
+      <div className="flex items-center gap-3 border-b border-gray-200/70 px-4 py-3 dark:border-white/[0.08]">
+        <svg
+          className="h-5 w-5 shrink-0 text-gray-400"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
         >
-          {flat.length > 0 &&
-            groups.map(({ group, items }) => (
-              <div
-                key={group}
-                role="group"
-                aria-label={COMMAND_GROUP_LABELS[group]}
-                className="mb-1 last:mb-0"
-              >
-                {/* 组名由 group 的 aria-label 承担,标题对读屏隐藏,listbox 子树只留 group/option */}
-                <div
-                  aria-hidden="true"
-                  className="px-3 pb-1 pt-2 text-[11px] font-medium text-gray-500 dark:text-gray-400"
-                >
-                  {COMMAND_GROUP_LABELS[group]}
-                </div>
-                {items.map(({ command, indices }) => {
-                  flatIndex++
-                  const index = flatIndex
-                  const isHighlighted = index === clampedIndex
-                  return (
-                    <button
-                      key={command.id}
-                      type="button"
-                      role="option"
-                      id={optionDomId(command.id)}
-                      // activedescendant 模式:DOM 焦点恒在 input,option 退出 Tab 序,否则 Tab 聚焦项与 Enter 执行的高亮项错位
-                      tabIndex={-1}
-                      aria-selected={isHighlighted}
-                      data-command-index={index}
-                      onClick={() => command.run()}
-                      onMouseMove={() => {
-                        if (activeIndex !== index) setActiveIndex(index)
-                      }}
-                      className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-                        isHighlighted
-                          ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
-                          : 'text-gray-700 dark:text-gray-200'
-                      }`}
-                    >
-                      <span className="truncate">
-                        <HighlightedTitle title={command.title} indices={indices} />
-                      </span>
-                      {/* option 子树按 presentational 处理,svg 的 aria-label 会被剪枝;sr-only 文本走 name-from-contents 可靠曝光 */}
-                      {command.active && <span className="sr-only">（当前）</span>}
-                      {command.active && (
-                        <svg
-                          className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          aria-hidden="true"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M5 13l4 4L19 7"
-                          />
-                        </svg>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-            ))}
-        </div>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z"
+          />
+        </svg>
+        {/* activedescendant 模式:焦点恒在 input,↑↓ 只移高亮,读屏靠 aria-activedescendant 播报 */}
+        <input
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setActiveIndex(0)
+          }}
+          placeholder="输入命令…"
+          aria-label="搜索命令"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls={LISTBOX_ID}
+          aria-autocomplete="list"
+          aria-activedescendant={
+            clampedIndex >= 0 ? optionDomId(flat[clampedIndex].command.id) : undefined
+          }
+          className="w-full bg-transparent text-sm text-gray-800 outline-none placeholder:text-gray-400 dark:text-gray-100"
+        />
+        <kbd className="hidden shrink-0 rounded-md border border-gray-200/80 px-1.5 py-0.5 text-[10px] text-gray-400 sm:block dark:border-white/[0.1]">
+          Esc
+        </kbd>
+      </div>
 
-        <div className="border-t border-gray-200/70 px-4 py-2 text-[11px] text-gray-500 dark:border-white/[0.08] dark:text-gray-400">
-          ↑↓ 选择 · Enter 执行 · Esc 关闭
+      {/* 空态放 listbox 外:listbox 的合法子节点只有 group/option;role=status 让零结果对读屏可感知 */}
+      {flat.length === 0 && (
+        <div
+          role="status"
+          className="px-3 py-8 text-center text-sm text-gray-500 dark:text-gray-400"
+        >
+          无匹配命令
         </div>
+      )}
+      <div
+        ref={listRef}
+        id={LISTBOX_ID}
+        role="listbox"
+        aria-label="命令列表"
+        className={`max-h-[50vh] overflow-y-auto custom-scrollbar ${flat.length === 0 ? '' : 'p-2'}`}
+      >
+        {flat.length > 0 &&
+          groups.map(({ group, items }) => (
+            <div
+              key={group}
+              role="group"
+              aria-label={COMMAND_GROUP_LABELS[group]}
+              className="mb-1 last:mb-0"
+            >
+              {/* 组名由 group 的 aria-label 承担,标题对读屏隐藏,listbox 子树只留 group/option */}
+              <div
+                aria-hidden="true"
+                className="px-3 pb-1 pt-2 text-[11px] font-medium text-gray-500 dark:text-gray-400"
+              >
+                {COMMAND_GROUP_LABELS[group]}
+              </div>
+              {items.map(({ command, indices }) => {
+                flatIndex++
+                const index = flatIndex
+                const isHighlighted = index === clampedIndex
+                return (
+                  <button
+                    key={command.id}
+                    type="button"
+                    role="option"
+                    id={optionDomId(command.id)}
+                    // activedescendant 模式:DOM 焦点恒在 input,option 退出 Tab 序,否则 Tab 聚焦项与 Enter 执行的高亮项错位
+                    tabIndex={-1}
+                    aria-selected={isHighlighted}
+                    data-command-index={index}
+                    onClick={() => command.run()}
+                    onMouseMove={() => {
+                      if (activeIndex !== index) setActiveIndex(index)
+                    }}
+                    className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
+                      isHighlighted
+                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+                        : 'text-gray-700 dark:text-gray-200'
+                    }`}
+                  >
+                    <span className="truncate">
+                      <HighlightedTitle title={command.title} indices={indices} />
+                    </span>
+                    {/* option 子树按 presentational 处理,svg 的 aria-label 会被剪枝;sr-only 文本走 name-from-contents 可靠曝光 */}
+                    {command.active && <span className="sr-only">（当前）</span>}
+                    {command.active && (
+                      <svg
+                        className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+      </div>
+
+      <div className="border-t border-gray-200/70 px-4 py-2 text-[11px] text-gray-500 dark:border-white/[0.08] dark:text-gray-400">
+        ↑↓ 选择 · Enter 执行 · Esc 关闭
+      </div>
     </Modal>
   )
 }

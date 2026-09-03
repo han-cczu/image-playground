@@ -22,6 +22,7 @@ import {
   mergeImportedSettings,
   normalizeSettings,
   switchApiProfileProvider,
+  validateApiProfile,
 } from './apiProfiles'
 
 describe('mergeImportedSettings', () => {
@@ -243,6 +244,137 @@ describe('mergeImportedSettings', () => {
       apiKey: 'gemini-key',
       model: DEFAULT_GEMINI_MODEL,
     })
+  })
+
+  it('合并导入自己抹空 apiKey 的备份时不追加同名无密钥的重复配置(图像/优化器/反推)', () => {
+    const current = normalizeSettings({
+      profiles: [
+        {
+          id: 'my-openai',
+          name: '默认',
+          provider: 'openai',
+          baseUrl: 'https://current.example.com/v1',
+          apiKey: 'sk-live',
+          model: 'current-model',
+          timeout: 600,
+          apiMode: 'responses',
+          codexCli: false,
+          apiProxy: false,
+        },
+        {
+          id: 'my-gemini',
+          name: 'Gemini',
+          provider: 'gemini',
+          baseUrl: DEFAULT_GEMINI_BASE_URL,
+          apiKey: 'g-key',
+          model: DEFAULT_GEMINI_MODEL,
+          timeout: 300,
+          apiMode: 'images',
+          codexCli: false,
+          apiProxy: false,
+        },
+      ],
+      activeProfileId: 'my-gemini',
+      optimizerProfiles: [
+        {
+          id: 'my-opt',
+          name: '默认',
+          baseUrl: 'https://opt.example.com/v1',
+          apiKey: 'sk-opt',
+          model: 'opt-model',
+          timeout: 30,
+          systemPrompt: 'opt prompt',
+        },
+      ],
+      activeOptimizerProfileId: 'my-opt',
+      captionerProfiles: [
+        {
+          id: 'my-cap',
+          name: '默认',
+          baseUrl: 'https://cap.example.com/v1',
+          apiKey: 'sk-cap',
+          model: 'cap-model',
+          timeout: 30,
+          systemPrompt: 'cap prompt',
+        },
+      ],
+      activeCaptionerProfileId: 'my-cap',
+    })
+    // 与 exportImport.redactSettingsForExport 同构:备份里所有 apiKey 抹空、其余字段原样。
+    // 不直接 import exportImport,避免把 store/db 整条依赖链拖进纯函数测试。
+    const backup = {
+      ...current,
+      apiKey: '',
+      profiles: current.profiles.map((profile) => ({ ...profile, apiKey: '' })),
+      promptOptimizer: { ...current.promptOptimizer, apiKey: '' },
+      optimizerProfiles: current.optimizerProfiles.map((profile) => ({ ...profile, apiKey: '' })),
+      captioner: { ...current.captioner, apiKey: '' },
+      captionerProfiles: current.captionerProfiles.map((profile) => ({ ...profile, apiKey: '' })),
+    }
+
+    const merged = mergeImportedSettings(current, backup)
+
+    expect(merged.profiles.map((profile) => [profile.id, profile.apiKey])).toEqual([
+      ['my-openai', 'sk-live'],
+      ['my-gemini', 'g-key'],
+    ])
+    expect(merged.activeProfileId).toBe('my-gemini')
+    expect(merged.optimizerProfiles.map((profile) => [profile.id, profile.apiKey])).toEqual([
+      ['my-opt', 'sk-opt'],
+    ])
+    expect(merged.activeOptimizerProfileId).toBe('my-opt')
+    expect(merged.captionerProfiles.map((profile) => [profile.id, profile.apiKey])).toEqual([
+      ['my-cap', 'sk-cap'],
+    ])
+    expect(merged.activeCaptionerProfileId).toBe('my-cap')
+  })
+
+  it('导入项 apiKey 非空且与本地不同时仍作为新配置追加(同端点多账号不被空 key 通配折叠)', () => {
+    const shared = {
+      name: '同一网关',
+      provider: 'openai' as const,
+      baseUrl: 'https://gateway.example.com/v1',
+      model: 'gpt-image-2',
+      timeout: 600,
+      apiMode: 'images' as const,
+      codexCli: false,
+      apiProxy: false,
+    }
+    const current = normalizeSettings({
+      profiles: [{ ...shared, id: 'acct-a', apiKey: 'sk-a' }],
+      activeProfileId: 'acct-a',
+    })
+
+    const merged = mergeImportedSettings(current, {
+      profiles: [{ ...shared, id: 'acct-b', apiKey: 'sk-b' }],
+      activeProfileId: 'acct-b',
+    })
+
+    expect(merged.profiles.map((profile) => profile.apiKey)).toEqual(['sk-a', 'sk-b'])
+    expect(merged.activeProfileId).toBe('acct-a')
+  })
+
+  it('本地配置 apiKey 为空而导入项带 key 时仍追加(空 key 通配只对导入项生效)', () => {
+    const shared = {
+      name: '免鉴权网关',
+      provider: 'openai' as const,
+      baseUrl: 'https://gateway.example.com/v1',
+      model: 'gpt-image-2',
+      timeout: 600,
+      apiMode: 'images' as const,
+      codexCli: false,
+      apiProxy: false,
+    }
+    const current = normalizeSettings({
+      profiles: [{ ...shared, id: 'no-auth', apiKey: '' }],
+      activeProfileId: 'no-auth',
+    })
+
+    const merged = mergeImportedSettings(current, {
+      profiles: [{ ...shared, id: 'with-key', apiKey: 'sk-x' }],
+    })
+
+    expect(merged.profiles.map((profile) => profile.apiKey)).toEqual(['', 'sk-x'])
   })
 })
 
@@ -687,10 +819,7 @@ describe('switchApiProfileProvider', () => {
       model: DEFAULT_GEMINI_MODEL,
     })
 
-    const backToOpenAI = switchApiProfileProvider(
-      { ...gemini, apiKey: 'AIza-gemini' },
-      'openai',
-    )
+    const backToOpenAI = switchApiProfileProvider({ ...gemini, apiKey: 'AIza-gemini' }, 'openai')
     expect(backToOpenAI).toMatchObject({
       provider: 'openai',
       apiKey: '',
@@ -1539,5 +1668,19 @@ describe('mergeImportedSettings - captioner profiles', () => {
       id: DEFAULT_CAPTIONER_PROFILE_ID,
       provider: 'gemini',
     })
+  })
+})
+
+describe('validateApiProfile 对非法 header 字符的 fail-fast', () => {
+  it('API Key 含换行 / 非 Latin-1 字符时直接报错,而不是等 fetch 抛 TypeError 被当网络故障重试', () => {
+    const base = {
+      ...DEFAULT_SETTINGS.profiles[0],
+      apiKey: 'sk-ok',
+      baseUrl: 'https://api.example/v1',
+    }
+    expect(validateApiProfile(base)).toBeNull()
+    expect(validateApiProfile({ ...base, apiKey: 'sk-ok\n' })).toBeNull() // trim 后合法
+    expect(validateApiProfile({ ...base, apiKey: 'sk-\nok' })).toMatch(/非法字符/)
+    expect(validateApiProfile({ ...base, apiKey: 'sk-全角' })).toMatch(/非法字符/)
   })
 })

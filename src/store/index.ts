@@ -45,6 +45,9 @@ function isIndexedDbStorageEvent(event: StorageEvent): boolean {
   return event.key === IDB_CHANGE_STORAGE_KEY || event.key === null
 }
 
+const IDB_SYNC_DEBOUNCE_MS = 250
+let idbSyncDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event) => {
     if (event.storageArea && event.storageArea !== window.localStorage) return
@@ -58,14 +61,20 @@ if (typeof window !== 'undefined') {
             'error',
           )
       })
+    // 另一标签页批量生成时每张图、每条任务落库都通知一次,本页若每次都全表重读会被反复全量刷新;
+    // 合并同一窗口内的通知,只在末尾读一次(清库 key===null 路径不走去抖,保持立即)
+    const scheduleSyncIndexedDb = () => {
+      if (idbSyncDebounceTimer !== null) clearTimeout(idbSyncDebounceTimer)
+      idbSyncDebounceTimer = setTimeout(() => {
+        idbSyncDebounceTimer = null
+        void syncIndexedDb()
+      }, IDB_SYNC_DEBOUNCE_MS)
+    }
     const restoreInputImages = () =>
       restorePersistedInputImageDataUrls().catch((err) => {
         useStore
           .getState()
-          .showToast(
-            `恢复参考图失败：${err instanceof Error ? err.message : String(err)}`,
-            'error',
-          )
+          .showToast(`恢复参考图失败：${err instanceof Error ? err.message : String(err)}`, 'error')
       })
     const rehydratePersistedStore = () =>
       Promise.resolve(useStore.persist.rehydrate()).catch((err) => {
@@ -90,9 +99,8 @@ if (typeof window !== 'undefined') {
       return
     }
 
-    if (isPersistStorageEvent(event))
-      void rehydratePersistedStore().then(restoreInputImages)
-    if (isIndexedDbStorageEvent(event)) void syncIndexedDb()
+    if (isPersistStorageEvent(event)) void rehydratePersistedStore().then(restoreInputImages)
+    if (isIndexedDbStorageEvent(event)) scheduleSyncIndexedDb()
   })
 }
 
@@ -100,10 +108,7 @@ export { mergePersistedStoreState } from './persist'
 
 // ===== Re-exports（保持原有调用方 import 路径不变） =====
 
-export {
-  getCachedImage,
-  ensureImageCached,
-} from '../lib/imageCache'
+export { getCachedImage, ensureImageCached } from '../lib/imageCache'
 
 export {
   getCodexCliPromptKey,
@@ -132,8 +137,4 @@ export {
   addImageFromUrl,
 } from '../lib/taskRuntime'
 
-export {
-  exportData,
-  importData,
-  clearAllData,
-} from '../lib/exportImport'
+export { exportData, importData, clearAllData } from '../lib/exportImport'

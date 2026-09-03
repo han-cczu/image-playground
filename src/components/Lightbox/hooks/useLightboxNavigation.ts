@@ -5,7 +5,10 @@ import { useStore } from '../../../store'
  * 列表导航:currentIndex/goTo/goPrev/goNext(取模环绕)+ 键盘左右方向键切换。
  * 键盘监听挂 window,仅在 Lightbox 打开且多图时注册。
  */
-export function useLightboxNavigation(lightboxImageId: string | null) {
+export function useLightboxNavigation(
+  lightboxImageId: string | null,
+  onNavigate?: (direction: 'prev' | 'next') => void,
+) {
   const lightboxImageList = useStore((s) => s.lightboxImageList)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
 
@@ -14,21 +17,39 @@ export function useLightboxNavigation(lightboxImageId: string | null) {
   const total = lightboxImageList.length
   const showNav = total > 1
 
-  const goTo = useCallback((idx: number) => {
-    if (lightboxImageList.length === 0) return
-    const wrapped = ((idx % lightboxImageList.length) + lightboxImageList.length) % lightboxImageList.length
-    setLightboxImageId(lightboxImageList[wrapped], lightboxImageList)
-  }, [lightboxImageList, setLightboxImageId])
+  const goTo = useCallback(
+    (idx: number) => {
+      if (lightboxImageList.length === 0) return
+      const wrapped =
+        ((idx % lightboxImageList.length) + lightboxImageList.length) % lightboxImageList.length
+      setLightboxImageId(lightboxImageList[wrapped], lightboxImageList)
+    },
+    [lightboxImageList, setLightboxImageId],
+  )
 
-  const goPrev = useCallback(() => { if (showNav) goTo(currentIndex - 1) }, [showNav, currentIndex, goTo])
-  const goNext = useCallback(() => { if (showNav) goTo(currentIndex + 1) }, [showNav, currentIndex, goTo])
+  const goPrev = useCallback(() => {
+    if (!showNav) return
+    onNavigate?.('prev')
+    goTo(currentIndex - 1)
+  }, [showNav, currentIndex, goTo, onNavigate])
+  const goNext = useCallback(() => {
+    if (!showNav) return
+    onNavigate?.('next')
+    goTo(currentIndex + 1)
+  }, [showNav, currentIndex, goTo, onNavigate])
 
   // 键盘左右切换
   useEffect(() => {
     if (!lightboxImageId || !showNav) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev() }
-      if (e.key === 'ArrowRight') { e.preventDefault(); goNext() }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        goPrev()
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        goNext()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

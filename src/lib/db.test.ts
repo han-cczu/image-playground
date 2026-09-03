@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
 import type { TaskRecord } from '../types'
@@ -22,6 +22,7 @@ import {
 } from './db'
 import type { StoredImage } from '../types'
 import { ARCHIVE_CONVERSATION_ID, createArchiveConversation } from './conversations'
+import { MAX_TASKS } from './tasks'
 
 function createLocalStorageStub(): Storage {
   const values = new Map<string, string>()
@@ -185,6 +186,27 @@ describe('stored image conversions', () => {
     ])
   })
 
+  it('putImage 以写入时刻盖章 storedAt,不信任调用方带来的值', async () => {
+    globalThis.indexedDB = new IDBFactory()
+    __resetDbCacheForTests()
+    // 不用假定时器:fake-indexeddb 靠真实定时器推进事务
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(123_456)
+    try {
+      await putImage({
+        id: 'stamped',
+        blob: new Blob(['image'], { type: 'image/png' }),
+        createdAt: 1,
+        storedAt: 5,
+      })
+    } finally {
+      nowSpy.mockRestore()
+    }
+
+    const stored = await getAllImages()
+
+    expect(stored[0]).toMatchObject({ id: 'stamped', createdAt: 1, storedAt: 123_456 })
+  })
+
   it('drops invalid image timestamps before storing images', async () => {
     globalThis.indexedDB = new IDBFactory()
     __resetDbCacheForTests()
@@ -274,6 +296,26 @@ describe('tasks object store', () => {
       }),
     ])
   })
+
+  it('库内任务超过 MAX_TASKS 条时 getAllTasks 不截断,主键序最靠后的最新任务仍可读到', async () => {
+    // 任务 id 与 genId 同构:base36 时间戳前缀,IDB getAll 按主键升序 ≈ 时间升序,
+    // 最新任务排在最后——若读取侧套导入用的 MAX_TASKS 截断,丢的正是这一条(及其图片引用)。
+    const base = 1_700_000_000_000
+    const total = MAX_TASKS + 1
+    const tasks = Array.from({ length: total }, (_, index) => ({
+      ...createTask((base + index).toString(36)),
+      createdAt: base + index,
+      outputImages: index === total - 1 ? ['newest-output'] : [],
+    }))
+    const newestId = tasks[total - 1].id
+    await persistConversationMigration([], tasks)
+
+    const loaded = await getAllTasks()
+
+    expect(loaded).toHaveLength(total)
+    const newest = loaded.find((task) => task.id === newestId)
+    expect(newest?.outputImages).toEqual(['newest-output'])
+  }, 30_000)
 })
 
 describe('conversations object store', () => {

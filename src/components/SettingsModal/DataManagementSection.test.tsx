@@ -42,6 +42,7 @@ function renderSection(
       onImport={vi.fn(async () => {})}
       onClearAll={vi.fn()}
       onConfirmReplaceImport={vi.fn()}
+      onConfirmMergeImport={vi.fn((proceed) => void proceed())}
       onConfirmClearAll={vi.fn()}
       {...props}
     />,

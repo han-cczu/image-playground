@@ -19,7 +19,15 @@ function nextTheme(current: Theme): Theme {
 function ThemeIcon({ theme }: { theme: Theme }) {
   if (theme === 'light') {
     return (
-      <svg className="w-5 h-5 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <svg
+        className="w-5 h-5 text-gray-600 dark:text-gray-400"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
         <circle cx="12" cy="12" r="4" />
         <path d="M12 2v2" />
         <path d="M12 20v2" />
@@ -34,13 +42,29 @@ function ThemeIcon({ theme }: { theme: Theme }) {
   }
   if (theme === 'dark') {
     return (
-      <svg className="w-5 h-5 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <svg
+        className="w-5 h-5 text-gray-600 dark:text-gray-400"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
       </svg>
     )
   }
   return (
-    <svg className="w-5 h-5 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      className="w-5 h-5 text-gray-600 dark:text-gray-400"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <rect x="2" y="3" width="20" height="14" rx="2" />
       <line x1="8" x2="16" y1="21" y2="21" />
       <line x1="12" x2="12" y1="17" y2="21" />
@@ -71,9 +95,12 @@ export default function Header({ onOpenMobileSidebar }: HeaderProps) {
         : '创建图'
       : 'Gemini'
 
-  const activeConversation = activeConversationId
-    ? conversations.find((c) => c.id === activeConversationId)
-    : null
+  const galleryView = useStore((s) => s.galleryView)
+  // 图库视图跨对话展示,移动端标题若仍显示激活对话名会误导用户以为只看到了这一个对话
+  const activeConversation =
+    activeConversationId && !galleryView
+      ? conversations.find((c) => c.id === activeConversationId)
+      : null
 
   return (
     <header
@@ -90,7 +117,15 @@ export default function Header({ onOpenMobileSidebar }: HeaderProps) {
             title="打开对话列表"
             aria-label="打开对话列表"
           >
-            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              className="h-5 w-5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <line x1="3" y1="6" x2="21" y2="6" />
               <line x1="3" y1="12" x2="21" y2="12" />
               <line x1="3" y1="18" x2="21" y2="18" />
@@ -100,7 +135,10 @@ export default function Header({ onOpenMobileSidebar }: HeaderProps) {
           <div className="flex min-w-0 items-center gap-2">
             {/* 桌面端：当前模型名 + 模式 chip */}
             <div className="hidden min-w-0 items-center gap-2 md:flex">
-              <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-100" title={modelLabel}>
+              <span
+                className="truncate text-sm font-medium text-gray-800 dark:text-gray-100"
+                title={modelLabel}
+              >
                 {modelLabel}
               </span>
               <span className="inline-flex shrink-0 items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-600 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30">
@@ -110,7 +148,7 @@ export default function Header({ onOpenMobileSidebar }: HeaderProps) {
 
             {/* 移动端：当前对话标题（无对话时显示品牌名） */}
             <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-100 md:hidden">
-              {activeConversation?.title ?? 'Image Playground'}
+              {galleryView ? '图库' : (activeConversation?.title ?? 'Image Playground')}
             </span>
           </div>
         </div>

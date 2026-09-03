@@ -31,7 +31,7 @@ npm install && npm run dev
 **3. Docker 一键自部署（最简：单容器，HTTP）**
 
 ```bash
-docker build -t image-playground .
+docker build --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) -t image-playground .
 docker run -d --name image-playground -p 8080:80 image-playground
 # 访问 http://localhost:8080
 ```
@@ -97,7 +97,7 @@ docker run -d --name image-playground -p 8080:80 image-playground
 - ⚠️ **数据在你的浏览器里,也只在你的浏览器里**：浏览器存储并非永久保障——磁盘空间紧张时浏览器可能自动清空站点数据（应用启动时会自动申请持久化授权以降低风险，可在设置 → 数据管理中查看授权状态）；Safari 在 7 天未访问后也可能清除（添加到主屏幕可豁免）。**请定期用「导出」做备份**——导出 ZIP 是唯一的恢复手段，不只是迁移工具。
 - 图片按 SHA-256 哈希去重，多任务引用同一张图只占一份空间。
 - 支持作为 PWA 安装到桌面 / 主屏，离线可完整使用（Service Worker 在安装期预缓存全部静态资源）。
-- **稳定性保障**：区域级 React Error Boundary 包裹 sidebar / Header / 主区域 / InputBar / 各 Modal，单点渲染异常不再拖垮整页；Service Worker 自动注入 commit hash 作 CACHE_NAME，每次部署旧缓存自然失效；翻车时只需改 KILL_SWITCH 常量部署一次就能远程救回所有用户，无需让用户清缓存。
+- **稳定性保障**：区域级 React Error Boundary 包裹 sidebar / Header / 主区域 / InputBar / 各 Modal，单点渲染异常不再拖垮整页；Service Worker 自动注入 commit hash 作 CACHE_NAME（Workers / 本机构建自动获取；Docker 构建上下文不含 `.git`，需按下文传入 `GIT_COMMIT`，否则退化为 `nogit-<时间戳>`，每次构建仍会轮换缓存），每次部署旧缓存自然失效；翻车时只需改 KILL_SWITCH 常量部署一次就能远程救回所有用户，无需让用户清缓存。
 
 </details>
 
@@ -117,7 +117,7 @@ docker run -d --name image-playground -p 8080:80 image-playground
 
 ### URL 快速填充
 
-适合创建书签或外部系统集成。`apiUrl` 与 `apiKey` 请放在 hash 中一次性传入，应用读取后会立即从地址栏清除；查询串中的同名参数会被清理但不会摄入。
+适合创建书签或外部系统集成。`apiUrl`、`apiKey` 与 `provider` 请放在 hash 中一次性传入，应用读取后会立即从地址栏清除；查询串中的同名参数会被清理但不会摄入（任意外链都能带查询串，不能让一条链接就改写你的配置）。
 
 | 参数 | 示例 | 作用 |
 |---|---|---|
@@ -125,7 +125,7 @@ docker run -d --name image-playground -p 8080:80 image-playground
 | `apiKey` | `#apiKey=sk-xxxx` | 一次性写入当前激活 profile 的 API Key |
 | `apiMode` | `?apiMode=images` 或 `?apiMode=responses` | 切换 OpenAI 接口模式（默认 `images`） |
 | `codexCli` | `?codexCli=true` | 强制开启 Codex CLI 兼容模式 |
-| `provider` | `?provider=openai` 或 `?provider=gemini` | 切换 Provider 类型 |
+| `provider` | `#provider=openai` 或 `#provider=gemini` | 切换 Provider 类型；与当前激活 profile 相同时不做任何改动，真正换厂商时端点/模型重置为目标默认并清空 API Key（可同时带 `#apiKey=` 写入新 key） |
 
 集成示例（如 New API 等聊天系统中以 URL 形式跳转）：
 
@@ -318,8 +318,9 @@ docker run -d --name image-playground -p 8080:80 image-playground
 <summary>维护与升级</summary>
 
 - 拉取新代码后用对应模式的命令滚动更新：
-  - HTTPS（含 sslip.io）：`docker compose --profile https up -d --build`
-  - HTTP + IP：`docker compose --profile lan up -d --build`
+  - HTTPS（含 sslip.io）：`GIT_COMMIT=$(git rev-parse --short HEAD) docker compose --profile https up -d --build`
+  - HTTP + IP：`GIT_COMMIT=$(git rev-parse --short HEAD) docker compose --profile lan up -d --build`
+  - 不传 `GIT_COMMIT` 也能构建，只是 CACHE_NAME 变成 `nogit-<时间戳>`（仍随每次构建轮换）。
 - 旧版本 Service Worker 通过 `__CACHE_NAME__` 注入机制自动失效（仅 HTTPS 模式下生效；HTTP 模式 SW 本就未注册）。
 - 仅修改 `cors-proxy.conf` 时：`docker compose restart cors-proxy`。
 - 仅修改 `Caddyfile` 时：`docker compose --profile https restart caddy`。

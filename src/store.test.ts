@@ -8,6 +8,7 @@ import {
   cancelTask,
   clearTaskFavorite,
   editOutputs,
+  getCodexCliPromptKey,
   markInterruptedSyncHttpTasks,
   mergePersistedStoreState,
   retryGridMissing,
@@ -29,7 +30,11 @@ import {
 } from './lib/favoriteCategories'
 import { MAX_BATCH_NOTES } from './lib/gridSheet'
 import { MAX_INPUT_IMAGES_PER_SUBMISSION, MAX_TASK_TEXT_LEN } from './lib/tasks'
-import { MAX_DISMISSED_CODEX_CLI_PROMPT_KEY_LEN, partialize } from './store/persist'
+import {
+  DISMISSED_CODEX_CLI_PROMPT_KEY_PREFIX,
+  MAX_DISMISSED_CODEX_CLI_PROMPT_KEY_LEN,
+  partialize,
+} from './store/persist'
 import { shouldAutoStartTour } from './lib/tour/autoStart'
 
 vi.mock('./lib/db', async (importOriginal) => {
@@ -89,6 +94,7 @@ import {
 import { callImageApi } from './lib/api'
 import {
   ARCHIVE_CONVERSATION_ID,
+  MAX_CONVERSATIONS,
   MAX_CONVERSATION_ID_LEN,
   MAX_CONVERSATION_TITLE_LEN,
 } from './lib/conversations'
@@ -100,6 +106,11 @@ import {
 import { MAX_TASK_PARAM_STRING_LEN } from './lib/api/paramCompatibility'
 import { clearAllData } from './lib/exportImport'
 import { mapWithConcurrency } from './lib/concurrency'
+import { registerInFlightImages, releaseInFlightImages } from './lib/inFlightImages'
+import { rollbackStoredImages } from './lib/taskRuntime/persistence'
+import { maybeUpdateConversationOnFirstTask } from './lib/taskRuntime/submit'
+import { showCodexCliPrompt } from './lib/taskRuntime/codexCli'
+import { MAX_FAVORITE_CATEGORIES } from './lib/favoriteCategories'
 import { validateMaskMatchesImage } from './lib/image/canvasImage'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
@@ -240,6 +251,75 @@ describe('mask draft lifecycle in store actions', () => {
     useStore.getState().setInputImages([imageA, imageB, duplicateA, imageA])
 
     expect(useStore.getState().inputImages).toEqual([imageB, imageA])
+  })
+
+  // toIdx 是 ImageGrid 传来的「移除前数组的插入缝隙」(0..length,指示线画在第 toIdx 张左侧);
+  // 若 store 先 splice 移除再按原 toIdx 插入,所有向前拖动都会比指示线多后移一格
+  describe('moveInputImage 按插入缝隙落位', () => {
+    const imageC = { id: 'image-c', dataUrl: 'data:image/png;base64,c' }
+    const imageD = { id: 'image-d', dataUrl: 'data:image/png;base64,d' }
+    const ids = () => useStore.getState().inputImages.map((img) => img.id)
+
+    beforeEach(() => {
+      useStore.setState({ inputImages: [imageA, imageB, imageC, imageD], maskDraft: null })
+    })
+
+    it('向前拖到中间缝隙时落在指示线处,而不是多后移一格', () => {
+      useStore.getState().moveInputImage(0, 2)
+
+      expect(ids()).toEqual(['image-b', 'image-a', 'image-c', 'image-d'])
+    })
+
+    it('向前拖到倒数第二个缝隙时不会被推到末尾', () => {
+      useStore.getState().moveInputImage(0, 3)
+
+      expect(ids()).toEqual(['image-b', 'image-c', 'image-a', 'image-d'])
+    })
+
+    it('向前拖到末尾缝隙(toIdx = length)落到最后一位', () => {
+      useStore.getState().moveInputImage(0, 4)
+
+      expect(ids()).toEqual(['image-b', 'image-c', 'image-d', 'image-a'])
+    })
+
+    it('向后拖动落在指示线处', () => {
+      useStore.getState().moveInputImage(3, 1)
+
+      expect(ids()).toEqual(['image-a', 'image-d', 'image-b', 'image-c'])
+    })
+
+    it('落在自身左右两个缝隙时视为原地不动,不产生新数组引用', () => {
+      const before = useStore.getState().inputImages
+
+      useStore.getState().moveInputImage(1, 1)
+      expect(useStore.getState().inputImages).toBe(before)
+
+      useStore.getState().moveInputImage(1, 2)
+      expect(useStore.getState().inputImages).toBe(before)
+    })
+
+    it('fromIdx 越界时保持原状', () => {
+      const before = useStore.getState().inputImages
+
+      useStore.getState().moveInputImage(9, 1)
+
+      expect(useStore.getState().inputImages).toBe(before)
+    })
+
+    it('存在遮罩主图时参考图仍按缝隙落位且主图保持首位', () => {
+      useStore.setState({
+        maskDraft: {
+          targetImageId: imageA.id,
+          maskDataUrl: 'data:image/png;base64,mask',
+          updatedAt: 1,
+        },
+      })
+
+      // 把 B 拖到 C|D 之间(缝隙 3)
+      useStore.getState().moveInputImage(1, 3)
+
+      expect(ids()).toEqual(['image-a', 'image-c', 'image-b', 'image-d'])
+    })
   })
 
   it('setInputImages and addInputImage cap references at the submission limit', () => {
@@ -408,6 +488,114 @@ describe('mask draft lifecycle in store actions', () => {
 
     expect(useStore.getState().maskDraft).toBeNull()
   })
+
+  it('任务完成时若遮罩编辑器仍打开,不清草稿也不关编辑器(用户涂到一半的笔画不能被后台完成事件卸掉)', async () => {
+    const maskDraft = {
+      targetImageId: imageA.id,
+      maskDataUrl: 'data:image/png;base64,mask',
+      updatedAt: 1,
+    }
+    vi.mocked(validateMaskMatchesImage).mockResolvedValueOnce('partial')
+    vi.mocked(getImage).mockImplementation(async (id) => ({
+      id,
+      dataUrl: `data:image/png;base64,${id}`,
+    }))
+    vi.mocked(storeImage).mockImplementation(async (dataUrl) =>
+      dataUrl === maskDraft.maskDataUrl ? 'mask-image-id' : 'generated-image-id',
+    )
+    vi.mocked(callImageApi).mockResolvedValue({
+      images: ['data:image/png;base64,AQID'],
+      actualParams: { n: 1 },
+    })
+    useStore.setState({ inputImages: [imageA], maskDraft, maskEditorImageId: imageA.id })
+
+    await submitTask()
+    await vi.waitFor(() => expect(useStore.getState().tasks[0]?.status).toBe('done'))
+
+    expect(useStore.getState().tasks[0]).toMatchObject({
+      status: 'done',
+      maskImageId: 'mask-image-id',
+    })
+    expect(useStore.getState().maskDraft).toEqual(maskDraft)
+    expect(useStore.getState().maskEditorImageId).toBe(imageA.id)
+  })
+
+  it('提交在途期间的重入被忽略:连点两次只入队一条,在途态随流程结束复位', async () => {
+    let releaseStore!: () => void
+    // 卡在输入图落库的 await 上,模拟「第一次提交还在跑,用户又点了一次发送」
+    vi.mocked(storeImage).mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          releaseStore = () => resolve('stored-input-a')
+        }),
+    )
+    vi.mocked(callImageApi).mockResolvedValue({
+      images: ['data:image/png;base64,AQID'],
+      actualParams: { n: 1 },
+    })
+    vi.mocked(getImage).mockImplementation(async (id) => ({
+      id,
+      dataUrl: `data:image/png;base64,${id}`,
+    }))
+    useStore.setState({ inputImages: [imageA] })
+
+    const first = submitTask()
+    await Promise.resolve()
+    expect(useStore.getState().submitting).toBe(true)
+    const second = submitTask()
+    await second
+    expect(useStore.getState().tasks).toHaveLength(0)
+
+    releaseStore()
+    await first
+    expect(useStore.getState().submitting).toBe(false)
+    expect(useStore.getState().tasks).toHaveLength(1)
+
+    // 互斥已释放:下一次提交正常入队
+    vi.mocked(storeImage).mockResolvedValue('stored-input-a')
+    await submitTask()
+    expect(useStore.getState().tasks).toHaveLength(2)
+    await vi.waitFor(() =>
+      expect(useStore.getState().tasks.every((task) => task.status === 'done')).toBe(true),
+    )
+  })
+
+  it('回滚自己的输出图时,不删别的任务仍在途(已落库、尚未写进任务记录)的同 hash 图', async () => {
+    registerInFlightImages('sibling-task', ['shared-hash'])
+    useStore.setState({ tasks: [], inputImages: [] })
+
+    await rollbackStoredImages(['shared-hash', 'only-mine'], 'me')
+
+    expect(deleteImage).toHaveBeenCalledTimes(1)
+    expect(deleteImage).toHaveBeenCalledWith('only-mine')
+    releaseInFlightImages('sibling-task')
+  })
+
+  it('任务完成时编辑器已关闭则照旧清掉这份已消费的遮罩草稿', async () => {
+    const maskDraft = {
+      targetImageId: imageA.id,
+      maskDataUrl: 'data:image/png;base64,mask',
+      updatedAt: 1,
+    }
+    vi.mocked(validateMaskMatchesImage).mockResolvedValueOnce('partial')
+    vi.mocked(getImage).mockImplementation(async (id) => ({
+      id,
+      dataUrl: `data:image/png;base64,${id}`,
+    }))
+    vi.mocked(storeImage).mockImplementation(async (dataUrl) =>
+      dataUrl === maskDraft.maskDataUrl ? 'mask-image-id' : 'generated-image-id',
+    )
+    vi.mocked(callImageApi).mockResolvedValue({
+      images: ['data:image/png;base64,AQID'],
+      actualParams: { n: 1 },
+    })
+    useStore.setState({ inputImages: [imageA], maskDraft, maskEditorImageId: null })
+
+    await submitTask()
+    await vi.waitFor(() => expect(useStore.getState().tasks[0]?.status).toBe('done'))
+
+    expect(useStore.getState().maskDraft).toBeNull()
+  })
 })
 
 describe('interrupted sync-http running tasks', () => {
@@ -545,7 +733,7 @@ describe('task runtime reliability', () => {
       showToast: vi.fn(),
     })
 
-    const categoryId = useStore.getState().ensureDefaultFavoriteCategory()
+    const categoryId = useStore.getState().ensureDefaultFavoriteCategory()!
     await setTaskFavoriteCategory('task-a', categoryId)
 
     expect(useStore.getState().favoriteCategories).toEqual([
@@ -585,9 +773,12 @@ describe('task runtime reliability', () => {
       partialFailureCount: 1,
       partialFailureMessage: 'one request failed',
     })
-    expect(useStore.getState().showToast).toHaveBeenCalledWith(
-      expect.stringContaining('部分完成'),
-      'error',
+    // toast 在 done 落库(await putTask)之后才发,与 status 翻 done 不在同一微任务,须单独等待
+    await vi.waitFor(() =>
+      expect(useStore.getState().showToast).toHaveBeenCalledWith(
+        expect.stringContaining('部分完成'),
+        'error',
+      ),
     )
   })
 
@@ -872,7 +1063,10 @@ describe('task runtime reliability', () => {
 
     scheduleSyncHttpWatchdog('non-finite-timeout', Infinity)
 
-    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), DEFAULT_SETTINGS.timeout * 1000)
+    expect(setTimeoutSpy).toHaveBeenCalledWith(
+      expect.any(Function),
+      DEFAULT_SETTINGS.timeout * 1000,
+    )
   })
 
   it('queued batch members execute on the profile pinned at enqueue, not the active profile at dequeue', async () => {
@@ -1767,8 +1961,8 @@ describe('favorite category store actions', () => {
   })
 
   it('creates, updates, and reorders favorite categories', () => {
-    const firstId = useStore.getState().createFavoriteCategory({ name: '角色', color: '#f59e0b' })
-    const secondId = useStore.getState().createFavoriteCategory({ name: '场景', color: '#14b8a6' })
+    const firstId = useStore.getState().createFavoriteCategory({ name: '角色', color: '#f59e0b' })!
+    const secondId = useStore.getState().createFavoriteCategory({ name: '场景', color: '#14b8a6' })!
 
     useStore.getState().updateFavoriteCategory(firstId, { name: '主角', color: '#ef4444' })
     useStore.getState().moveFavoriteCategory(secondId, -1)
@@ -2344,6 +2538,77 @@ describe('conversation store actions', () => {
     expect(useStore.getState().selectedTaskIds).toEqual([])
   })
 
+  it('createConversation 在普通对话达上限时不再新建:提示、停留在当前对话并返回其 id', () => {
+    const regular = Array.from({ length: MAX_CONVERSATIONS - 1 }, (_, i) => ({
+      id: `conv-${i}`,
+      title: `对话 ${i}`,
+      createdAt: i,
+      updatedAt: i,
+    }))
+    const showToast = vi.fn()
+    useStore.setState({
+      conversations: [
+        ...regular,
+        { id: ARCHIVE_CONVERSATION_ID, title: '历史记录', createdAt: 0, updatedAt: 0 },
+      ],
+      activeConversationId: 'conv-3',
+      showToast,
+    })
+
+    const id = useStore.getState().createConversation()
+
+    expect(id).toBe('conv-3')
+    expect(useStore.getState().conversations).toHaveLength(MAX_CONVERSATIONS)
+    expect(putConversation).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('上限'), 'error')
+
+    // 没有激活对话(首次提交兜底路径)时回落到最新的普通对话,返回值必须是有效 id
+    useStore.setState({ activeConversationId: null })
+    const fallback = useStore.getState().createConversation()
+    expect(fallback).toBe('conv-0')
+    expect(useStore.getState().activeConversationId).toBe('conv-0')
+  })
+
+  it('收藏分类达上限时 createFavoriteCategory / ensureDefaultFavoriteCategory 返回 null 并提示,不产生幽灵分类', () => {
+    const showToast = vi.fn()
+    useStore.setState({
+      favoriteCategories: Array.from({ length: MAX_FAVORITE_CATEGORIES }, (_, i) => ({
+        id: `cat-${i}`,
+        name: `分类 ${i}`,
+        color: '#000000',
+        sortOrder: i,
+        createdAt: i,
+      })),
+      favoriteCategoriesInitialized: true,
+      showToast,
+    })
+
+    expect(useStore.getState().createFavoriteCategory({ name: '溢出' })).toBeNull()
+    expect(useStore.getState().ensureDefaultFavoriteCategory()).toBeNull()
+    expect(useStore.getState().favoriteCategories).toHaveLength(MAX_FAVORITE_CATEGORIES)
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('上限'), 'error')
+  })
+
+  it('mergePersistedStoreState 在持久化分类列表里找不到当前筛选分类时复位筛选', () => {
+    const persistedCategories = {
+      favoriteCategories: [
+        { id: 'cat-keep', name: '保留', color: '#000000', sortOrder: 0, createdAt: 1 },
+      ],
+      favoriteCategoriesInitialized: true,
+    } as never
+    const merged = mergePersistedStoreState(persistedCategories, {
+      ...useStore.getInitialState(),
+      filterFavoriteCategoryId: 'cat-deleted-elsewhere',
+    })
+    expect(merged.filterFavoriteCategoryId).toBeNull()
+
+    const kept = mergePersistedStoreState(persistedCategories, {
+      ...useStore.getInitialState(),
+      filterFavoriteCategoryId: 'cat-keep',
+    })
+    expect(kept.filterFavoriteCategoryId).toBe('cat-keep')
+  })
+
   it('createConversation respects an explicit seed title', () => {
     const id = useStore.getState().createConversation('我的对话')
     expect(useStore.getState().conversations[0]).toMatchObject({ id, title: '我的对话' })
@@ -2560,6 +2825,70 @@ describe('conversation store actions', () => {
     expect(useStore.getState().tasks.map((t) => t.id)).toEqual(['task-keep'])
     expect(useStore.getState().activeConversationId).toBe('conv-keep')
     expect(deleteConversation).toHaveBeenCalledWith('conv-target', true)
+  })
+
+  it('删除当前对话后按侧栏可见顺序(updatedAt 降序)选下一个激活项,而不是 store 插入序', async () => {
+    const setConfirmDialog = vi.fn()
+    useStore.setState({
+      conversations: [
+        { id: 'conv-old', title: '旧', createdAt: 1, updatedAt: 1 },
+        { id: 'conv-target', title: '待删', createdAt: 2, updatedAt: 2 },
+        { id: 'conv-recent', title: '最近', createdAt: 3, updatedAt: 30 },
+      ],
+      tasks: [],
+      activeConversationId: 'conv-target',
+      setConfirmDialog,
+      showToast: vi.fn(),
+    })
+
+    useStore.getState().deleteConversationWithTasks('conv-target')
+    const dialog = vi.mocked(setConfirmDialog).mock.calls[0][0] as { action: () => void }
+    dialog.action()
+
+    await vi.waitFor(() => expect(useStore.getState().activeConversationId).toBe('conv-recent'))
+  })
+
+  it('createOrReuseEmptyConversation 复用空「新对话」而不是每次新建', () => {
+    useStore.setState({
+      conversations: [
+        { id: 'conv-empty', title: '新对话', createdAt: 5, updatedAt: 5 },
+        { id: 'conv-busy', title: '新对话', createdAt: 6, updatedAt: 6 },
+      ],
+      tasks: [task({ id: 't', conversationId: 'conv-busy' })],
+      activeConversationId: 'conv-busy',
+      showToast: vi.fn(),
+    })
+
+    expect(useStore.getState().createOrReuseEmptyConversation()).toBe('conv-empty')
+    expect(useStore.getState().activeConversationId).toBe('conv-empty')
+    expect(useStore.getState().conversations).toHaveLength(2)
+    expect(putConversation).not.toHaveBeenCalled()
+
+    useStore.setState({
+      tasks: [
+        task({ id: 't', conversationId: 'conv-busy' }),
+        task({ id: 't2', conversationId: 'conv-empty' }),
+      ],
+    })
+    const created = useStore.getState().createOrReuseEmptyConversation()
+    expect(created).not.toBe('conv-empty')
+    expect(useStore.getState().conversations).toHaveLength(3)
+  })
+
+  it('批量提交首条回填对话标题:同批兄弟不算「先前任务」', async () => {
+    useStore.setState({
+      conversations: [{ id: 'conv-new', title: '新对话', createdAt: 1, updatedAt: 1 }],
+      tasks: [
+        task({ id: 'b1', conversationId: 'conv-new', batchId: 'batch', prompt: '晨光下的猫' }),
+        task({ id: 'b2', conversationId: 'conv-new', batchId: 'batch', prompt: '黄昏下的猫' }),
+      ],
+      showToast: vi.fn(),
+    })
+
+    await maybeUpdateConversationOnFirstTask('conv-new', useStore.getState().tasks[0])
+
+    expect(useStore.getState().conversations[0].title).not.toBe('新对话')
+    expect(useStore.getState().conversations[0].title).toContain('晨光')
   })
 
   it('deleteConversationWithTasks returns the cascade deletion promise from the confirmation action', () => {
@@ -2940,6 +3269,45 @@ describe('conversation store actions', () => {
     expect(dismissedKeys[dismissedKeys.length - 1]).toBe('key-59')
   })
 
+  it('showCodexCliPrompt 在已有确认弹窗时让位(非 force),不顶掉用户正在操作的弹窗', () => {
+    const setConfirmDialog = vi.fn()
+    useStore.setState({
+      settings: normalizeSettings({ ...DEFAULT_SETTINGS, codexCli: false }),
+      dismissedCodexCliPrompts: [],
+      confirmDialog: { title: '删除对话', message: '确认?', action: () => {} } as never,
+      setConfirmDialog,
+    })
+
+    showCodexCliPrompt()
+    expect(setConfirmDialog).not.toHaveBeenCalled()
+
+    showCodexCliPrompt(true)
+    expect(setConfirmDialog).toHaveBeenCalledTimes(1)
+  })
+
+  it('getCodexCliPromptKey 不含 API 密钥:换 key 不变、换 profile 才变,且带版本前缀', () => {
+    const settings = normalizeSettings({
+      ...DEFAULT_SETTINGS,
+      profiles: [
+        {
+          ...DEFAULT_SETTINGS.profiles[0],
+          apiKey: 'sk-secret-1',
+          baseUrl: 'https://relay.example/v1',
+        },
+        { ...DEFAULT_SETTINGS.profiles[0], id: 'second', name: '第二', apiKey: 'sk-secret-2' },
+      ],
+    })
+    const key = getCodexCliPromptKey(settings)
+
+    expect(key.startsWith(DISMISSED_CODEX_CLI_PROMPT_KEY_PREFIX)).toBe(true)
+    expect(key).not.toContain('sk-secret-1')
+    expect(key).toContain('https://relay.example/v1')
+    expect(getCodexCliPromptKey(normalizeSettings({ ...settings, apiKey: 'sk-rotated' }))).toBe(key)
+    expect(
+      getCodexCliPromptKey(normalizeSettings({ ...settings, activeProfileId: 'second' })),
+    ).not.toBe(key)
+  })
+
   it('dismissCodexCliPrompt dedupes after trimming regardless of insertion order', () => {
     useStore.setState({ dismissedCodexCliPrompts: [] })
 
@@ -3005,7 +3373,9 @@ describe('insecure context banner state', () => {
 
   it('mergePersistedStoreState normalizes unsafe prompt, params, inputImages and dismissed prompt keys', () => {
     const longText = 'x'.repeat(MAX_TASK_TEXT_LEN + 50)
-    const longDismissedPromptKey = 'k'.repeat(MAX_DISMISSED_CODEX_CLI_PROMPT_KEY_LEN + 50)
+    const longDismissedPromptKey =
+      DISMISSED_CODEX_CLI_PROMPT_KEY_PREFIX +
+      'k'.repeat(MAX_DISMISSED_CODEX_CLI_PROMPT_KEY_LEN + 50)
     const merged = mergePersistedStoreState(
       {
         prompt: longText,
@@ -3026,13 +3396,15 @@ describe('insecure context banner state', () => {
           { id: longText, dataUrl: 'data:image/png;base64,long' },
         ],
         dismissedCodexCliPrompts: [
-          'ok',
-          'ok',
+          'v2:ok',
+          'v2:ok',
           '   ',
-          '  trimmed  ',
+          '  v2:trimmed  ',
           longDismissedPromptKey,
           1,
-          ...Array.from({ length: 80 }, (_, index) => `prompt-${index}`),
+          // 旧格式(无前缀,含明文 apiKey)必须被丢弃
+          'https://api.openai.com/v1\nsk-legacy-secret',
+          ...Array.from({ length: 80 }, (_, index) => `v2:prompt-${index}`),
         ],
       } as never,
       useStore.getInitialState(),
@@ -3055,12 +3427,15 @@ describe('insecure context banner state', () => {
     ])
     expect(merged.dismissedCodexCliPrompts).toHaveLength(50)
     expect(merged.dismissedCodexCliPrompts.slice(0, 3)).toEqual([
-      'ok',
-      'trimmed',
+      'v2:ok',
+      'v2:trimmed',
       longDismissedPromptKey.slice(0, MAX_DISMISSED_CODEX_CLI_PROMPT_KEY_LEN),
     ])
+    expect(merged.dismissedCodexCliPrompts.some((key) => key.includes('sk-legacy-secret'))).toBe(
+      false,
+    )
     expect(merged.dismissedCodexCliPrompts[merged.dismissedCodexCliPrompts.length - 1]).toBe(
-      'prompt-46',
+      'v2:prompt-46',
     )
   })
 

@@ -18,7 +18,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import type { TaskRecord } from '../types'
 import { useStore, reuseConfig, editOutputs, removeTask, reorderTask } from '../store'
-import { filterAndSortTasks } from '../lib/taskFilters'
+import { filterAndSortTasks, TASK_GRID_RENDER_CAP } from '../lib/taskFilters'
 import { groupIntoGridBlocks } from '../lib/gridExperiment'
 import { pickFallbackColor } from '../lib/conversations'
 import TaskCard from './TaskCard'
@@ -109,7 +109,7 @@ const SortableTaskCard = memo(function SortableTaskCard({
 })
 
 /** 超此 task 数仅渲染前 N 条(按 task 计数,矩阵块按成员数累计)+ 提示。极端大库兜底,会强制关拖拽。 */
-const RENDER_CAP = 2000
+const RENDER_CAP = TASK_GRID_RENDER_CAP
 
 export default function TaskGrid() {
   const tasks = useStore((s) => s.tasks)
@@ -326,8 +326,17 @@ export default function TaskGrid() {
         const taskId = card.getAttribute('data-task-id')
         if (!taskId) return
 
+        // 矩阵块横向可滚动:被 overflow 裁掉的格子 gBCR 仍在页面右侧留白处,在那里框选会选中看不见的任务。
+        // 与最近的裁剪祖先求交,交集为空即视为不可见、不参与命中(仍走「不在初始选区就移除」分支)。
+        const clip = card.closest('[data-selection-clip]')
+        let visible = true
+        if (clip) {
+          const clipRect = clip.getBoundingClientRect()
+          visible = rect.right > clipRect.left && rect.left < clipRect.right
+        }
+
         const isIntersecting =
-          minX < rect.right && maxX > rect.left && minY < rect.bottom && maxY > rect.top
+          visible && minX < rect.right && maxX > rect.left && minY < rect.bottom && maxY > rect.top
 
         if (isIntersecting) {
           if (initialSelected.has(taskId)) {
@@ -371,7 +380,10 @@ export default function TaskGrid() {
       if (!target.closest('[data-drag-select-surface]')) return
       if (target.closest('[data-input-bar]')) return
       if (target.closest('[data-no-drag-select], [data-lightbox-root]')) return
-      if (target.closest('button, a, input, textarea, select')) return
+      // label 也算交互控件:它会把 click 转发给内部控件(如矩阵「选中整批」checkbox)。若在这里把
+      // label 上的按下当作框选起点,mouseup 会先 clearSelection,随后转发的 click 读到「未全选」
+      // 反向把整批重新勾上——点文字永远无法取消,且批外已选任务被静默清掉。
+      if (target.closest('button, a, input, textarea, select, label')) return
 
       const isCtrl = isMac ? e.metaKey : e.ctrlKey
       beginSelection(target as HTMLElement, e.clientX, e.clientY, isCtrl)

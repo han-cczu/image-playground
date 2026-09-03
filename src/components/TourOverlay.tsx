@@ -161,10 +161,14 @@ function TourPanel() {
   useLockBodyScroll(true)
   useFocusTrap(true, bubbleRef)
 
-  // 每步切换把焦点拉回「下一步」(useFocusTrap 仅在 active 变化时移焦,步进不重触发)
+  // 每步切换把焦点拉回「下一步」(useFocusTrap 仅在 active 变化时移焦,步进不重触发)。
+  // 首步要等气泡定位完成:定位前气泡是 visibility:hidden,对不可见元素 focus() 是空操作,
+  // 焦点会留在被遮罩盖住的页面控件上。用布尔依赖而不是 bubblePos 对象——锚点轮询/resize 每次
+  // setBubblePos 都会换对象,否则用户 Tab 到「跳过」后会被反复拉回「下一步」。
+  const bubblePositioned = bubblePos !== null
   useEffect(() => {
-    nextBtnRef.current?.focus()
-  }, [stepIndex])
+    if (bubblePositioned) nextBtnRef.current?.focus()
+  }, [stepIndex, bubblePositioned])
 
   if (!step) return null
   const isLast = stepIndex === steps.length - 1

@@ -14,14 +14,27 @@ import {
   DEFAULT_FAVORITE_CATEGORY_ID,
   createDefaultFavoriteCategory,
   normalizeFavoriteCategories,
+  MAX_FAVORITE_CATEGORIES,
 } from '../../lib/favoriteCategories'
 import {
   ARCHIVE_CONVERSATION_ID,
+  MAX_CONVERSATIONS,
+  findReusableEmptyConversation,
+  normalizeConversations,
   MAX_CONVERSATION_ID_LEN,
   genConversationId,
   isArchiveConversation,
+  isConversationLimitReached,
   normalizeConversationTitle,
 } from '../../lib/conversations'
+import {
+  clearPendingIndexedDbConversationDelete,
+  clearPendingIndexedDbConversationWrite,
+  clearPendingIndexedDbTaskDelete,
+  markPendingIndexedDbConversationDelete,
+  markPendingIndexedDbConversationWrite,
+  markPendingIndexedDbTaskDelete,
+} from '../idbSyncState'
 import {
   genSnippetId,
   MAX_SNIPPET_CONTENT_LEN,
@@ -164,6 +177,10 @@ export interface TasksSlice {
   removeInputImage: (idx: number) => void
   clearInputImages: () => void
   setInputImages: (imgs: InputImage[]) => void
+  /**
+   * toIdx 是「移除前数组」的插入缝隙下标(0..length,length 表示末尾),与 ImageGrid 的
+   * 指示线位置/noop 判定同一语义;不是移动后的最终下标。新调用方若按最终下标传参会偏一格。
+   */
   moveInputImage: (fromIdx: number, toIdx: number) => void
   maskDraft: MaskDraft | null
   setMaskDraft: (draft: MaskDraft | null) => void
@@ -188,8 +205,10 @@ export interface TasksSlice {
   favoriteCategories: FavoriteCategory[]
   favoriteCategoriesInitialized: boolean
   setFavoriteCategories: (categories: FavoriteCategory[]) => void
-  createFavoriteCategory: (input: { name: string; color?: string }) => string
-  ensureDefaultFavoriteCategory: () => string
+  /** 满 MAX_FAVORITE_CATEGORIES 时返回 null(带 toast) */
+  createFavoriteCategory: (input: { name: string; color?: string }) => string | null
+  /** 默认分类不存在且已满 MAX_FAVORITE_CATEGORIES 时返回 null(带 toast) */
+  ensureDefaultFavoriteCategory: () => string | null
   updateFavoriteCategory: (
     id: string,
     patch: Partial<Pick<FavoriteCategory, 'name' | 'color'>>,
@@ -216,6 +235,8 @@ export interface TasksSlice {
   activeConversationId: string | null
   setConversations: (conversations: Conversation[]) => void
   createConversation: (seedTitle?: string) => string
+  /** 侧栏 / 命令面板「新建对话」共用:已有可复用的空「新对话」就切过去,否则新建——避免连按堆积同名空对话并写库 */
+  createOrReuseEmptyConversation: () => string
   renameConversation: (id: string, title: string) => Promise<void>
   deleteConversationWithTasks: (id: string) => void
   setActiveConversation: (id: string | null) => void
@@ -258,11 +279,14 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
     }),
   moveInputImage: (fromIdx, toIdx) =>
     set((s) => {
-      if (fromIdx === toIdx) return s
+      // 自身左右两个缝隙都是原地不动(UI 已过滤,store 自己也防,免得空转一次 set)
+      if (toIdx === fromIdx || toIdx === fromIdx + 1) return s
       const next = [...s.inputImages]
       const [moved] = next.splice(fromIdx, 1)
       if (!moved) return s
-      next.splice(toIdx, 0, moved)
+      // 缝隙下标以移除前数组为准:移除 fromIdx 后其后的元素整体前移一位,
+      // 向前拖(toIdx > fromIdx)若不减 1 就会比指示线多后移一格
+      next.splice(toIdx > fromIdx ? toIdx - 1 : toIdx, 0, moved)
       const reordered = orderImagesWithMaskFirst(next, s.maskDraft?.targetImageId)
       return { inputImages: reordered }
     }),
@@ -307,6 +331,12 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
   setFavoriteCategories: (favoriteCategories) =>
     set((state) => createCategoryStatePatch(favoriteCategories, state.filterFavoriteCategoryId)),
   createFavoriteCategory: ({ name, color }) => {
+    // 写入侧拦上限:normalizeFavoriteCategories 在持久化恢复时会 slice(0, MAX),超出的分类会被静默切掉,
+    // 而这里若照样返回 id,任务就被收藏到一个重启后不存在的幽灵分类
+    if (get().favoriteCategories.length >= MAX_FAVORITE_CATEGORIES) {
+      get().showToast(`收藏分类已达上限（${MAX_FAVORITE_CATEGORIES} 个），请先清理`, 'error')
+      return null
+    }
     const id = genCategoryId()
     set((state) =>
       createCategoryStatePatch(
@@ -330,6 +360,10 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
       (category) => category.id === DEFAULT_FAVORITE_CATEGORY_ID,
     )
     if (existing) return existing.id
+    if (get().favoriteCategories.length >= MAX_FAVORITE_CATEGORIES) {
+      get().showToast(`收藏分类已达上限（${MAX_FAVORITE_CATEGORIES} 个），请先清理`, 'error')
+      return null
+    }
 
     set((state) =>
       createCategoryStatePatch(
@@ -508,6 +542,24 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
   activeConversationId: null,
   setConversations: (conversations) => set({ conversations }),
   createConversation: (seedTitle) => {
+    const current = get()
+    // 写入侧拦上限:超过后 normalizeConversations 会在下次读库时静默截掉 updatedAt 最旧的对话
+    //(记录仍在 IDB 里但侧栏看不到、其任务在任何对话视图都不可见)。达上限时不建新对话,
+    // 停留在当前对话(没有则回落到最新的普通对话 / archive),让调用方拿到的 id 始终有效。
+    if (isConversationLimitReached(current.conversations)) {
+      current.showToast(
+        `对话已达上限（${MAX_CONVERSATIONS - 1} 个），请先删除不需要的对话`,
+        'error',
+      )
+      const fallbackId =
+        current.activeConversationId ??
+        current.conversations.find((c) => c.id !== ARCHIVE_CONVERSATION_ID)?.id ??
+        ARCHIVE_CONVERSATION_ID
+      if (fallbackId !== current.activeConversationId) {
+        set({ activeConversationId: fallbackId, selectedTaskIds: [] })
+      }
+      return fallbackId
+    }
     const id = genConversationId()
     const now = Date.now()
     const next: Conversation = {
@@ -516,15 +568,44 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
       createdAt: now,
       updatedAt: now,
     }
+    // 登记在途写入(与 set 同一同步段):跨标签页刷新的快照里还没有这条新对话,不能把它连同 activeConversationId 一起抹掉
+    markPendingIndexedDbConversationWrite(id)
     set((state) => ({
       conversations: [next, ...state.conversations.filter((c) => c.id !== id)],
       activeConversationId: id,
       selectedTaskIds: [],
     }))
-    void putConversation(next).catch(() => {
-      /* 持久化失败不阻塞 UI；后续可通过其他动作再次写入 */
-    })
+    void putConversation(next)
+      .catch((err: unknown) => {
+        // 不回滚内存态(任务可能已挂在该对话上,回滚会造成更严重的内存/库不一致),但要让用户知道:
+        // 静默吞掉的话这条对话重启后从侧栏消失,其任务只剩图库可见
+        const message = err instanceof Error ? err.message : String(err)
+        get().showToast(`保存对话失败：${message}`, 'error')
+      })
+      .finally(() => clearPendingIndexedDbConversationWrite(id))
     return id
+  },
+  createOrReuseEmptyConversation: () => {
+    const state = get()
+    const taskCountByConversation = new Map<string, number>()
+    for (const task of state.tasks) {
+      if (!task.conversationId) continue
+      taskCountByConversation.set(
+        task.conversationId,
+        (taskCountByConversation.get(task.conversationId) ?? 0) + 1,
+      )
+    }
+    const reusable = findReusableEmptyConversation(
+      normalizeConversations(state.conversations),
+      taskCountByConversation,
+    )
+    if (reusable) {
+      if (state.activeConversationId !== reusable.id) {
+        set({ activeConversationId: reusable.id, selectedTaskIds: [] })
+      }
+      return reusable.id
+    }
+    return state.createConversation()
   },
   renameConversation: async (id, title) => {
     if (!title.trim()) return
@@ -537,6 +618,7 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
     const target = state.conversations.find((c) => c.id === id)
     if (!target) return
     const updated: Conversation = { ...target, title: normalizedTitle, updatedAt: Date.now() }
+    markPendingIndexedDbConversationWrite(id)
     set({
       conversations: state.conversations.map((c) => (c.id === id ? updated : c)),
     })
@@ -551,6 +633,8 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
       }))
       get().showToast(`重命名对话失败：${message}`, 'error')
       throw err
+    } finally {
+      clearPendingIndexedDbConversationWrite(id)
     }
   },
   deleteConversationWithTasks: (id) => {
@@ -611,10 +695,21 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
           terminateRunningTaskRuntimes(deletedTasks)
           const remainingConversations = latest.conversations.filter((c) => c.id !== id)
           const remainingTasks = latest.tasks.filter((task) => task.conversationId !== id)
+          // 下一个激活项按侧栏可见顺序(updatedAt 降序,archive 沉底)选,与 initStore / 跨标签页刷新同口径;
+          // remainingConversations[0] 是 store 插入序,用户看到的会是「跳到了一个不相邻的对话」
           const nextActive =
             latest.activeConversationId === id
-              ? (remainingConversations[0]?.id ?? ARCHIVE_CONVERSATION_ID)
+              ? (normalizeConversations(remainingConversations).find(
+                  (c) => c.id !== ARCHIVE_CONVERSATION_ID,
+                )?.id ?? ARCHIVE_CONVERSATION_ID)
               : latest.activeConversationId
+          // 删除登记与 set 同一同步段:级联删除落盘前的跨标签页刷新不得把对话与其任务借快照复活
+          markPendingIndexedDbConversationDelete(id)
+          for (const task of deletedTasks) markPendingIndexedDbTaskDelete(task.id)
+          const clearDeleteMarks = () => {
+            clearPendingIndexedDbConversationDelete(id)
+            for (const task of deletedTasks) clearPendingIndexedDbTaskDelete(task.id)
+          }
           set({
             conversations: remainingConversations,
             tasks: remainingTasks,
@@ -624,7 +719,9 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
           const optimisticUiAfterDelete = get()
           try {
             await dbDeleteConversation(id, true)
+            clearDeleteMarks()
           } catch (err) {
+            clearDeleteMarks()
             set((current) => ({
               conversations: restoreRemovedItemsByPreviousOrder(
                 current.conversations,

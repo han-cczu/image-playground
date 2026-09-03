@@ -4,7 +4,7 @@
 import type { TaskRecord } from '../../types'
 import { useStore } from '../../store'
 import { registerIndexedDbSyncRuntimeTerminator } from '../../store/idbRuntimeBridge'
-import { taskAbortControllers, terminateTaskRuntime } from './shared'
+import { isTaskInRetryBackoff, taskAbortControllers, terminateTaskRuntime } from './shared'
 import { updateTaskInStoreSilently } from './persistence'
 
 const TASK_CANCELLED_ERROR = '已取消生成'
@@ -68,9 +68,9 @@ function cancelRunningTasks(predicate: (task: TaskRecord) => boolean): CancelBat
   const members = useStore.getState().tasks.filter((t) => t.status === 'running' && predicate(t))
   const result: CancelBatchResult = { aborted: 0, skipped: 0 }
   for (const member of members) {
-    // 在途/排队的区分仅用于反馈文案:controller 只在 executeTask 进入时注册,
-    // 依赖「所有在途任务必有条目」——ApiProvider 全集 openai|gemini 均走注册分支(executeTask 入口)
-    const inFlight = taskAbortControllers.has(member.id)
+    // 在途/排队的区分仅用于反馈文案:controller 在 attempt 进入时注册,而自动重试的退避睡眠期间
+    // controller 已清、任务却仍是在途(不是排队成员),要一并计入,否则 toast 数字把它们报成「跳过排队」
+    const inFlight = taskAbortControllers.has(member.id) || isTaskInRetryBackoff(member.id)
     if (cancelTask(member.id)) {
       if (inFlight) result.aborted += 1
       else result.skipped += 1

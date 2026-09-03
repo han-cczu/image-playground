@@ -17,17 +17,23 @@ export async function copyTextToClipboard(text: string) {
   throw asyncClipboardError ?? new Error('Clipboard API is not available')
 }
 
-export async function copyBlobToClipboard(blob: Blob) {
+/**
+ * 把图片写入剪贴板。接受 Blob 或「将来才拿到的 Blob」:Safari(WebKit)要求 clipboard.write 必须在
+ * 用户手势的同步段内调用,await 取图/转码之后再 write 会因用户激活失效而固定报 NotAllowedError——
+ * 所以这里绝不在 write 之前 await,取图与 PNG 转码都塞进 ClipboardItem 的 Promise 值里由浏览器等待。
+ * 浏览器异步剪贴板对图片只可靠支持 image/png(写 jpeg/webp 会抛错),toPngBlob 保证输出 png,键固定写死。
+ */
+export async function copyBlobToClipboard(source: Blob | Promise<Blob>) {
   if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
     throw new Error('Clipboard image API is not available')
   }
 
-  // 浏览器异步剪贴板对图片只可靠支持 image/png(写 jpeg/webp 会抛错);空 type 还会得到坏键 { '': blob }。
-  // 统一先转成 image/png 再写入。
-  const png = await toPngBlob(blob)
-  await navigator.clipboard.write([
-    new ClipboardItem({ [png.type]: png }),
-  ])
+  const png = Promise.resolve(source).then(toPngBlob)
+  // 取图/转码失败时 write 会拒绝,但拒绝原因是浏览器包装过的;这里再 await 一次原始 promise,
+  // 把「获取图片失败 / 非图片 / 超限」等真实原因抛给调用方(先挂空 catch 避免 write 先拒绝时留下未处理 rejection)
+  png.catch(() => {})
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+  await png
 }
 
 export function getClipboardFailureMessage(fallback: string, err: unknown) {

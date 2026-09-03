@@ -19,10 +19,29 @@ export async function getImageDimensions(dataUrl: string): Promise<ImageDimensio
   return { width: image.naturalWidth, height: image.naturalHeight }
 }
 
+/**
+ * data URL → Blob。不用 fetch(data:) 解码:四套部署配置的 CSP connect-src 都没放行 data:,
+ * 一旦从 Report-Only 转为强制,所有编辑/遮罩请求会在这里整体失败;本地 atob 解码不受 CSP 约束。
+ */
 export async function dataUrlToBlob(dataUrl: string, fallbackType = 'image/png'): Promise<Blob> {
-  const response = await fetch(dataUrl)
-  const blob = await response.blob()
-  return blob.type ? blob : new Blob([await blob.arrayBuffer()], { type: fallbackType })
+  const match = /^data:([^;,]*)((?:;[^;,]*)*),(.*)$/s.exec(dataUrl)
+  if (!match) throw new Error('无效的 data URL')
+  const [, mime, params, payload] = match
+  const isBase64 = params.split(';').some((param) => param.toLowerCase() === 'base64')
+  let buffer: ArrayBuffer
+  if (isBase64) {
+    const binary = atob(payload.replace(/\s/g, ''))
+    buffer = new ArrayBuffer(binary.length)
+    const bytes = new Uint8Array(buffer)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  } else {
+    const encoded = new TextEncoder().encode(decodeURIComponent(payload))
+    buffer = encoded.buffer.slice(
+      encoded.byteOffset,
+      encoded.byteOffset + encoded.byteLength,
+    ) as ArrayBuffer
+  }
+  return new Blob([buffer], { type: mime || fallbackType })
 }
 
 export async function imageDataUrlToPngBlob(dataUrl: string): Promise<Blob> {
@@ -73,38 +92,64 @@ export async function maskDataUrlToPngBlob(maskDataUrl: string): Promise<Blob> {
   return blob
 }
 
-export async function canvasToBlob(canvas: HTMLCanvasElement, type = 'image/png', quality?: number): Promise<Blob> {
+export async function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  type = 'image/png',
+  quality?: number,
+): Promise<Blob> {
   return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (!blob) reject(new Error('图片导出失败'))
-      else resolve(blob)
-    }, type, quality)
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) reject(new Error('图片导出失败'))
+        else resolve(blob)
+      },
+      type,
+      quality,
+    )
   })
 }
 
-function releaseCanvasBitmap(canvas: HTMLCanvasElement): void {
+/** 把离屏 canvas 尺寸归零立即释放位图内存(等 GC 回收前,几张 4K 画布就能占掉数百 MB) */
+export function releaseCanvasBitmap(canvas: HTMLCanvasElement): void {
   canvas.width = 0
   canvas.height = 0
 }
 
-export async function validateMaskMatchesImage(maskDataUrl: string, imageDataUrl: string): Promise<MaskCoverage> {
-  const [maskImage, sourceImage] = await Promise.all([loadImage(maskDataUrl), loadImage(imageDataUrl)])
-  if (maskImage.naturalWidth !== sourceImage.naturalWidth || maskImage.naturalHeight !== sourceImage.naturalHeight) {
+export async function validateMaskMatchesImage(
+  maskDataUrl: string,
+  imageDataUrl: string,
+): Promise<MaskCoverage> {
+  const [maskImage, sourceImage] = await Promise.all([
+    loadImage(maskDataUrl),
+    loadImage(imageDataUrl),
+  ])
+  if (
+    maskImage.naturalWidth !== sourceImage.naturalWidth ||
+    maskImage.naturalHeight !== sourceImage.naturalHeight
+  ) {
     throw new Error('遮罩尺寸与遮罩主图不一致，请重新绘制遮罩')
   }
 
   const canvas = document.createElement('canvas')
   canvas.width = maskImage.naturalWidth
   canvas.height = maskImage.naturalHeight
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) throw new Error('当前浏览器不支持 Canvas')
-  ctx.drawImage(maskImage, 0, 0)
-  const coverage = classifyMaskAlpha(ctx.getImageData(0, 0, canvas.width, canvas.height))
-  assertUsableMaskCoverage(coverage)
-  return coverage
+  try {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!ctx) throw new Error('当前浏览器不支持 Canvas')
+    ctx.drawImage(maskImage, 0, 0)
+    // getImageData 返回独立副本,释放 canvas 不影响 coverage
+    const coverage = classifyMaskAlpha(ctx.getImageData(0, 0, canvas.width, canvas.height))
+    assertUsableMaskCoverage(coverage)
+    return coverage
+  } finally {
+    releaseCanvasBitmap(canvas)
+  }
 }
 
-export async function createMaskPreviewDataUrl(imageDataUrl: string, maskDataUrl: string): Promise<string> {
+export async function createMaskPreviewDataUrl(
+  imageDataUrl: string,
+  maskDataUrl: string,
+): Promise<string> {
   const [image, mask] = await Promise.all([loadImage(imageDataUrl), loadImage(maskDataUrl)])
   if (image.naturalWidth !== mask.naturalWidth || image.naturalHeight !== mask.naturalHeight) {
     throw new Error('遮罩尺寸与遮罩主图不一致，请重新绘制遮罩')

@@ -28,7 +28,7 @@ body {
 input,
 textarea,
 select,
-[contenteditable="true"],
+[contenteditable='true'],
 [data-selectable-text],
 [data-selectable-text] * {
   -webkit-user-select: text;
@@ -63,27 +63,46 @@ body.drag-selecting * {
   scrollbar-color: #3f3f46 transparent;
 }
 
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
 
 /* 隐藏 number input 的增减按钮 */
-input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button {
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
-input[type="number"] {
+input[type='number'] {
   -moz-appearance: textfield;
 }
 
-.dark ::-webkit-scrollbar-thumb { background: #3f3f46; }
-.dark ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+.dark ::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
 
 @keyframes pulse-border {
-  0%, 100% { border-color: #3b82f6; }
-  50% { border-color: #93c5fd; }
+  0%,
+  100% {
+    border-color: #3b82f6;
+  }
+  50% {
+    border-color: #93c5fd;
+  }
 }
 .generating {
   animation: pulse-border 1.5s ease-in-out infinite;
@@ -101,11 +120,23 @@ input[type="number"] {
   mask-image: linear-gradient(to right, black 85%, transparent 100%);
 }
 
+/* Toast 水平居中:外层是 fixed left-1/2 且没有 -translate-x-1/2 兜底,-50% 必须写在基础规则上,关键帧
+   只负责纵向过渡(两帧都保留 -50%,否则关键帧整体覆盖基础值时会水平跳变)。此前 -50% 只存在于关键帧
+   结束帧、靠 forwards 填充留住,下方 prefers-reduced-motion 块一句 animation:none 就把它抹掉——气泡整体
+   右偏半个宽度,390px 手机上错误文案右半截出屏、最右侧的关闭按钮够不到
+   (scripts/reduced-motion-animation.test.mjs 守卫)。 */
 @keyframes toast-enter {
-  0% { transform: translate(-50%, 16px); opacity: 0; }
-  100% { transform: translate(-50%, 0); opacity: 1; }
+  0% {
+    transform: translate(-50%, 16px);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
 }
 .toast-enter {
+  transform: translate(-50%, 0);
   animation: toast-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
@@ -113,8 +144,12 @@ input[type="number"] {
 
 /* 背景遮罩淡入 */
 @keyframes overlay-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .animate-overlay-in {
   animation: overlay-in 0.2s ease-out both;
@@ -122,8 +157,14 @@ input[type="number"] {
 
 /* 弹窗面板：从中心弹出 */
 @keyframes modal-in {
-  from { opacity: 0; transform: scale(0.95) translateY(10px); }
-  to   { opacity: 1; transform: scale(1) translateY(0); }
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 .animate-modal-in {
   animation: modal-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -131,8 +172,14 @@ input[type="number"] {
 
 /* 设置面板：从上方滑入 */
 @keyframes slide-down-in {
-  from { opacity: 0; transform: translateY(-20px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .animate-slide-down-in {
   animation: slide-down-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -140,8 +187,12 @@ input[type="number"] {
 
 /* Lightbox：淡入 */
 @keyframes fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .animate-fade-in {
   animation: fade-in 0.2s ease-out both;
@@ -149,8 +200,14 @@ input[type="number"] {
 
 /* Lightbox 图片：缩放弹入 */
 @keyframes zoom-in {
-  from { opacity: 0; transform: scale(0.9); }
-  to   { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 .animate-zoom-in {
   animation: zoom-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -158,8 +215,14 @@ input[type="number"] {
 
 /* 确认对话框：从下方弹入 */
 @keyframes confirm-in {
-  from { opacity: 0; transform: scale(0.92) translateY(16px); }
-  to   { opacity: 1; transform: scale(1) translateY(0); }
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 .animate-confirm-in {
   animation: confirm-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -169,7 +232,9 @@ input[type="number"] {
 .collapse-section {
   display: grid;
   grid-template-rows: 1fr;
-  transition: grid-template-rows 0.25s ease-out, opacity 0.2s ease-out;
+  transition:
+    grid-template-rows 0.25s ease-out,
+    opacity 0.2s ease-out;
   opacity: 1;
 }
 .collapse-section.collapsed {
@@ -185,13 +250,25 @@ input[type="number"] {
 
 /* 下拉菜单：向下展开 */
 @keyframes dropdown-down {
-  from { opacity: 0; transform: scaleY(0.9) translateY(-4px); }
-  to   { opacity: 1; transform: scaleY(1) translateY(0); }
+  from {
+    opacity: 0;
+    transform: scaleY(0.9) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1) translateY(0);
+  }
 }
 /* 下拉菜单：向上展开 */
 @keyframes dropdown-up {
-  from { opacity: 0; transform: scaleY(0.9) translateY(4px); }
-  to   { opacity: 1; transform: scaleY(1) translateY(0); }
+  from {
+    opacity: 0;
+    transform: scaleY(0.9) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1) translateY(0);
+  }
 }
 .animate-dropdown-down {
   transform-origin: top center;
@@ -204,29 +281,67 @@ input[type="number"] {
 
 /* ===== 首屏入场动画（分层错落，统一用 0.16,1,0.3,1 缓动；尊重 prefers-reduced-motion） ===== */
 @keyframes app-fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 /* 顶栏：从上方轻落 */
 @keyframes app-drop-in {
-  from { opacity: 0; transform: translateY(-10px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 /* 主内容：从下方上浮 */
 @keyframes app-rise-in {
-  from { opacity: 0; transform: translateY(16px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 /* InputBar 固定居中：入场保留 -50% 水平位移，仅做纵向上浮，避免与 -translate-x-1/2 冲突 */
 @keyframes app-rise-in-centered {
-  from { opacity: 0; transform: translate(-50%, 28px); }
-  to   { opacity: 1; transform: translate(-50%, 0); }
+  from {
+    opacity: 0;
+    transform: translate(-50%, 28px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
-.app-enter-sidebar  { animation: app-fade-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.05s both; }
-.app-enter-header   { animation: app-drop-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both; }
-.app-enter-main     { animation: app-rise-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.18s both; }
-.app-enter-inputbar { animation: app-rise-in-centered 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.26s both; }
+/* fill-mode 必须是 backwards 而非 both/forwards(scripts/app-enter-animation.test.mjs 守卫):
+   both 会让动画结束后 transform 计算值永久停在 translateY(0)(非 none),按 CSS Transforms 规范
+   该元素就成了所有 fixed 后代的包含块并新建层叠上下文——.app-enter-main 包住 TaskGrid,其框选矩形
+   (position:fixed,left/top 直接写 clientX/clientY)会被整体平移侧栏宽 + 顶栏高并随内容滚动,
+   「看到的框」与「实际选中」不一致。backwards 同样在延迟期停在 from 帧(opacity 0,不闪现),
+   结束后计算值回到自然值:main/header 的 transform 回到 none,inputbar 由 Tailwind 的
+   -translate-x-1/2 接管(与 to 帧 translate(-50%, 0) 相同,无跳变)。sidebar 只动 opacity,
+   一并改 backwards 是为了四条规则形态一致,免得日后被「统一成 both」顺手回退。 */
+.app-enter-sidebar {
+  animation: app-fade-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.05s backwards;
+}
+.app-enter-header {
+  animation: app-drop-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.12s backwards;
+}
+.app-enter-main {
+  animation: app-rise-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.18s backwards;
+}
+.app-enter-inputbar {
+  animation: app-rise-in-centered 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.26s backwards;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .app-enter-sidebar,
@@ -241,26 +356,50 @@ input[type="number"] {
 
 /* 环境光晕：三块光斑错峰缓慢漂移（仅 transform，走合成层） */
 @keyframes glow-drift-a {
-  0%   { transform: translate3d(0, 0, 0) scale(1); }
-  100% { transform: translate3d(6%, 8%, 0) scale(1.12); }
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(6%, 8%, 0) scale(1.12);
+  }
 }
 @keyframes glow-drift-b {
-  0%   { transform: translate3d(0, 0, 0) scale(1.05); }
-  100% { transform: translate3d(-7%, -5%, 0) scale(0.95); }
+  0% {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+  100% {
+    transform: translate3d(-7%, -5%, 0) scale(0.95);
+  }
 }
 @keyframes glow-drift-c {
-  0%   { transform: translate3d(0, 0, 0) scale(1); }
-  100% { transform: translate3d(4%, -6%, 0) scale(1.1); }
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(4%, -6%, 0) scale(1.1);
+  }
 }
-.glow-blob-a { animation: glow-drift-a 26s ease-in-out 0s infinite alternate; }
-.glow-blob-b { animation: glow-drift-b 32s ease-in-out 1.5s infinite alternate; }
-.glow-blob-c { animation: glow-drift-c 22s ease-in-out 0.8s infinite alternate; }
+.glow-blob-a {
+  animation: glow-drift-a 26s ease-in-out 0s infinite alternate;
+}
+.glow-blob-b {
+  animation: glow-drift-b 32s ease-in-out 1.5s infinite alternate;
+}
+.glow-blob-c {
+  animation: glow-drift-c 22s ease-in-out 0.8s infinite alternate;
+}
 
 /* 卡片错落入场：放在 dnd 外层包裹的内层元素上，不与拖拽 transform 冲突。
    backwards 让 stagger 延迟期间保持隐藏（opacity 0），避免先闪现。 */
 @keyframes card-rise-in {
-  from { opacity: 0; transform: translateY(16px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .card-enter {
   animation: card-rise-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;

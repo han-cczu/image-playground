@@ -70,6 +70,7 @@ export default function InputBar() {
   const searchQuery = useStore((s) => s.searchQuery)
   const galleryView = useStore((s) => s.galleryView)
   const activeConversationId = useStore((s) => s.activeConversationId)
+  const submitting = useStore((s) => s.submitting)
   const maskDraft = useStore((s) => s.maskDraft)
   const setMaskEditorImageId = useStore((s) => s.setMaskEditorImageId)
   const moveInputImage = useStore((s) => s.moveInputImage)
@@ -131,7 +132,8 @@ export default function InputBar() {
     deps: { prompt, imageCount: inputImages.length, hasMask: Boolean(maskDraft), maskPreviewUrl },
   })
 
-  const canSubmit = prompt.trim() && settings.apiKey
+  // 在途期间禁用:submitTask 内部也有互斥,这里只是让按钮态与快捷键跟着变灰,不让用户以为没点上
+  const canSubmit = prompt.trim() && settings.apiKey && !submitting
   const optimizerKeyConfigured = Boolean(settings.promptOptimizer.apiKey.trim())
   const optimizerPromptReady = Boolean(prompt.trim())
   const canOptimize = optimizerKeyConfigured && optimizerPromptReady
@@ -188,8 +190,13 @@ export default function InputBar() {
         return
       }
 
-      const accepted = Array.from(files).filter(isImageFile)
+      const all = Array.from(files)
+      const accepted = all.filter(isImageFile)
+      const skippedNonImage = all.length - accepted.length
       let discarded = 0
+      // 单个文件失败(解码失败 / 过大 / 尺寸非法)不中止其余文件:串行继续,最后汇总一条提示;
+      // 保持串行——addImageFromFile 内部按 inputImages.length 判上限与去重,并发会破坏该判定
+      const failures: string[] = []
 
       for (const file of accepted) {
         if (useStore.getState().inputImages.length >= API_MAX_IMAGES) {
@@ -207,15 +214,20 @@ export default function InputBar() {
             discarded++
             continue
           }
-          throw err
+          failures.push(`${file.name || '未命名'}：${message}`)
         }
       }
 
-      if (discarded > 0) {
-        useStore
-          .getState()
-          .showToast(`已达上限 ${API_MAX_IMAGES} 张，${discarded} 张图片被丢弃`, 'error')
+      const notices: string[] = []
+      if (discarded > 0) notices.push(`已达上限 ${API_MAX_IMAGES} 张，${discarded} 张图片被丢弃`)
+      if (skippedNonImage > 0) notices.push(`${skippedNonImage} 个非图片文件已跳过`)
+      if (failures.length > 0) {
+        const shown = failures.slice(0, 3).join('；')
+        notices.push(
+          `${failures.length} 张图片添加失败：${shown}${failures.length > 3 ? ' 等' : ''}`,
+        )
       }
+      if (notices.length) useStore.getState().showToast(notices.join('。'), 'error')
     } catch (err) {
       useStore
         .getState()
@@ -244,7 +256,12 @@ export default function InputBar() {
       return
     }
     if (file.size > MAX_INPUT_IMAGE_BYTES) {
-      useStore.getState().showToast(`图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`, 'error')
+      useStore
+        .getState()
+        .showToast(
+          `图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`,
+          'error',
+        )
       return
     }
     try {
@@ -255,13 +272,20 @@ export default function InputBar() {
       useStore.getState().setCaptionSource(dataUrl)
     } catch (err) {
       if (pickSeq !== captionPickSeqRef.current) return
-      useStore.getState().showToast(`读取图片失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+      useStore
+        .getState()
+        .showToast(`读取图片失败：${err instanceof Error ? err.message : String(err)}`, 'error')
     }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      // 组字中按 Enter 是上屏/取消候选,不能当提交(React 合成事件无 isComposing,须走 nativeEvent;
+      // keyCode 229 兜底旧版 Safari/Android 不给 isComposing 的情况,写法对齐 FavoriteCategoryMenu)
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return
       e.preventDefault()
+      // 长按 Enter 的自动重复(e.repeat)与在途期间的重复触发都忽略,避免同一提示词入队多次
+      if (e.repeat || useStore.getState().submitting) return
       void submitTask().catch(() => {
         /* submitTask surfaces recoverable errors via toast */
       })

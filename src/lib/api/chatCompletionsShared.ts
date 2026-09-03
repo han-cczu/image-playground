@@ -1,5 +1,5 @@
 import { MAX_TASK_TEXT_LEN } from '../tasks'
-import { normalizeBaseUrl } from './devProxy'
+import { hasApiVersionSegment, normalizeBaseUrl } from './devProxy'
 import { isHttpUrl } from './imageApiShared'
 
 const MAX_CHAT_ERROR_BODY_BYTES = 64 * 1024
@@ -17,7 +17,8 @@ export function buildChatCompletionsUrl(baseUrl: string): string {
   if (!normalized || !isHttpUrl(normalized)) {
     throw new Error('未配置 API URL')
   }
-  return normalized.endsWith('/v1')
+  // 与 buildApiUrl 同口径:路径里已有版本段就不再插 v1(网关前缀路径 / v1beta 兼容端点)
+  return hasApiVersionSegment(normalized)
     ? `${normalized}/chat/completions`
     : `${normalized}/v1/chat/completions`
 }

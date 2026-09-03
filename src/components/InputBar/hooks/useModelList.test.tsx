@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useStore } from '../../../store'
 import { listModels } from '../../../lib/api/listModels'
 import type { OpenAIProfile } from '../../../types'
-import { useModelList } from './useModelList'
+import { __resetModelListCacheForTests, useModelList } from './useModelList'
 
 vi.mock('../../../lib/api/listModels', () => ({
   listModels: vi.fn(),
@@ -35,10 +35,48 @@ function makeProfile(apiKey: string): OpenAIProfile {
   }
 }
 
+/** effect 里的请求经微任务发起(见 useModelList 注释),断言 loading 前先让它跑一拍 */
+const flushEffects = () =>
+  act(async () => {
+    await Promise.resolve()
+  })
+
 describe('useModelList', () => {
   afterEach(() => {
     vi.clearAllMocks()
+    __resetModelListCacheForTests()
     useStore.setState(useStore.getInitialState(), true)
+  })
+
+  it('模块级缓存:菜单卸载再挂载不重新请求 /models;同 key 在途请求被复用', async () => {
+    const deferred = createDeferred<string[]>()
+    vi.mocked(listModels).mockReturnValueOnce(deferred.promise)
+    const profile = makeProfile('sk-cache')
+    useStore.setState({
+      settings: { ...useStore.getState().settings, activeProfileId: profile.id },
+    })
+
+    const first = renderHook(() => useModelList(profile))
+    await flushEffects()
+    // 请求未返回时卸载再挂载:复用在途请求,不发第二次
+    first.unmount()
+    const second = renderHook(() => useModelList(profile))
+    await flushEffects()
+    expect(listModels).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      deferred.resolve(['gpt-image-2'])
+      await deferred.promise
+    })
+    await waitFor(() =>
+      expect(second.result.current.state).toEqual({ kind: 'success', models: ['gpt-image-2'] }),
+    )
+
+    // 返回后再挂载:直接命中模块级缓存
+    second.unmount()
+    const third = renderHook(() => useModelList(profile))
+    expect(third.result.current.state).toEqual({ kind: 'success', models: ['gpt-image-2'] })
+    expect(listModels).toHaveBeenCalledTimes(1)
   })
 
   it('ignores model-list results for the same profile id after connection settings change', async () => {
@@ -60,15 +98,19 @@ describe('useModelList', () => {
       { initialProps: { profile: profileA } },
     )
 
+    await flushEffects()
+
     expect(result.current.state.kind).toBe('loading')
 
     rerender({ profile: profileB })
+    await flushEffects()
     expect(result.current.state.kind).toBe('loading')
 
     await act(async () => {
       first.resolve(['old-model'])
       await Promise.resolve()
     })
+    await flushEffects()
     expect(result.current.state.kind).toBe('loading')
 
     await act(async () => {
@@ -110,6 +152,8 @@ describe('useModelList', () => {
 
     rerender({ profile: proxyProfile })
 
+    await flushEffects()
+
     expect(result.current.state.kind).toBe('loading')
     expect(listModels).toHaveBeenCalledTimes(2)
 
@@ -136,6 +180,8 @@ describe('useModelList', () => {
     })
 
     const { result } = renderHook(() => useModelList(profile))
+
+    await flushEffects()
 
     expect(result.current.state.kind).toBe('loading')
 

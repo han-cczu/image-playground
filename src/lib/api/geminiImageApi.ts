@@ -16,6 +16,9 @@ import {
   summarizeConcurrentFailures,
 } from './imageApiShared'
 
+/** 无图响应里带出的模型文本上限:提示用途,不必完整 */
+const MAX_GEMINI_TEXT_DETAIL_LEN = 300
+
 const ASPECT_RATIO_PRESETS: Array<{ ratio: string; value: number }> = [
   { ratio: '1:1', value: 1 },
   { ratio: '4:5', value: 4 / 5 },
@@ -222,14 +225,16 @@ async function callGeminiSingleWithBody(
       const abnormalFinish = (payload.candidates ?? [])
         .map((candidate) => candidate.finishReason)
         .find((reason) => reason && reason !== 'STOP' && reason !== 'MAX_TOKENS')
+      // 模型用文字回答/婉拒(finishReason=STOP 但只有 text part)时,文本就是用户最需要的线索;截断防止超长
+      const detail = (payload.candidates ?? [])
+        .flatMap((candidate) => candidate.content?.parts ?? [])
+        .map((part) => part.text?.trim())
+        .find(Boolean)
+        ?.slice(0, MAX_GEMINI_TEXT_DETAIL_LEN)
       if (abnormalFinish) {
-        const detail = (payload.candidates ?? [])
-          .flatMap((candidate) => candidate.content?.parts ?? [])
-          .map((part) => part.text?.trim())
-          .find(Boolean)
         throw new Error(`生成中断：${abnormalFinish}${detail ? `（${detail}）` : ''}`)
       }
-      throw new Error('Gemini 未返回图片数据')
+      throw new Error(`Gemini 未返回图片数据${detail ? `（模型回复：${detail}）` : ''}`)
     }
 
     const actualParams = mergeActualParams({

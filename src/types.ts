@@ -243,8 +243,10 @@ export interface StoredImage {
   mime?: string
   /** 旧版图片主体字段：仅用于读取历史 IndexedDB 记录，新写入会转为 blob */
   dataUrl?: string
-  /** 图片首次存储时间（ms） */
+  /** 图片首次存储时间（ms）;备份往返会原样带回,因此不能拿它判断「是否本库新写入」 */
   createdAt?: number
+  /** 写入本库的时刻(ms),每次 putImage 重新盖章。孤儿 GC 的 cutoff 比较用它:导入的老图 createdAt 很旧但 storedAt 是现在 */
+  storedAt?: number
   /** 图片来源：用户上传 / API 生成 / 遮罩 */
   source?: 'upload' | 'generated' | 'mask'
 }
@@ -287,11 +289,13 @@ export interface ImageApiResponse {
 
 export interface ResponsesOutputItem {
   type?: string
-  result?: string | {
-    b64_json?: string
-    image?: string
-    data?: string
-  }
+  result?:
+    | string
+    | {
+        b64_json?: string
+        image?: string
+        data?: string
+      }
   size?: string
   quality?: string
   output_format?: string
@@ -334,10 +338,13 @@ export interface ExportData {
   batchNotes?: Record<string, { text: string; updatedAt: number }>
   tasks: TaskRecord[]
   /** imageId → 图片信息 */
-  imageFiles: Record<string, {
-    path: string
-    mime?: string
-    createdAt?: number
-    source?: 'upload' | 'generated' | 'mask'
-  }>
+  imageFiles: Record<
+    string,
+    {
+      path: string
+      mime?: string
+      createdAt?: number
+      source?: 'upload' | 'generated' | 'mask'
+    }
+  >
 }

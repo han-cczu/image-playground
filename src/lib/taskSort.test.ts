@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeReorderedSortOrders, SORT_STEP } from './taskSort'
+import { computeReorderedSortOrders, isSortGapExhausted, SORT_STEP } from './taskSort'
 
 describe('computeReorderedSortOrders', () => {
   it('移到 prev 之后 / next 之前:顺序与整数化降序正确', () => {
@@ -30,5 +30,18 @@ describe('computeReorderedSortOrders', () => {
     const vals = ['a', 'c', 'd', 'b'].map((id) => orders.get(id)!)
     for (let i = 1; i < vals.length; i++) expect(vals[i - 1]).toBeGreaterThan(vals[i])
     expect(new Set(vals).size).toBe(4)
+  })
+})
+
+describe('isSortGapExhausted', () => {
+  it('按「中点是否仍落在两端之间」判定,与 sortOrder 量级无关', () => {
+    expect(isSortGapExhausted(1, 2)).toBe(false)
+    // createdAt 量级(~1.7e12)下相邻 ulp:中点等于端点即耗尽
+    // 1.7e12 落在 [2^40, 2^41),ulp = 2^-12:相邻一个 ulp 的两个值之间没有中点
+    const big = 1.7e12
+    const next = big + 2 ** -12
+    expect(next).not.toBe(big)
+    expect(isSortGapExhausted(big, next)).toBe(true)
+    expect(isSortGapExhausted(big, big + 1)).toBe(false)
   })
 })

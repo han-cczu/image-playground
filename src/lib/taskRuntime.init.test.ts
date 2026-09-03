@@ -25,6 +25,9 @@ vi.mock('./storageStats', async (importOriginal) => {
 import { getAllConversations, getAllImages, getAllTasks, getImage, putConversation } from './db'
 import { ARCHIVE_CONVERSATION_ID, CONVERSATION_MIGRATION_VERSION } from './conversations'
 import { pruneOrphanImages } from './storageStats'
+import { MAX_TASKS } from './tasks'
+import { setDataJobInProgress } from './dataJobState'
+import { registerInFlightImages, releaseInFlightImages } from './inFlightImages'
 import { useStore } from '../store'
 import {
   __runPendingStartupOrphanGcForTests,
@@ -137,6 +140,45 @@ describe('initStore image cleanup', () => {
     expect(pruneOrphanImages).toHaveBeenCalledTimes(1)
   })
 
+  it('导入/清空进行中时启动期孤儿 GC 放弃本轮且不盖频控戳,下次启动补收;在途图并入引用集', async () => {
+    setDataJobInProgress('import')
+    await initStore()
+    await __runPendingStartupOrphanGcForTests()
+    expect(pruneOrphanImages).not.toHaveBeenCalled()
+
+    // 数据任务结束后再启动(仍在同一频控周期内):因为上一轮没盖戳,这次要真正执行
+    setDataJobInProgress(null)
+    registerInFlightImages('task-x', ['inflight-img'])
+    resetTaskRuntimeForTest()
+    registerInFlightImages('task-x', ['inflight-img'])
+    await initStore()
+    await __runPendingStartupOrphanGcForTests()
+    expect(pruneOrphanImages).toHaveBeenCalledTimes(1)
+    const refs = vi.mocked(pruneOrphanImages).mock.calls[0][0]
+    expect(refs.has('inflight-img')).toBe(true)
+    releaseInFlightImages('task-x')
+  })
+
+  it('init 窗口内新提交(仅在内存)的任务不被 IDB 快照整体覆盖抹掉', async () => {
+    vi.mocked(getAllTasks).mockResolvedValue([task({ id: 'stored' })])
+    // 模拟首屏读库期间用户已点发送:store 里有一条快照没有的 running 任务
+    vi.mocked(getAllConversations).mockImplementation(async () => {
+      useStore.setState({
+        tasks: [task({ id: 'fresh', status: 'running', finishedAt: null, elapsed: null })],
+      })
+      return [{ id: 'conv-a', title: 'A', createdAt: 1, updatedAt: 1, sortOrder: 0, color: null }]
+    })
+
+    await initStore()
+
+    expect(
+      useStore
+        .getState()
+        .tasks.map((item) => item.id)
+        .sort(),
+    ).toEqual(['fresh', 'stored'])
+  })
+
   it('throttles startup orphan GC to once per interval and re-runs after it elapses', async () => {
     await initStore()
     await __runPendingStartupOrphanGcForTests()
@@ -190,6 +232,30 @@ describe('initStore image cleanup', () => {
     ])
     await __runPendingStartupOrphanGcForTests()
     expect(pruneOrphanImages).toHaveBeenCalledWith(new Set(['kept-input']), 10_000)
+  })
+
+  it('库内任务超过 MAX_TASKS 条时全部进 store,启动孤儿 GC 的引用集仍包含最新任务的图片', async () => {
+    // 回归:读取侧若沿用导入用的 MAX_TASKS 截断,主键序(≈时间序)最靠后的最新任务会从 store
+    // 消失,其输出图不进引用集 → 被 pruneOrphanImages 当孤儿物理删除,不可恢复。
+    const base = 1_700_000_000_000
+    const total = MAX_TASKS + 1
+    vi.mocked(getAllTasks).mockResolvedValue(
+      Array.from({ length: total }, (_, index) =>
+        task({
+          id: (base + index).toString(36),
+          createdAt: base + index,
+          outputImages: index === total - 1 ? ['newest-output'] : [],
+        }),
+      ),
+    )
+
+    await initStore()
+
+    expect(useStore.getState().tasks).toHaveLength(total)
+    await __runPendingStartupOrphanGcForTests()
+    expect(pruneOrphanImages).toHaveBeenCalledTimes(1)
+    const referencedIds = vi.mocked(pruneOrphanImages).mock.calls[0]![0]
+    expect(referencedIds.has('newest-output')).toBe(true)
   })
 
   it('uses cursor-based orphan pruning and restores persisted input images without loading all images', async () => {
@@ -256,8 +322,7 @@ describe('initStore image cleanup', () => {
     vi.mocked(getImage).mockImplementation(
       async (id) =>
         new Promise((resolve) => {
-          releaseGetImage = () =>
-            resolve(id === storedInputImage.id ? persistedImage : undefined)
+          releaseGetImage = () => resolve(id === storedInputImage.id ? persistedImage : undefined)
         }),
     )
     useStore.setState({ inputImages: [storedInputImage] })
@@ -269,10 +334,7 @@ describe('initStore image cleanup', () => {
     releaseGetImage()
     await initPromise
 
-    expect(useStore.getState().inputImages.map((img) => img.id)).toEqual([
-      'input-a',
-      'fresh-input',
-    ])
+    expect(useStore.getState().inputImages.map((img) => img.id)).toEqual(['input-a', 'fresh-input'])
     expect(useStore.getState().inputImages.find((img) => img.id === 'input-a')?.dataUrl).toBe(
       'data:image/png;base64,aW1hZ2UtYnl0ZXM=',
     )

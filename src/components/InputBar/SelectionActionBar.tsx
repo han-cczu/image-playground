@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import type { TaskRecord } from '../../types'
+import { TASK_GRID_RENDER_CAP } from '../../lib/taskFilters'
 import {
   cancelTask,
   clearTaskFavorite,
@@ -22,19 +23,25 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
   const setCompareTaskIds = useStore((s) => s.setCompareTaskIds)
   const setCaptionBatchImageIds = useStore((s) => s.setCaptionBatchImageIds)
 
-  const visibleTaskIds = new Set(filteredTasks.map((task) => task.id))
+  // 「当前可见」以 TaskGrid 实际渲染的上限为准:超过 TASK_GRID_RENDER_CAP 时只渲染前 N 条,
+  // 全选若按 filteredTasks 全量选中,批量删除会命中用户从未看到的记录
+  const renderedTasks =
+    filteredTasks.length > TASK_GRID_RENDER_CAP
+      ? filteredTasks.slice(0, TASK_GRID_RENDER_CAP)
+      : filteredTasks
+  const visibleTaskIds = new Set(renderedTasks.map((task) => task.id))
   const actionableSelectedTaskIds = selectedTaskIds.filter((id) => visibleTaskIds.has(id))
 
   const allVisibleSelected =
-    actionableSelectedTaskIds.length === filteredTasks.length && filteredTasks.length > 0
+    actionableSelectedTaskIds.length === renderedTasks.length && renderedTasks.length > 0
 
   const handleSelectAllToggle = useCallback(() => {
     if (allVisibleSelected) {
       clearSelection()
     } else {
-      setSelectedTaskIds(filteredTasks.map((t) => t.id))
+      setSelectedTaskIds(renderedTasks.map((t) => t.id))
     }
-  }, [allVisibleSelected, filteredTasks, clearSelection, setSelectedTaskIds])
+  }, [allVisibleSelected, renderedTasks, clearSelection, setSelectedTaskIds])
 
   const handleSetFavoriteCategory = useCallback(
     (categoryId: string | null) => {

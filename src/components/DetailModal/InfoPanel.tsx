@@ -1,6 +1,10 @@
 import { useStore, updateTaskInStore, showCodexCliPrompt, getCodexCliPromptKey } from '../../store'
 import { ActualValueBadge, DetailParamValue } from '../../lib/paramDisplay'
-import { copyBlobToClipboard, copyTextToClipboard, getClipboardFailureMessage } from '../../lib/image/clipboard'
+import {
+  copyBlobToClipboard,
+  copyTextToClipboard,
+  getClipboardFailureMessage,
+} from '../../lib/image/clipboard'
 import type { LineageLink } from '../../lib/lineage'
 import FavoriteCategoryMenu from '../FavoriteCategoryMenu'
 import type { TaskRecord, TaskParams } from '../../types'
@@ -36,7 +40,12 @@ function ParamCard({
     <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
       <span className="text-gray-400 dark:text-gray-500">{label}</span>
       <br />
-      <DetailParamValue task={task} paramKey={paramKey} className="font-medium" actualParams={actualParams} />
+      <DetailParamValue
+        task={task}
+        paramKey={paramKey}
+        className="font-medium"
+        actualParams={actualParams}
+      />
     </div>
   )
 }
@@ -58,9 +67,12 @@ function readBlobWithAbort(response: Response, signal: AbortSignal): Promise<Blo
       const onAbort = () => reject(createAbortError())
       signal.addEventListener('abort', onAbort, { once: true })
       try {
-        response.blob().then(resolve, reject).finally(() => {
-          signal.removeEventListener('abort', onAbort)
-        })
+        response
+          .blob()
+          .then(resolve, reject)
+          .finally(() => {
+            signal.removeEventListener('abort', onAbort)
+          })
       } catch (err) {
         signal.removeEventListener('abort', onAbort)
         reject(err)
@@ -95,33 +107,38 @@ function readBlobWithAbort(response: Response, signal: AbortSignal): Promise<Blo
 
     const pump = (): void => {
       try {
-        reader.read().then(({ done, value }) => {
-          if (done) {
-            finish(() =>
-              resolve(
-                new Blob(
-                  chunks.map((chunk) => new Uint8Array(chunk)),
-                  { type: response.headers.get('Content-Type') || 'application/octet-stream' },
-                ),
-              ),
-            )
-            return
-          }
-          if (value) {
-            bytes += value.byteLength
-            if (bytes > MAX_INPUT_IMAGE_BYTES) {
-              void reader.cancel().catch(() => undefined)
+        reader.read().then(
+          ({ done, value }) => {
+            if (done) {
               finish(() =>
-                reject(
-                  new Error(`图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`),
+                resolve(
+                  new Blob(
+                    chunks.map((chunk) => new Uint8Array(chunk)),
+                    { type: response.headers.get('Content-Type') || 'application/octet-stream' },
+                  ),
                 ),
               )
               return
             }
-            chunks.push(value)
-          }
-          pump()
-        }, (err) => finish(() => reject(err)))
+            if (value) {
+              bytes += value.byteLength
+              if (bytes > MAX_INPUT_IMAGE_BYTES) {
+                void reader.cancel().catch(() => undefined)
+                finish(() =>
+                  reject(
+                    new Error(
+                      `图片过大:超过 ${Math.round(MAX_INPUT_IMAGE_BYTES / 1024 / 1024)}MB 上限`,
+                    ),
+                  ),
+                )
+                return
+              }
+              chunks.push(value)
+            }
+            pump()
+          },
+          (err) => finish(() => reject(err)),
+        )
       } catch (err) {
         finish(() => reject(err))
       }
@@ -206,13 +223,25 @@ export default function InfoPanel({
   const allInputImageIds = task.inputImageIds ?? []
 
   const outputLen = task.outputImages?.length || 0
-  const currentActualParams = currentOutputImageId ? task.actualParamsByImage?.[currentOutputImageId] : undefined
-  const currentRevisedPrompt = currentOutputImageId ? task.revisedPromptByImage?.[currentOutputImageId]?.trim() : ''
-  const showRevisedPrompt = Boolean(currentRevisedPrompt && currentRevisedPrompt !== task.prompt.trim())
+  const currentActualParams = currentOutputImageId
+    ? task.actualParamsByImage?.[currentOutputImageId]
+    : undefined
+  const currentRevisedPrompt = currentOutputImageId
+    ? task.revisedPromptByImage?.[currentOutputImageId]?.trim()
+    : ''
+  const showRevisedPrompt = Boolean(
+    currentRevisedPrompt && currentRevisedPrompt !== task.prompt.trim(),
+  )
   const codexCliPromptKey = getCodexCliPromptKey(settings)
-  const hasHandledPromptWarning = settings.codexCli || dismissedCodexCliPrompts.includes(codexCliPromptKey)
-  const showPromptWarning = Boolean(currentOutputImageId && (!currentRevisedPrompt || showRevisedPrompt) && !hasHandledPromptWarning)
-  const aggregateActualParams = outputLen > 0 ? { ...task.actualParams, n: outputLen } : task.actualParams
+  const hasHandledPromptWarning =
+    settings.codexCli || dismissedCodexCliPrompts.includes(codexCliPromptKey)
+  const showPromptWarning = Boolean(
+    currentOutputImageId &&
+    (!currentRevisedPrompt || showRevisedPrompt) &&
+    !hasHandledPromptWarning,
+  )
+  const aggregateActualParams =
+    outputLen > 0 ? { ...task.actualParams, n: outputLen } : task.actualParams
   const taskProvider = task.apiProvider
   const taskProviderName = taskProvider === 'gemini' ? 'Gemini' : taskProvider ? 'OpenAI' : '未知'
   const taskProfileName = task.apiProfileName || '未知'
@@ -249,8 +278,8 @@ export default function InfoPanel({
     const src = imgId ? imageSrcs[imgId] : ''
     if (!src) return
     try {
-      const blob = await fetchReferenceImageBlob(src)
-      await copyBlobToClipboard(blob)
+      // 取图链作为 Promise 传入,clipboard.write 留在点击手势的同步段内(Safari 用户激活要求)
+      await copyBlobToClipboard(fetchReferenceImageBlob(src))
       useStore.getState().showToast('参考图已复制', 'success')
     } catch (err) {
       console.error(err)
@@ -280,7 +309,12 @@ export default function InfoPanel({
             title="复制提示词"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+              />
             </svg>
           </button>
         )}
@@ -293,7 +327,12 @@ export default function InfoPanel({
               aria-label="提示词已被改写"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                />
               </svg>
             </button>
           </span>
@@ -324,31 +363,35 @@ export default function InfoPanel({
               title="复制参考图"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                />
               </svg>
             </button>
           </div>
           <div className="flex gap-2 flex-wrap">
             {allInputImageIds.map((imgId, index) => {
               const isMaskTarget = imgId === maskTargetId
-              const displaySrc = (isMaskTarget && maskPreviewSrc) ? maskPreviewSrc : (imageSrcs[imgId] || '')
+              const displaySrc =
+                isMaskTarget && maskPreviewSrc ? maskPreviewSrc : imageSrcs[imgId] || ''
               return (
                 <div key={`${imgId}-${index}`} className="relative group inline-block">
                   <button
                     type="button"
                     className={`relative block w-16 h-16 rounded-lg overflow-hidden border cursor-pointer hover:opacity-80 transition ${
-                      isMaskTarget ? 'border-blue-500 border-2 shadow-sm' : 'border-gray-200 dark:border-white/[0.08]'
+                      isMaskTarget
+                        ? 'border-blue-500 border-2 shadow-sm'
+                        : 'border-gray-200 dark:border-white/[0.08]'
                     }`}
                     onClick={() => setLightboxImageId(imgId, allInputImageIds)}
                     aria-label={isMaskTarget ? '放大查看参考图(遮罩目标)' : '放大查看参考图'}
                     title="点击放大"
                   >
                     {displaySrc && (
-                      <img
-                        src={displaySrc}
-                        className="w-full h-full object-cover"
-                        alt=""
-                      />
+                      <img src={displaySrc} className="w-full h-full object-cover" alt="" />
                     )}
                     {isMaskTarget && (
                       <span className="absolute left-1 top-1 rounded bg-blue-500/90 px-1.5 py-0.5 text-[8px] leading-none text-white font-bold tracking-wider backdrop-blur-sm z-10 pointer-events-none">
@@ -410,7 +453,16 @@ export default function InfoPanel({
             }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-600 transition hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
           >
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <svg
+              className="h-3.5 w-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
               <circle cx="12" cy="5" r="2.5" />
               <circle cx="6" cy="19" r="2.5" />
               <circle cx="18" cy="19" r="2.5" />
@@ -430,17 +482,35 @@ export default function InfoPanel({
           <span className="text-gray-400 dark:text-gray-500">来源</span>
           <br />
           <span className="font-medium text-gray-700 dark:text-gray-200">{taskProviderName}</span>
-          <span className="text-gray-400 dark:text-gray-500"> · {taskProfileName} · {taskModel}</span>
+          <span className="text-gray-400 dark:text-gray-500">
+            {' '}
+            · {taskProfileName} · {taskModel}
+          </span>
         </div>
       )}
       <div className="grid grid-cols-2 gap-2 text-xs mb-4">
         <ParamCard task={task} label="尺寸" paramKey="size" actualParams={currentActualParams} />
         <ParamCard task={task} label="质量" paramKey="quality" actualParams={currentActualParams} />
-        <ParamCard task={task} label="格式" paramKey="output_format" actualParams={currentActualParams} />
-        <ParamCard task={task} label="审核" paramKey="moderation" actualParams={currentActualParams} />
+        <ParamCard
+          task={task}
+          label="格式"
+          paramKey="output_format"
+          actualParams={currentActualParams}
+        />
+        <ParamCard
+          task={task}
+          label="审核"
+          paramKey="moderation"
+          actualParams={currentActualParams}
+        />
         <ParamCard task={task} label="数量" paramKey="n" actualParams={aggregateActualParams} />
         {task.params.output_compression != null && (
-          <ParamCard task={task} label="压缩率" paramKey="output_compression" actualParams={currentActualParams} />
+          <ParamCard
+            task={task}
+            label="压缩率"
+            paramKey="output_compression"
+            actualParams={currentActualParams}
+          />
         )}
       </div>
 
@@ -460,8 +530,13 @@ export default function InfoPanel({
               className="flex min-w-0 max-w-[55%] items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500"
               title={currentCategory.name}
             >
-              <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: currentCategory.color }} />
-              <span className="min-w-0 truncate">{currentCategory.name.trim() || '未命名分类'}</span>
+              <span
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ backgroundColor: currentCategory.color }}
+              />
+              <span className="min-w-0 truncate">
+                {currentCategory.name.trim() || '未命名分类'}
+              </span>
             </span>
           )}
         </div>
@@ -481,7 +556,10 @@ export default function InfoPanel({
             >
               <span className="flex min-w-0 items-center gap-2">
                 {selectedCategory ? (
-                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: selectedCategory.color }} />
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: selectedCategory.color }}
+                  />
                 ) : (
                   <span className="h-2 w-2 shrink-0 rounded-full border border-dashed border-gray-300 dark:border-gray-600" />
                 )}
@@ -493,7 +571,12 @@ export default function InfoPanel({
                 stroke="currentColor"
                 viewBox="0 0 24 24"
               >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
               </svg>
             </button>
           )}

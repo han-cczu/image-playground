@@ -4,7 +4,7 @@ import {
   createArchiveConversation,
   normalizeConversations,
 } from './conversations'
-import { normalizeTasks } from './tasks'
+import { normalizeStoredTasks } from './tasks'
 
 const DB_NAME = 'image-playground'
 const DB_VERSION = 2
@@ -124,8 +124,17 @@ function dbTransaction<T>(
 // ===== Tasks =====
 
 export function getAllTasks(): Promise<TaskRecord[]> {
+  // 只做字段级归一化(防旧数据/脏字段直入 store),绝不能套导入用的 MAX_TASKS 截断:
+  // getAll 按主键升序返回,截掉的是最新任务,启动期孤儿 GC 会随之删掉它们的图(见 normalizeTasks 注释)。
   return dbTransaction<unknown[]>(STORE_TASKS, 'readonly', (s) => s.getAll()).then((tasks) =>
-    normalizeTasks(tasks),
+    normalizeStoredTasks(tasks),
+  )
+}
+
+/** 单条读取(走同一套字段归一化):给「先读库再决定是否覆写」的路径用,避免拿内存里的陈旧副本当依据。 */
+export function getTask(id: string): Promise<TaskRecord | undefined> {
+  return dbTransaction<unknown>(STORE_TASKS, 'readonly', (s) => s.get(id)).then(
+    (task) => normalizeStoredTasks(task === undefined ? [] : [task])[0],
   )
 }
 
@@ -453,6 +462,8 @@ async function normalizeImageForStorage(image: StoredImage): Promise<StoredImage
     ...(source.blob ? { blob: source.blob } : {}),
     ...(source.mime ? { mime: source.mime } : {}),
     ...(createdAt !== undefined ? { createdAt } : {}),
+    // 写入时刻由本库盖章,不信任调用方/备份携带的值(见 StoredImage.storedAt)
+    storedAt: Date.now(),
     ...(imageSource !== undefined ? { source: imageSource } : {}),
   }
 }

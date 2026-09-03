@@ -19,7 +19,7 @@ function makeStore(overrides: Partial<CommandStore> = {}): CommandStore {
     toggleSidebar: vi.fn(),
     conversations: [],
     activeConversationId: null,
-    createConversation: vi.fn(() => 'conv-new'),
+    createOrReuseEmptyConversation: vi.fn(() => 'conv-new'),
     setActiveConversation: vi.fn(),
     settings: {
       theme: 'light',
@@ -77,7 +77,11 @@ describe('buildCommands', () => {
       activeConversationId: 'c2',
     })
     const switches = buildCommands(ctx).filter((c) => c.id.startsWith('conversation:switch:'))
-    expect(switches.map((c) => c.title)).toEqual(['切换到：猫猫实验', '切换到：风景', '切换到：历史记录'])
+    expect(switches.map((c) => c.title)).toEqual([
+      '切换到：猫猫实验',
+      '切换到：风景',
+      '切换到：历史记录',
+    ])
     expect(switches.map((c) => c.active)).toEqual([false, true, false])
   })
 
@@ -93,20 +97,31 @@ describe('buildCommands', () => {
       } as unknown as CommandStore['settings'],
     })
     const providers = buildCommands(ctx).filter((c) => c.group === 'provider')
-    expect(providers.map((c) => c.title)).toEqual(['Provider：Gemini 主力', 'Provider：OpenAI 备用'])
+    expect(providers.map((c) => c.title)).toEqual([
+      'Provider：Gemini 主力',
+      'Provider：OpenAI 备用',
+    ])
     expect(providers.map((c) => c.active)).toEqual([true, false])
   })
 
   it('marks the current theme as active, defaulting to light when unset', () => {
-    const dark = buildCommands(makeCtx({
-      settings: { theme: 'dark', profiles: [], activeProfileId: '' } as unknown as CommandStore['settings'],
-    }))
+    const dark = buildCommands(
+      makeCtx({
+        settings: {
+          theme: 'dark',
+          profiles: [],
+          activeProfileId: '',
+        } as unknown as CommandStore['settings'],
+      }),
+    )
     expect(dark.find((c) => c.id === 'theme:dark')!.active).toBe(true)
     expect(dark.find((c) => c.id === 'theme:light')!.active).toBe(false)
 
-    const unset = buildCommands(makeCtx({
-      settings: { profiles: [], activeProfileId: '' } as unknown as CommandStore['settings'],
-    }))
+    const unset = buildCommands(
+      makeCtx({
+        settings: { profiles: [], activeProfileId: '' } as unknown as CommandStore['settings'],
+      }),
+    )
     expect(unset.find((c) => c.id === 'theme:light')!.active).toBe(true)
   })
 
@@ -123,29 +138,37 @@ describe('buildCommands', () => {
   describe('run wiring（每条 run 触发对应 action 并 close）', () => {
     it('nav:gallery toggles galleryView', () => {
       const ctx = makeCtx({ galleryView: true })
-      buildCommands(ctx).find((c) => c.id === 'nav:gallery')!.run()
+      buildCommands(ctx)
+        .find((c) => c.id === 'nav:gallery')!
+        .run()
       expect(ctx.store.setGalleryView).toHaveBeenCalledWith(false)
       expect(ctx.close).toHaveBeenCalledTimes(1)
     })
 
     it('nav:settings opens settings', () => {
       const ctx = makeCtx()
-      buildCommands(ctx).find((c) => c.id === 'nav:settings')!.run()
+      buildCommands(ctx)
+        .find((c) => c.id === 'nav:settings')!
+        .run()
       expect(ctx.store.setShowSettings).toHaveBeenCalledWith(true)
       expect(ctx.close).toHaveBeenCalledTimes(1)
     })
 
     it('nav:sidebar toggles the sidebar', () => {
       const ctx = makeCtx()
-      buildCommands(ctx).find((c) => c.id === 'nav:sidebar')!.run()
+      buildCommands(ctx)
+        .find((c) => c.id === 'nav:sidebar')!
+        .run()
       expect(ctx.store.toggleSidebar).toHaveBeenCalledTimes(1)
       expect(ctx.close).toHaveBeenCalledTimes(1)
     })
 
     it('conversation:new creates a conversation and leaves gallery view', () => {
       const ctx = makeCtx({ galleryView: true })
-      buildCommands(ctx).find((c) => c.id === 'conversation:new')!.run()
-      expect(ctx.store.createConversation).toHaveBeenCalledTimes(1)
+      buildCommands(ctx)
+        .find((c) => c.id === 'conversation:new')!
+        .run()
+      expect(ctx.store.createOrReuseEmptyConversation).toHaveBeenCalledTimes(1)
       expect(ctx.store.setGalleryView).toHaveBeenCalledWith(false)
       expect(ctx.close).toHaveBeenCalledTimes(1)
     })
@@ -155,7 +178,9 @@ describe('buildCommands', () => {
         conversations: [{ id: 'c1', title: 'T', createdAt: 1, updatedAt: 1 }],
         galleryView: true,
       })
-      buildCommands(ctx).find((c) => c.id === 'conversation:switch:c1')!.run()
+      buildCommands(ctx)
+        .find((c) => c.id === 'conversation:switch:c1')!
+        .run()
       expect(ctx.store.setActiveConversation).toHaveBeenCalledWith('c1')
       expect(ctx.store.setGalleryView).toHaveBeenCalledWith(false)
       expect(ctx.close).toHaveBeenCalledTimes(1)
@@ -166,17 +191,24 @@ describe('buildCommands', () => {
         settings: {
           theme: 'light',
           activeProfileId: 'p1',
-          profiles: [{ id: 'p1', name: 'A' }, { id: 'p2', name: 'B' }],
+          profiles: [
+            { id: 'p1', name: 'A' },
+            { id: 'p2', name: 'B' },
+          ],
         } as unknown as CommandStore['settings'],
       })
-      buildCommands(ctx).find((c) => c.id === 'provider:p2')!.run()
+      buildCommands(ctx)
+        .find((c) => c.id === 'provider:p2')!
+        .run()
       expect(ctx.store.setSettings).toHaveBeenCalledWith({ activeProfileId: 'p2' })
       expect(ctx.close).toHaveBeenCalledTimes(1)
     })
 
     it('theme command sets the theme', () => {
       const ctx = makeCtx()
-      buildCommands(ctx).find((c) => c.id === 'theme:dark')!.run()
+      buildCommands(ctx)
+        .find((c) => c.id === 'theme:dark')!
+        .run()
       expect(ctx.store.setSettings).toHaveBeenCalledWith({ theme: 'dark' })
       expect(ctx.close).toHaveBeenCalledTimes(1)
     })
@@ -184,7 +216,16 @@ describe('buildCommands', () => {
     it('snippet command appends content to the prompt (palette has no caret context)', () => {
       const ctx = makeCtx({
         prompt: '一只猫,',
-        snippets: [{ id: 'snip-1', name: '光线', content: '{晨光|黄昏}', createdAt: 1, updatedAt: 1, sortOrder: 0 }],
+        snippets: [
+          {
+            id: 'snip-1',
+            name: '光线',
+            content: '{晨光|黄昏}',
+            createdAt: 1,
+            updatedAt: 1,
+            sortOrder: 0,
+          },
+        ],
       })
       const cmd = buildCommands(ctx).find((c) => c.id === 'snippet:insert:snip-1')!
       expect(cmd.title).toBe('插入片段：光线')
@@ -196,16 +237,16 @@ describe('buildCommands', () => {
 
     it('action:export fires exportData and closes immediately', () => {
       const ctx = makeCtx()
-      buildCommands(ctx).find((c) => c.id === 'action:export')!.run()
+      buildCommands(ctx)
+        .find((c) => c.id === 'action:export')!
+        .run()
       expect(exportData).toHaveBeenCalledTimes(1)
       expect(ctx.close).toHaveBeenCalledTimes(1)
     })
 
     it('action:cancel-running appears only with running tasks and reports counts', () => {
       // 无在途任务:命令不出现
-      expect(
-        buildCommands(makeCtx()).find((c) => c.id === 'action:cancel-running'),
-      ).toBeUndefined()
+      expect(buildCommands(makeCtx()).find((c) => c.id === 'action:cancel-running')).toBeUndefined()
 
       // 有在途任务:命令出现,run 调 cancelAllRunning 并 toast 细分计数
       const ctx = makeCtx({ hasRunningTasks: true })

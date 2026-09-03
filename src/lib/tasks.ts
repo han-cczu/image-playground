@@ -231,10 +231,10 @@ export function normalizeTask(input: unknown, now = Date.now()): TaskRecord | nu
   }
 }
 
-export function normalizeTasks(input: unknown, now = Date.now()): TaskRecord[] {
+function normalizeTaskList(input: unknown, now: number, limit: number): TaskRecord[] {
   if (!Array.isArray(input)) return []
   const normalized = input
-    .slice(0, MAX_TASKS)
+    .slice(0, limit)
     .map((task) => normalizeTask(task, now))
     .filter((task): task is TaskRecord => task !== null)
   const byId = new Map<string, TaskRecord>()
@@ -243,4 +243,25 @@ export function normalizeTasks(input: unknown, now = Date.now()): TaskRecord[] {
     byId.set(task.id, task)
   }
   return Array.from(byId.values())
+}
+
+/**
+ * 不可信来源(导入 ZIP 的 manifest)的任务列表归一化:逐条字段白名单 + 按 id 去重,
+ * 并按 MAX_TASKS 截断,防止超大/恶意 manifest 把无限量记录灌进 IndexedDB。
+ *
+ * 只用于导入路径。自家 IndexedDB 的全量读取必须走 normalizeStoredTasks:IDB getAll 按主键
+ * 升序返回,而任务 id 以 base36 时间戳开头,在这里截断丢掉的正是**最新**的任务——它们仍在库里
+ * 却不进 store / 导出 / 孤儿 GC 引用集,启动期 GC 会把它们的输出图当孤儿物理删除(2026-09-02 审计 #1)。
+ */
+export function normalizeTasks(input: unknown, now = Date.now()): TaskRecord[] {
+  return normalizeTaskList(input, now, MAX_TASKS)
+}
+
+/**
+ * 自家 IndexedDB 读取用的归一化:与 normalizeTasks 相同的字段白名单与去重,但**不截断条数**。
+ * 库里的记录全是本应用自己写入的,条数上限(若需要)只应在写入侧执行;读取侧静默丢记录
+ * 只会让 store、备份与孤儿 GC 的引用集变得不完整,而不完整的引用集会误删在用图。
+ */
+export function normalizeStoredTasks(input: unknown, now = Date.now()): TaskRecord[] {
+  return normalizeTaskList(input, now, Number.POSITIVE_INFINITY)
 }

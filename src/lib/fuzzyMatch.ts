@@ -31,9 +31,14 @@ const WORD_START_BONUS = 3
  * 导致 indices 与原文 Array.from(text) 的下标空间错位、高亮错字符。
  * 折叠后扩成多码点时取首码点近似（'İ' 仍可被 'i' 命中）。
  */
+/** 单码点大小写折叠:折叠后扩成多码点(如 'İ' → 'i' + U+0307)时取首码点近似,text 与 query 两侧同一口径 */
+function foldChar(char: string): string {
+  const lower = char.toLowerCase()
+  return lower.length > 1 ? Array.from(lower)[0] : lower
+}
+
 function charMatches(textChar: string, queryChar: string): boolean {
-  const lower = textChar.toLowerCase()
-  return lower === queryChar || (lower.length > 1 && Array.from(lower)[0] === queryChar)
+  return foldChar(textChar) === queryChar
 }
 
 /**
@@ -42,7 +47,11 @@ function charMatches(textChar: string, queryChar: string): boolean {
  */
 export function fuzzyMatch(query: string, text: string): FuzzyMatchResult | null {
   // query 中的空白视为分词符，不参与匹配（「new conv」可命中「New Conversation」）
-  const queryChars = Array.from(query.toLowerCase()).filter((ch) => !/\s/u.test(ch))
+  // 逐码点折叠而不是整串 toLowerCase:整串折叠会让 'İ' 变成两个码点,与 charMatches 的首码点近似口径对不上,
+  // query 里的 'İ' 永远命不中 text 里的 'İ' / 'i'
+  const queryChars = Array.from(query)
+    .filter((ch) => !/\s/u.test(ch))
+    .map(foldChar)
   if (queryChars.length === 0) return { score: 0, indices: [] }
 
   // 在原文码点上匹配（不整串小写），保证 indices 与渲染端 Array.from(text) 同一下标空间

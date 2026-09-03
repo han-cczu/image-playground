@@ -197,8 +197,12 @@ export default function MaskEditorModal() {
 
     const transform = viewTransformRef.current
     return {
-      x: ((frame.clientWidth / 2 - transform.x) / transform.scale / frame.clientWidth) * maskCanvas.width,
-      y: ((frame.clientHeight / 2 - transform.y) / transform.scale / frame.clientHeight) * maskCanvas.height,
+      x:
+        ((frame.clientWidth / 2 - transform.x) / transform.scale / frame.clientWidth) *
+        maskCanvas.width,
+      y:
+        ((frame.clientHeight / 2 - transform.y) / transform.scale / frame.clientHeight) *
+        maskCanvas.height,
     }
   }
 
@@ -274,13 +278,15 @@ export default function MaskEditorModal() {
         updatedAt: Date.now(),
       })
       setMaskEditorImageId(null)
-      useStore.getState().showToast('遮罩已保存', 'success')
+      // 遮罩草稿只在内存(不进 persist 白名单、不落 IDB),刷新页面即失:文案不能暗示已落盘
+      useStore.getState().showToast('遮罩已应用到当前参考图（刷新页面后需重新绘制）', 'success')
     } catch (err) {
       if (
         saveTokenRef.current !== token ||
         activeSessionIdRef.current !== savingSessionId ||
         useStore.getState().maskEditorImageId !== savingImageId
-      ) return
+      )
+        return
       useStore.getState().showToast(err instanceof Error ? err.message : String(err), 'error')
     } finally {
       if (saveTokenRef.current === token) setIsSaving(false)
@@ -309,62 +315,89 @@ export default function MaskEditorModal() {
 
   return (
     <>
-      <div ref={modalRootRef} role="dialog" aria-modal="true" aria-label="遮罩编辑器" tabIndex={-1} data-no-drag-select className="fixed inset-0 z-[80] flex flex-col bg-gray-50 dark:bg-gray-900 animate-modal-in">
-      {/* Header */}
-      <div className="flex-none flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950 z-20">
-        <div className="flex items-center gap-3">
-          <button onClick={close} disabled={isSaving} className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-lg dark:text-gray-400 dark:hover:bg-gray-800 transition" title="取消">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
-          </button>
-          <MaskInfoPopover open={showMaskInfo} onOpenChange={setShowMaskInfo} />
-        </div>
-        <div className="flex items-center gap-2">
-          {maskDraft?.targetImageId === imageId && (
-            <button onClick={handleRemoveMask} className="flex h-8 items-center gap-1.5 px-4 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-lg transition">
-              移除遮罩
-            </button>
-          )}
-          <button onClick={handleSave} disabled={!canEditMaskHistory} className="flex h-8 items-center gap-1.5 px-4 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg disabled:opacity-50 transition">
-            {isSaving ? '保存中...' : '保存'}
-          </button>
-        </div>
-      </div>
-
-      {/* Workspace */}
-      <CanvasViewport
-        size={size}
-        isLoading={isLoading}
-        viewTransform={viewTransform}
-        isPanning={isPanning}
-        isAltKeyPressed={isAltKeyPressed}
-        hoverPoint={hoverPoint}
-        imageCanvasRef={imageCanvasRef}
-        maskCanvasRef={maskCanvasRef}
-        previewCanvasRef={previewCanvasRef}
-        cursorCanvasRef={cursorCanvasRef}
-        baseFrameRef={baseFrameRef}
-        stageRef={stageRef}
-        handlers={pointer.handlers}
+      <div
+        ref={modalRootRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="遮罩编辑器"
+        tabIndex={-1}
+        data-no-drag-select
+        className="fixed inset-0 z-[80] flex flex-col bg-gray-50 dark:bg-gray-900 animate-modal-in"
       >
-        <BrushToolbar
-          tool={tool}
-          onToolChange={setTool}
-          brushSize={brushSize}
-          showBrushControls={showBrushControls}
-          onToggleBrushSize={toggleBrushControls}
-          brushSizeControlRef={brushSizeControlRef}
-          brushSizeButtonRef={brushSizeButtonRef}
-          canUndo={canUndo}
-          canRedo={canRedo}
-          onUndo={handleUndo}
-          onRedo={handleRedo}
-          isZoomed={isZoomed}
-          onResetView={resetViewTransform}
-          onClear={handleClear}
-          isReady={canEditMaskHistory}
-          isSaving={isSaving}
-        />
-      </CanvasViewport>
+        {/* Header */}
+        <div className="flex-none flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950 z-20">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={close}
+              disabled={isSaving}
+              className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-lg dark:text-gray-400 dark:hover:bg-gray-800 transition"
+              title="取消"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+            <MaskInfoPopover open={showMaskInfo} onOpenChange={setShowMaskInfo} />
+          </div>
+          <div className="flex items-center gap-2">
+            {maskDraft?.targetImageId === imageId && (
+              <button
+                onClick={handleRemoveMask}
+                className="flex h-8 items-center gap-1.5 px-4 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-lg transition"
+              >
+                移除遮罩
+              </button>
+            )}
+            <button
+              onClick={handleSave}
+              disabled={!canEditMaskHistory}
+              className="flex h-8 items-center gap-1.5 px-4 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg disabled:opacity-50 transition"
+            >
+              {isSaving ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </div>
+
+        {/* Workspace */}
+        <CanvasViewport
+          size={size}
+          isLoading={isLoading}
+          viewTransform={viewTransform}
+          isPanning={isPanning}
+          isAltKeyPressed={isAltKeyPressed}
+          hoverPoint={hoverPoint}
+          imageCanvasRef={imageCanvasRef}
+          maskCanvasRef={maskCanvasRef}
+          previewCanvasRef={previewCanvasRef}
+          cursorCanvasRef={cursorCanvasRef}
+          baseFrameRef={baseFrameRef}
+          stageRef={stageRef}
+          handlers={pointer.handlers}
+        >
+          <BrushToolbar
+            tool={tool}
+            onToolChange={setTool}
+            brushSize={brushSize}
+            showBrushControls={showBrushControls}
+            onToggleBrushSize={toggleBrushControls}
+            brushSizeControlRef={brushSizeControlRef}
+            brushSizeButtonRef={brushSizeButtonRef}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            isZoomed={isZoomed}
+            onResetView={resetViewTransform}
+            onClear={handleClear}
+            isReady={canEditMaskHistory}
+            isSaving={isSaving}
+          />
+        </CanvasViewport>
       </div>
       <BrushSizePanel
         open={showBrushControls}

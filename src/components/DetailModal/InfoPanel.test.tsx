@@ -16,7 +16,9 @@ const mocks = vi.hoisted(() => ({
   updateTaskInStore: vi.fn(async () => undefined),
   showCodexCliPrompt: vi.fn(),
   getCodexCliPromptKey: vi.fn(() => 'codex-cli-openai'),
-  copyBlobToClipboard: vi.fn(async () => undefined),
+  copyBlobToClipboard: vi.fn(async (source: Blob | Promise<Blob>) => {
+    await source
+  }),
   copyTextToClipboard: vi.fn(async () => undefined),
 }))
 
@@ -25,7 +27,13 @@ const state = vi.hoisted(() => ({
     codexCli: true,
   },
   dismissedCodexCliPrompts: [] as string[],
-  favoriteCategories: [] as Array<{ id: string; name: string; color: string; sortOrder: number; createdAt: number }>,
+  favoriteCategories: [] as Array<{
+    id: string
+    name: string
+    color: string
+    sortOrder: number
+    createdAt: number
+  }>,
   showToast: vi.fn(),
 }))
 
@@ -40,14 +48,16 @@ vi.mock('../../store', () => {
     ensureDefaultFavoriteCategory: mocks.ensureDefaultFavoriteCategory,
   })
   const useStore = (
-    selector: (s: typeof state & {
-      setDetailTaskId: typeof mocks.setDetailTaskId
-      setLineageTaskId: typeof mocks.setLineageTaskId
-      setLightboxImageId: typeof mocks.setLightboxImageId
-      showToast: typeof state.showToast
-      createFavoriteCategory: typeof mocks.createFavoriteCategory
-      ensureDefaultFavoriteCategory: typeof mocks.ensureDefaultFavoriteCategory
-    }) => unknown,
+    selector: (
+      s: typeof state & {
+        setDetailTaskId: typeof mocks.setDetailTaskId
+        setLineageTaskId: typeof mocks.setLineageTaskId
+        setLightboxImageId: typeof mocks.setLightboxImageId
+        showToast: typeof state.showToast
+        createFavoriteCategory: typeof mocks.createFavoriteCategory
+        ensureDefaultFavoriteCategory: typeof mocks.ensureDefaultFavoriteCategory
+      },
+    ) => unknown,
   ) => selector(getStoreState())
   useStore.getState = getStoreState
   return {
@@ -152,7 +162,8 @@ describe('InfoPanel', () => {
     await waitFor(() => {
       expect(state.showToast).toHaveBeenCalledWith('复制参考图失败', 'error')
     })
-    expect(mocks.copyBlobToClipboard).not.toHaveBeenCalled()
+    // 新契约:取图链作为 Promise 传入 copyBlobToClipboard,失败由它 await 后抛出
+    expect(mocks.copyBlobToClipboard).toHaveBeenCalledTimes(1)
   })
 
   it('does not copy an oversized reference image response', async () => {
@@ -185,24 +196,26 @@ describe('InfoPanel', () => {
       expect(state.showToast).toHaveBeenCalledWith('复制参考图失败', 'error')
     })
     expect(blob).not.toHaveBeenCalled()
-    expect(mocks.copyBlobToClipboard).not.toHaveBeenCalled()
+    // 新契约:取图链作为 Promise 传入 copyBlobToClipboard,失败由它 await 后抛出
+    expect(mocks.copyBlobToClipboard).toHaveBeenCalledTimes(1)
   })
 
   it('stops copying a streaming reference image once the body exceeds the image size cap', async () => {
     let pulls = 0
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(
-          new ReadableStream<Uint8Array>({
-            pull(controller) {
-              pulls += 1
-              controller.enqueue(new Uint8Array(1024 * 1024))
-              if (pulls >= 100) controller.close()
-            },
-          }),
-          { headers: { 'Content-Type': 'image/png' } },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              pull(controller) {
+                pulls += 1
+                controller.enqueue(new Uint8Array(1024 * 1024))
+                if (pulls >= 100) controller.close()
+              },
+            }),
+            { headers: { 'Content-Type': 'image/png' } },
+          ),
       ),
     )
 
@@ -224,7 +237,8 @@ describe('InfoPanel', () => {
       expect(state.showToast).toHaveBeenCalledWith('复制参考图失败', 'error')
     })
     expect(pulls).toBeLessThan(100)
-    expect(mocks.copyBlobToClipboard).not.toHaveBeenCalled()
+    // 新契约:取图链作为 Promise 传入 copyBlobToClipboard,失败由它 await 后抛出
+    expect(mocks.copyBlobToClipboard).toHaveBeenCalledTimes(1)
   })
 
   it('shows copy failure when a reference image body keeps hanging', async () => {
@@ -258,7 +272,8 @@ describe('InfoPanel', () => {
     await Promise.resolve()
 
     expect(state.showToast).toHaveBeenCalledWith('复制参考图失败', 'error')
-    expect(mocks.copyBlobToClipboard).not.toHaveBeenCalled()
+    // 新契约:取图链作为 Promise 传入 copyBlobToClipboard,失败由它 await 后抛出
+    expect(mocks.copyBlobToClipboard).toHaveBeenCalledTimes(1)
   })
 
   it('reports delayed prompt copy success through the latest toast handler', async () => {

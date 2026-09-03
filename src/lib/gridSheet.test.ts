@@ -17,6 +17,7 @@ import {
   SHEET_NOTE_MAX_LINES,
   SHEET_PADDING,
   SHEET_ROW_HEADER_W,
+  wrapText,
 } from './gridSheet'
 import { DEFAULT_PARAMS } from '../types'
 import type { TaskRecord } from '../types'
@@ -78,11 +79,18 @@ describe('computeSheetLayout', () => {
   it('reserves a note area and shifts the grid down', () => {
     const without = computeSheetLayout({ cols: 2, rows: 1, hasY: false, measureWidth: measure10 })
     const withNote = computeSheetLayout({
-      cols: 2, rows: 1, hasY: false, note: '短笔记', measureWidth: measure10,
+      cols: 2,
+      rows: 1,
+      hasY: false,
+      note: '短笔记',
+      measureWidth: measure10,
     })
     expect(withNote.noteLines).toEqual(['短笔记'])
     expect(withNote.noteRect).toEqual({
-      x: SHEET_PADDING, y: SHEET_PADDING, w: withNote.width - SHEET_PADDING * 2, h: SHEET_NOTE_LINE_H,
+      x: SHEET_PADDING,
+      y: SHEET_PADDING,
+      w: withNote.width - SHEET_PADDING * 2,
+      h: SHEET_NOTE_LINE_H,
     })
     expect(withNote.height - without.height).toBe(SHEET_NOTE_LINE_H + SHEET_GAP)
     expect(withNote.cellRect(0, 0).y - without.cellRect(0, 0).y).toBe(SHEET_NOTE_LINE_H + SHEET_GAP)
@@ -92,7 +100,11 @@ describe('computeSheetLayout', () => {
     // 宽度 = padding*2 + 2*cell + gap;可用 = 宽-2*padding = 2*512+12 = 1036 → 每行 103 字(10px/字)
     const longNote = 'x'.repeat(103 * SHEET_NOTE_MAX_LINES + 50)
     const layout = computeSheetLayout({
-      cols: 2, rows: 1, hasY: false, note: longNote, measureWidth: measure10,
+      cols: 2,
+      rows: 1,
+      hasY: false,
+      note: longNote,
+      measureWidth: measure10,
     })
     expect(layout.noteLines).toHaveLength(SHEET_NOTE_MAX_LINES)
     expect(layout.noteLines[SHEET_NOTE_MAX_LINES - 1].endsWith('…')).toBe(true)
@@ -104,7 +116,11 @@ describe('computeSheetLayout', () => {
 
   it('collapses whitespace in notes', () => {
     const layout = computeSheetLayout({
-      cols: 1, rows: 1, hasY: false, note: '  a \n b  ', measureWidth: measure10,
+      cols: 1,
+      rows: 1,
+      hasY: false,
+      note: '  a \n b  ',
+      measureWidth: measure10,
     })
     expect(layout.noteLines).toEqual(['a b'])
   })
@@ -131,14 +147,17 @@ describe('normalizeBatchNotes', () => {
   })
 
   it('drops invalid entries and blank texts, trims and clamps long ones', () => {
-    const result = normalizeBatchNotes({
-      '': { text: 'no-id' },
-      'b1': null,
-      'b2': { text: 42 },
-      'b3': { text: '   ' },
-      'b4': { text: '  好实验  ', updatedAt: 123 },
-      'b5': { text: 'x'.repeat(MAX_BATCH_NOTE_LEN + 99) },
-    }, 999)
+    const result = normalizeBatchNotes(
+      {
+        '': { text: 'no-id' },
+        b1: null,
+        b2: { text: 42 },
+        b3: { text: '   ' },
+        b4: { text: '  好实验  ', updatedAt: 123 },
+        b5: { text: 'x'.repeat(MAX_BATCH_NOTE_LEN + 99) },
+      },
+      999,
+    )
     expect(Object.keys(result)).toEqual(['b4', 'b5'])
     expect(result.b4).toEqual({ text: '好实验', updatedAt: 123 })
     expect(result.b5.text).toHaveLength(MAX_BATCH_NOTE_LEN)
@@ -146,12 +165,14 @@ describe('normalizeBatchNotes', () => {
   })
 
   it('drops dangerous keys from untrusted records', () => {
-    const result = normalizeBatchNotes(JSON.parse(`{
+    const result = normalizeBatchNotes(
+      JSON.parse(`{
       "__proto__": { "text": "polluted", "updatedAt": 1 },
       "constructor": { "text": "bad", "updatedAt": 2 },
       "prototype": { "text": "bad", "updatedAt": 3 },
       "good": { "text": "ok", "updatedAt": 4 }
-    }`))
+    }`),
+    )
 
     expect(result).toEqual({ good: { text: 'ok', updatedAt: 4 } })
     expect(({} as Record<string, unknown>).polluted).toBeUndefined()
@@ -180,7 +201,13 @@ describe('computeSafeCellSize(审查修复:canvas 单边上限)', () => {
     expect(cell).not.toBeNull()
     expect(cell).toBeLessThan(SHEET_CELL_SIZE)
     expect(cell).toBeGreaterThanOrEqual(SHEET_MIN_CELL_SIZE)
-    const layout = computeSheetLayout({ cols: 40, rows: 1, hasY: false, measureWidth: measure10, cellSize: cell! })
+    const layout = computeSheetLayout({
+      cols: 40,
+      rows: 1,
+      hasY: false,
+      measureWidth: measure10,
+      cellSize: cell!,
+    })
     expect(layout.width).toBeLessThanOrEqual(SHEET_MAX_EDGE)
   })
 
@@ -196,8 +223,12 @@ describe('computeSafeCellSize(审查修复:canvas 单边上限)', () => {
     expect(withNote!).toBeLessThan(withoutNote!)
     // 用收缩后的尺寸 + 满 4 行笔记排版,总高仍 ≤ SHEET_MAX_EDGE,不再依赖 16384-16000 的隐式余量
     const layout = computeSheetLayout({
-      cols: 2, rows: 31, hasY: true, note: 'x'.repeat(MAX_BATCH_NOTE_LEN),
-      measureWidth: measure10, cellSize: withNote!,
+      cols: 2,
+      rows: 31,
+      hasY: true,
+      note: 'x'.repeat(MAX_BATCH_NOTE_LEN),
+      measureWidth: measure10,
+      cellSize: withNote!,
     })
     expect(layout.noteLines).toHaveLength(SHEET_NOTE_MAX_LINES)
     expect(layout.height).toBeLessThanOrEqual(SHEET_MAX_EDGE)
@@ -206,7 +237,13 @@ describe('computeSafeCellSize(审查修复:canvas 单边上限)', () => {
   it('shrinks cell size so the sheet stays within the total canvas pixel budget', () => {
     const cell = computeSafeCellSize(64, 64, true)
     expect(cell).not.toBeNull()
-    const layout = computeSheetLayout({ cols: 64, rows: 64, hasY: true, measureWidth: measure10, cellSize: cell! })
+    const layout = computeSheetLayout({
+      cols: 64,
+      rows: 64,
+      hasY: true,
+      measureWidth: measure10,
+      cellSize: cell!,
+    })
     expect(layout.width * layout.height).toBeLessThanOrEqual(EXPECTED_SHEET_MAX_PIXELS)
   })
 
@@ -215,7 +252,13 @@ describe('computeSafeCellSize(审查修复:canvas 单边上限)', () => {
   })
 
   it('layout respects a custom cellSize in every rect', () => {
-    const layout = computeSheetLayout({ cols: 2, rows: 2, hasY: true, measureWidth: measure10, cellSize: 100 })
+    const layout = computeSheetLayout({
+      cols: 2,
+      rows: 2,
+      hasY: true,
+      measureWidth: measure10,
+      cellSize: 100,
+    })
     expect(layout.cellRect(0, 0).w).toBe(100)
     expect(layout.cellRect(1, 1).x - layout.cellRect(0, 1).x).toBe(100 + SHEET_GAP)
     expect(layout.rowHeaderRect(0).h).toBe(100)
@@ -225,7 +268,10 @@ describe('computeSafeCellSize(审查修复:canvas 单边上限)', () => {
 describe('normalizeBatchNotes 条数上限(审查修复:localStorage 配额炸弹)', () => {
   it('caps entries at MAX_BATCH_NOTES keeping the most recently updated', () => {
     const flood = Object.fromEntries(
-      Array.from({ length: MAX_BATCH_NOTES + 100 }, (_, i) => [`b${i}`, { text: 'x', updatedAt: i }]),
+      Array.from({ length: MAX_BATCH_NOTES + 100 }, (_, i) => [
+        `b${i}`,
+        { text: 'x', updatedAt: i },
+      ]),
     )
     const result = normalizeBatchNotes(flood)
     expect(Object.keys(result)).toHaveLength(MAX_BATCH_NOTES)
@@ -252,7 +298,10 @@ describe('mergeBatchNotes(审查修复:merge 导入绕过条数上限)', () => {
   it('re-caps the union at MAX_BATCH_NOTES when both sides are individually within cap', () => {
     // 两侧各 500 条且 batchId 不相交:裸展开会得到 1000 条直写持久化
     const local = Object.fromEntries(
-      Array.from({ length: MAX_BATCH_NOTES }, (_, i) => [`l${i}`, { text: 'x', updatedAt: 1000 + i }]),
+      Array.from({ length: MAX_BATCH_NOTES }, (_, i) => [
+        `l${i}`,
+        { text: 'x', updatedAt: 1000 + i },
+      ]),
     )
     const imported = Object.fromEntries(
       Array.from({ length: MAX_BATCH_NOTES }, (_, i) => [`i${i}`, { text: 'x', updatedAt: i }]),
@@ -263,5 +312,17 @@ describe('mergeBatchNotes(审查修复:merge 导入绕过条数上限)', () => {
     expect(merged.l0).toBeDefined()
     expect(merged[`l${MAX_BATCH_NOTES - 1}`]).toBeDefined()
     expect(merged.i0).toBeUndefined()
+  })
+})
+
+describe('wrapText 截断的代理对安全', () => {
+  it('末行截断在 emoji 边界回退,不产生孤立代理项', () => {
+    // 每个码点宽 10:maxWidth 45 时最多放 4 个码点(含省略号)
+    const measure = (text: string) => Array.from(text).length * 10
+    const lines = wrapText('猫猫🐱🐱🐱🐱', 45, 1, measure)
+    expect(lines).toHaveLength(1)
+    expect(lines[0].endsWith('…')).toBe(true)
+    expect(lines[0]).not.toMatch(/[\uD800-\uDBFF]$|[\uD800-\uDBFF]…$/)
+    expect(Array.from(lines[0]).every((ch) => !/^[\uD800-\uDFFF]$/.test(ch))).toBe(true)
   })
 })

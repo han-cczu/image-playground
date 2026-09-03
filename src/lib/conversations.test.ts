@@ -4,7 +4,9 @@ import {
   ARCHIVE_CONVERSATION_ID,
   ARCHIVE_CONVERSATION_TITLE,
   findReusableEmptyConversation,
+  isConversationLimitReached,
   MAX_CONVERSATION_ID_LEN,
+  MAX_CONVERSATIONS,
   normalizeConversations,
 } from './conversations'
 
@@ -35,10 +37,7 @@ describe('findReusableEmptyConversation', () => {
     const older = makeConversation({ id: 'older', createdAt: 1000 })
     const newer = makeConversation({ id: 'newer', createdAt: 3000 })
     const middle = makeConversation({ id: 'middle', createdAt: 2000 })
-    const result = findReusableEmptyConversation(
-      [older, newer, middle],
-      new Map(),
-    )
+    const result = findReusableEmptyConversation([older, newer, middle], new Map())
     expect(result?.id).toBe('newer')
   })
 
@@ -106,10 +105,7 @@ describe('findReusableEmptyConversation', () => {
     const first = makeConversation({ id: 'first', createdAt: 1000 })
     const second = makeConversation({ id: 'second', createdAt: 1000 })
     const third = makeConversation({ id: 'third', createdAt: 1000 })
-    const result = findReusableEmptyConversation(
-      [first, second, third],
-      new Map(),
-    )
+    const result = findReusableEmptyConversation([first, second, third], new Map())
     // reduce 用严格大于 (>)，相等时保留 latest（数组首项），等价于"先遇到的"
     expect(result?.id).toBe('first')
   })
@@ -148,6 +144,40 @@ describe('normalizeConversations', () => {
       color: undefined,
     })
     expect(result.find((conversation) => conversation.id === 'conv-549')).toBeUndefined()
+  })
+
+  it('普通对话满额时截掉的是 updatedAt 最旧的普通对话,「历史记录」永远保留且沉底', () => {
+    const regular = Array.from({ length: MAX_CONVERSATIONS }, (_, i) => ({
+      id: `conv-${i}`,
+      title: `对话 ${i}`,
+      createdAt: i,
+      updatedAt: 1000 + i,
+    }))
+    const archive = {
+      id: ARCHIVE_CONVERSATION_ID,
+      title: ARCHIVE_CONVERSATION_TITLE,
+      createdAt: 0,
+      updatedAt: 0,
+    }
+
+    const result = normalizeConversations([archive, ...regular])
+
+    expect(result).toHaveLength(MAX_CONVERSATIONS)
+    expect(result[result.length - 1].id).toBe(ARCHIVE_CONVERSATION_ID)
+    expect(result.find((c) => c.id === 'conv-0')).toBeUndefined()
+    expect(result.find((c) => c.id === `conv-${MAX_CONVERSATIONS - 1}`)).toBeDefined()
+    // 幂等:initStore 会用 [archive, ...已归一化结果] 再归一化一次,不能再次截掉 archive
+    const again = normalizeConversations([archive, ...result])
+    expect(again.map((c) => c.id)).toEqual(result.map((c) => c.id))
+  })
+
+  it('isConversationLimitReached 只数普通对话,阈值与 normalizeConversations 留给 archive 的位置一致', () => {
+    const archive = makeConversation({ id: ARCHIVE_CONVERSATION_ID })
+    const regular = (n: number) =>
+      Array.from({ length: n }, (_, i) => makeConversation({ id: `conv-${i}` }))
+    expect(isConversationLimitReached([archive, ...regular(MAX_CONVERSATIONS - 2)])).toBe(false)
+    expect(isConversationLimitReached([archive, ...regular(MAX_CONVERSATIONS - 1)])).toBe(true)
+    expect(isConversationLimitReached(regular(MAX_CONVERSATIONS - 1))).toBe(true)
   })
 
   it('caps imported conversation ids and drops invalid colors', () => {

@@ -33,7 +33,8 @@ export function pushBudgeted(
   opts: { maxEntries: number; byteBudget: number; reservedBytes?: number },
 ): ImageData[] {
   pushBounded(stack, item, opts.maxEntries)
-  let total = (opts.reservedBytes ?? 0) + stack.reduce((sum, snapshot) => sum + imageDataBytes(snapshot), 0)
+  let total =
+    (opts.reservedBytes ?? 0) + stack.reduce((sum, snapshot) => sum + imageDataBytes(snapshot), 0)
   while (stack.length > 1 && total > opts.byteBudget) {
     const removed = stack.shift()!
     total -= imageDataBytes(removed)
@@ -50,6 +51,7 @@ export interface MaskHistory {
   redo: () => void
   clear: () => void
   cancelActiveStroke: () => void
+  commitActiveStroke: () => void
 }
 
 export function useMaskHistory(args: {
@@ -65,6 +67,8 @@ export function useMaskHistory(args: {
 
   const undoStackRef = useRef<ImageData[]>([])
   const redoStackRef = useRef<ImageData[]>([])
+  /** pushSnapshot 时暂存的旧 redo 栈,笔画被取消(转捏合)则放回、落定则丢弃 */
+  const pendingRedoRef = useRef<ImageData[] | null>(null)
   const [historyState, setHistoryState] = useState({ undo: 0, redo: 0 })
 
   const syncHistoryState = useCallback(() => {
@@ -74,14 +78,17 @@ export function useMaskHistory(args: {
     })
   }, [])
 
-  const restoreMask = useCallback((imageData: ImageData) => {
-    const canvas = maskCanvasRef.current
-    const ctx = canvas?.getContext('2d', { willReadFrequently: true })
-    if (!canvas || !ctx) return
+  const restoreMask = useCallback(
+    (imageData: ImageData) => {
+      const canvas = maskCanvasRef.current
+      const ctx = canvas?.getContext('2d', { willReadFrequently: true })
+      if (!canvas || !ctx) return
 
-    ctx.putImageData(imageData, 0, 0)
-    renderPreview()
-  }, [maskCanvasRef, renderPreview])
+      ctx.putImageData(imageData, 0, 0)
+      renderPreview()
+    },
+    [maskCanvasRef, renderPreview],
+  )
 
   const pushSnapshot = useCallback(() => {
     const canvas = maskCanvasRef.current
@@ -89,7 +96,10 @@ export function useMaskHistory(args: {
     if (!canvas || !ctx) return
 
     // redo 先清(新笔画作废重做链),undo 栈独占全部字节预算;
-    // undo/redo 互换(两栈 1:1 交换快照)不增加总量,只需在新增快照的入口控制预算
+    // undo/redo 互换(两栈 1:1 交换快照)不增加总量,只需在新增快照的入口控制预算。
+    // 旧 redo 暂存到 pendingRedoRef:第一指 pointerdown 已推快照,第二指落下转捏合会 cancelActiveStroke——
+    // 这不是一笔画,重做链要能恢复;笔画真正落定(commitActiveStroke)才作废
+    pendingRedoRef.current = redoStackRef.current
     redoStackRef.current = []
     pushBudgeted(undoStackRef.current, ctx.getImageData(0, 0, canvas.width, canvas.height), {
       maxEntries: HISTORY_LIMIT,
@@ -134,8 +144,17 @@ export function useMaskHistory(args: {
   const cancelActiveStroke = useCallback(() => {
     const previous = undoStackRef.current.pop()
     if (previous) restoreMask(previous)
+    if (pendingRedoRef.current) {
+      redoStackRef.current = pendingRedoRef.current
+      pendingRedoRef.current = null
+    }
     syncHistoryState()
   }, [restoreMask, syncHistoryState])
+
+  /** 笔画落定:作废 pushSnapshot 暂存的旧重做链(此后才真正不可重做)。 */
+  const commitActiveStroke = useCallback(() => {
+    pendingRedoRef.current = null
+  }, [])
 
   return {
     canUndo: historyState.undo > 0,
@@ -146,6 +165,7 @@ export function useMaskHistory(args: {
     redo,
     clear,
     cancelActiveStroke,
+    commitActiveStroke,
     undoStackRef,
     redoStackRef,
     syncHistoryState,

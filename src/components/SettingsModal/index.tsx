@@ -41,6 +41,7 @@ import {
   pruneOrphanImages,
   type StorageStats,
 } from '../../lib/storageStats'
+import { getInFlightImageIds } from '../../lib/inFlightImages'
 
 function newId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -190,7 +191,22 @@ export default function SettingsModal() {
     captionerTimeout,
   ])
 
-  const settingsJson = useMemo(() => JSON.stringify(settings), [settings])
+  // 基线与 draft 同口径:代理不可用的环境里 draft 会把所有 profile.apiProxy 置 false(见打开面板的 effect),
+  // 若基线仍是持久化里的 apiProxy=true,面板一打开就「已修改」——保存按钮亮起、关闭还要确认「放弃改动」
+  const settingsJson = useMemo(
+    () =>
+      JSON.stringify(
+        normalizeSettings(
+          apiProxyAvailable
+            ? settings
+            : {
+                ...settings,
+                profiles: settings.profiles.map((profile) => ({ ...profile, apiProxy: false })),
+              },
+        ),
+      ),
+    [settings, apiProxyAvailable],
+  )
   const isDirty = useMemo(
     () => JSON.stringify(buildFlushedDraft()) !== settingsJson,
     [buildFlushedDraft, settingsJson],
@@ -361,6 +377,8 @@ export default function SettingsModal() {
         try {
           const { tasks, inputImages } = useStore.getState()
           const refs = collectReferencedImageIds(tasks, inputImages)
+          // 已落库、任务记录尚未引用的在途输出图/遮罩图不是孤儿(点击时刻的引用集看不到它们)
+          for (const id of getInFlightImageIds()) refs.add(id)
           const { deletedCount, deletedBytes } = await pruneOrphanImages(refs, Date.now())
           useStore
             .getState()
@@ -619,11 +637,25 @@ export default function SettingsModal() {
             onExport={() => exportData()}
             onImport={runImport}
             onClearAll={handleClearAllData}
+            onConfirmMergeImport={(proceed) => {
+              // 导入成功后面板会用 store 里的设置重建 draft,未保存的改动会被静默丢掉:有改动先确认
+              if (!isDirty) {
+                void proceed()
+                return
+              }
+              setConfirmDialog({
+                title: '合并导入',
+                message:
+                  '设置面板里有未保存的改动，导入完成后会被备份里的设置覆盖并丢失。是否继续？',
+                confirmText: '放弃改动并选择备份',
+                tone: 'warning',
+                action: proceed,
+              })
+            }}
             onConfirmReplaceImport={(proceed) =>
               setConfirmDialog({
                 title: '替换导入',
-                message:
-                  '替换导入会先清空本地任务记录和图片，再导入备份。设置会按安全规则合并，已有密钥不会被空密钥覆盖。',
+                message: `替换导入会先清空本地任务记录和图片，再导入备份。设置会按安全规则合并，已有密钥不会被空密钥覆盖。${isDirty ? '面板里未保存的改动也会丢失。' : ''}`,
                 confirmText: '选择备份',
                 tone: 'warning',
                 action: proceed,

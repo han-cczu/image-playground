@@ -124,4 +124,77 @@ describe('useLightboxPointer', () => {
     expect(onClose).not.toHaveBeenCalled()
     el.remove()
   })
+
+  function mountTapHarness() {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const onClose = vi.fn()
+    const apply = vi.fn()
+    const hook = renderHook(() =>
+      useLightboxPointer({
+        containerRef: { current: el },
+        scaleRef: { current: 1 },
+        txRef: { current: 0 },
+        tyRef: { current: 0 },
+        apply,
+        onClose,
+      }),
+    )
+    const compatClick = () =>
+      act(() => {
+        hook.result.current.onClick({
+          stopPropagation: () => {},
+          target: el,
+        } as unknown as React.MouseEvent)
+      })
+    return { el, onClose, apply, hook, compatClick }
+  }
+
+  it('触屏单指轻点:浏览器补发的兼容 click 被吞掉,关闭只在延迟窗口结束后发生一次', () => {
+    const { el, onClose, hook, compatClick } = mountTapHarness()
+
+    act(() => {
+      el.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 10, clientY: 10 }]))
+      el.dispatchEvent(createTouchEvent('touchend', []))
+    })
+    compatClick()
+    expect(onClose).not.toHaveBeenCalled()
+
+    act(() => {
+      vi.advanceTimersByTime(TAP_CLOSE_DELAY_MS)
+    })
+    expect(onClose).toHaveBeenCalledTimes(1)
+
+    // 延迟窗口过后真实鼠标点击照常关闭(抑制标志已复位,不能吞掉下一次点击)
+    compatClick()
+    expect(onClose).toHaveBeenCalledTimes(2)
+    hook.unmount()
+    el.remove()
+  })
+
+  it('触屏双击:第二次轻点触发放大而不是关闭', () => {
+    const { el, onClose, apply, hook, compatClick } = mountTapHarness()
+
+    act(() => {
+      el.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 10, clientY: 10 }]))
+      el.dispatchEvent(createTouchEvent('touchend', []))
+    })
+    compatClick()
+    act(() => {
+      vi.advanceTimersByTime(100)
+      el.dispatchEvent(createTouchEvent('touchstart', [{ clientX: 12, clientY: 11 }]))
+      el.dispatchEvent(createTouchEvent('touchend', []))
+    })
+    act(() => {
+      vi.advanceTimersByTime(TAP_CLOSE_DELAY_MS * 2)
+    })
+
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(apply.mock.calls[0][0]).toBeGreaterThan(1)
+    expect(onClose).not.toHaveBeenCalled()
+    hook.unmount()
+    el.remove()
+  })
 })
