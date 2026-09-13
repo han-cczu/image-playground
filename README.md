@@ -1,341 +1,214 @@
 # Image Playground
 
-> 基于 OpenAI 与 Google Gemini 图像接口的本地优先图片生成与编辑工作台 —— 对话式组织、最多 16 张参考图融合、可视化遮罩，所有数据存浏览器本地。
+<p align="center"><strong>从一个想法开始，在同一个工作台里生成、编辑、比较和整理图片。</strong></p>
 
-[在线试用 →](https://image-playground.diaohan111.workers.dev/) ・ [Docker 自部署 ↓](#-docker-部署)
+<p align="center">
+  <a href="https://image-playground.diaohan111.workers.dev/">在线体验</a> ·
+  <a href="#quick-start">快速开始</a> ·
+  <a href="#workflow">创作流程</a> ·
+  <a href="docs/deployment.md">部署指南</a>
+</p>
 
-<!-- screenshot: 主界面（左侧 sidebar 对话列表 + 中部生成卡片网格 + 底部 InputBar） -->
+Image Playground 是一个本地优先的图像创作前端，支持 **OpenAI 兼容接口与 Google Gemini**。你可以连接自己的 API，用对话整理创作项目，以参考图和遮罩继续编辑，再通过参数矩阵与图片对比挑选结果。
 
----
+![工作台总览：左侧对话与作品导航，中间作品卡片，底部创作面板](docs/images/workspace.png)
 
-## Why Image Playground
+*当前界面实拍。文档中的图片和任务均为带「演示」标记的本地合成样例，用于展示交互，不代表模型生成效果；线上部署可能与仓库当前版本不同。*
 
-- **本地优先**：任务记录、生成图片、API 配置全部存浏览器（IndexedDB Blob + localStorage），不经过任何第三方服务器；SHA-256 哈希去重，多任务引用同一张图只占一份空间。
-- **对话式组织**：按「对话」归档生成任务及其提示词、参考图。每次点击新建都会创建独立对话，可连续创建多个空对话。输入区使用一份全局草稿，切换对话或浏览全部作品时保留；面板显示实际生成目标。左侧导航支持切换 / 新建，桌面常驻、移动抽屉。
-- **16 参考图 + 可视化遮罩**：单次最多上传 16 张参考图（文件 / 剪贴板 / 整页拖拽），内置遮罩编辑器自动预处理满足官方分辨率与文件大小限制。
-- **Codex CLI / URL 集成友好**：内置 Codex CLI 兼容模式（屏蔽无效 `quality` / 多图并发拆单 / 提示词防改写）；支持 `apiUrl` / `apiKey` / `apiMode` / `provider` 等 URL 传参，便于书签与外部系统跳转。
-- **Docker 自部署友好**：自带多阶段 `Dockerfile`、`nginx.conf`、`docker-compose.yml`、`Caddyfile`、CORS 代理配置，HTTPS / HTTP+IP / sslip.io 三种模式一键切换，与 Cloudflare Workers 部署互不影响。
+## 你可以用它做什么
 
----
+| 创作环节 | 功能 |
+| --- | --- |
+| 从想法到图片 | 文字生图、多图生成、风格预设、提示词优化、常用提示词片段 |
+| 在结果上继续编辑 | 最多 16 张参考图、粘贴与拖放上传、可视化遮罩、输出转参考图、派生关系追踪 |
+| 比较不同方案 | `{选项一\|选项二}` 通配批量、X/Y 参数网格、2–4 条任务对照、带轴标签的对照图导出 |
+| 整理作品 | 独立对话、全部作品、收藏分类、提示词与参数搜索、批量操作 |
+| 切换创作环境 | 多套 API 配置、模型选择、浅色 / 深色 / 跟随系统、桌面侧栏与手机抽屉 |
+| 保存和迁移 | 浏览器本地历史、图片去重、存储管理、ZIP 导出与合并 / 替换导入 |
 
-## Quickstart
+<a id="quick-start"></a>
 
-**1. 在线试用（零配置）** —— 打开 [image-playground.diaohan111.workers.dev](https://image-playground.diaohan111.workers.dev/)，进入设置面板填入自己的 API URL / Key 即可。
+## 快速开始
 
-**2. 本地开发**
+### 1. 打开工作台
 
-```bash
-npm install && npm run dev
-```
-
-**3. Docker 一键自部署（最简：单容器，HTTP）**
-
-```bash
-docker build --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) -t image-playground .
-docker run -d --name image-playground -p 8080:80 image-playground
-# 访问 http://localhost:8080
-```
-
-完整 HTTPS + CORS 代理见 [Docker 部署](#-docker-部署) 章节。
-
----
-
-## ✨ 核心特性
-
-<details>
-<summary>🎨 图像生成与编辑</summary>
-
-- **对话式创作**：以「对话」为创作组织单位，任务历史按对话保存；提示词、参考图和生成参数使用全局草稿。左侧导航提供全部作品、我的收藏和近期对话，桌面端可折叠，平板默认紧凑，移动端抽屉。
-- **多 Provider**：OpenAI 兼容接口（`Images API` / `Responses API` 双模） + Google Gemini，单次生成可一键切换。
-- **参考图融合**：最多上传 16 张参考图，支持文件选择、剪贴板粘贴、整页拖拽。
-- **可视化遮罩**：内置遮罩编辑器，自动预处理以符合官方分辨率与文件大小限制。
-- **批量与迭代**：支持单次多图生成；一键将任意输出图转为参考图，无缝进入下一轮编辑。
-- **提示词通配批量**：提示词里写 `{橘色|黑色|白色}` 这样的通配组，提交时自动笛卡尔展开为多条提示词并发生成（如 `一只{橘|黑}的猫` → 2 张对照），多组通配会做笛卡尔积；并发受限流保护，展开数超过 20 会二次确认、超过上限直接拦截。零新控件，直接在输入框书写即可，无通配的普通提示词行为完全不变。
-- **风格预设**：底栏「风格」pill 内置 9 选 1（无风格 + 8 偏写实预设：写实摄影 / 胶片 / 人像 / 古典油画 / 文艺水彩 / 工业设计图 / 建筑渲染 / 产品摄影），选中后 API 调用前自动拼接英文修饰词，原始提示词保持不被污染。
-- **一键清空**：textarea 右上角 X 按钮快清文字，底栏右侧「重置」pill 二次确认后清空文字 + 参考图 + 遮罩，避免连按 Ctrl+A 删字符。
-
-</details>
-
-<details>
-<summary>🗂️ 历史与画廊</summary>
-
-- **图库视图**：sidebar 顶部独立入口，点击聚合所有对话的全部 task 按时间倒序展示。每张卡片附「所属对话」色块标签，点标签直接跳到对应对话。图库视图下禁用拖拽，保护各对话内部 sortOrder 不被跨对话操作污染。
-- **拖拽排序**：每张卡片右上角的 ⋮⋮ 手柄可调整顺序，全自定义编排；新生成的任务依旧自动落到最前。（图库视图下不可拖拽）
-- **批量选择**：桌面端支持鼠标拖拽框选 + `Ctrl/⌘` 连选，移动端支持侧滑多选。
-- **筛选与搜索**：按状态过滤、收藏过滤、关键字搜索（提示词、参数）。
-- **收藏分类**：可创建命名分类把心仪作品归类，新建分类时从 8 色预设色板选颜色（写入分类点缀色，显示在对话标签 / 卡片角标上）。
-- **详情对照**：自动提取 API 响应中真实生效的尺寸、质量、耗时和 **API 改写后的提示词**，与你的请求参数高亮对比。
-- **导出 / 导入**：一键打包全部记录与图片为 ZIP 备份，可在另一台设备导入恢复。
-
-</details>
-
-<details>
-<summary>⚙️ 参数与配置</summary>
-
-- **多 Profile 管理**：可保存多套 API URL / Key / 模型组合，快速切换。底栏「模型」pill 升级为两段式——上半显示当前 profile 下可用 model 列表（从 API 拉到的），下半切换 profile。
-- **从 API 拉取模型列表**：模型 ID 输入框旁的刷新按钮直接调 `/v1/models`，下拉选择即可填入。
-- **智能尺寸控制**：1K / 2K / 4K 快速预设，自定义宽高自动规整到模型安全范围（16 的倍数、总像素校验等）。
-- **提示词优化**：可独立配置一套 OpenAI 兼容的文本对话 API（chat completions），一键把简略草稿改写成结构化的英文图像提示词，弹窗对比新旧后由用户主动采用。
-- **设置入口**：sidebar 底部齿轮按钮打开设置面板。Header 仅保留 浅色 / 深色 / 跟随系统 主题切换。
-
-</details>
-
-<details>
-<summary>🔌 API 兼容增强</summary>
-
-- **Codex CLI 兼容模式**：针对非标准 OpenAI 网关，自动屏蔽无效的 `quality` 参数；Images API 多图请求拆分为并发单图；提示词前注入防改写指令。
-- **提示词防改写保护**：Responses API 始终注入防改写前缀；Codex CLI 模式下 Images API 同等保护。
-- **API 代理转发**：可让浏览器请求同源的 `/api-proxy/` 路径，由部署环境代理转发到真实 API，绕过 CORS（需运行环境支持）。
-- **智能诊断提示**：检测到接口返回提示词被改写或缺少标准字段时，主动提示是否开启 Codex CLI 模式。
-
-</details>
-
-<details>
-<summary>🔒 隐私与本地优先</summary>
-
-- 任务记录、生成图片、API 配置全部存浏览器（IndexedDB Blob 存储 + localStorage），**不经过任何第三方服务器**。
-- ⚠️ **数据在你的浏览器里,也只在你的浏览器里**：浏览器存储并非永久保障——磁盘空间紧张时浏览器可能自动清空站点数据（应用启动时会自动申请持久化授权以降低风险，可在设置 → 数据管理中查看授权状态）；Safari 在 7 天未访问后也可能清除（添加到主屏幕可豁免）。**请定期用「导出」做备份**——导出 ZIP 是唯一的恢复手段，不只是迁移工具。
-- 图片按 SHA-256 哈希去重，多任务引用同一张图只占一份空间。
-- 支持作为 PWA 安装到桌面 / 主屏，离线可完整使用（Service Worker 在安装期预缓存全部静态资源）。
-- **稳定性保障**：区域级 React Error Boundary 包裹 sidebar / Header / 主区域 / InputBar / 各 Modal，单点渲染异常不再拖垮整页；Service Worker 自动注入 commit hash 作 CACHE_NAME（Workers / 本机构建自动获取；Docker 构建上下文不含 `.git`，需按下文传入 `GIT_COMMIT`，否则退化为 `nogit-<时间戳>`，每次构建仍会轮换缓存），每次部署旧缓存自然失效；翻车时只需改 KILL_SWITCH 常量部署一次就能远程救回所有用户，无需让用户清缓存。
-
-</details>
-
----
-
-## 🛠️ API 配置与 URL 传参
-
-点击 **sidebar 底部 ⚙️ 设置** 配置 Provider、密钥、模型等参数。
-
-**支持的 Provider**
-
-| 类型 | 接口 / 端点 | 说明 |
-|---|---|---|
-| OpenAI 兼容（Images API） | `/v1/images` | 使用 GPT Image 系列模型，如 `gpt-image-2` |
-| OpenAI 兼容（Responses API） | `/v1/responses` | 使用支持 `image_generation` 工具的文本模型，如 `gpt-5.5` |
-| Google Gemini | `generativelanguage.googleapis.com/v1beta` | 多模态图像模型，如 `gemini-2.5-flash-image`。不支持遮罩与 quality 参数；多图并发拆单 |
-
-### URL 快速填充
-
-适合创建书签或外部系统集成。`apiUrl`、`apiKey` 与 `provider` 请放在 hash 中一次性传入，应用读取后会立即从地址栏清除；查询串中的同名参数会被清理但不会摄入（任意外链都能带查询串，不能让一条链接就改写你的配置）。
-
-| 参数 | 示例 | 作用 |
-|---|---|---|
-| `apiUrl` | `#apiUrl=https://example.com/v1` | 覆盖当前激活 profile 的 API URL |
-| `apiKey` | `#apiKey=sk-xxxx` | 一次性写入当前激活 profile 的 API Key |
-| `apiMode` | `?apiMode=images` 或 `?apiMode=responses` | 切换 OpenAI 接口模式（默认 `images`） |
-| `codexCli` | `?codexCli=true` | 强制开启 Codex CLI 兼容模式 |
-| `provider` | `#provider=openai` 或 `#provider=gemini` | 切换 Provider 类型；与当前激活 profile 相同时不做任何改动，真正换厂商时端点/模型重置为目标默认并清空 API Key（可同时带 `#apiKey=` 写入新 key） |
-
-集成示例（如 New API 等聊天系统中以 URL 形式跳转）：
-
-```text
-https://image-playground.diaohan111.workers.dev/#apiUrl={address}&apiKey={key}
-```
-
----
-
-## 🚀 本地开发与构建
-
-**环境准备**：需要 Node.js 22 或更高版本。可选在项目根目录新建 `.env.local` 配置默认 API URL：
+直接访问 [在线体验](https://image-playground.diaohan111.workers.dev/)，或在本地启动。开发环境需要 **Node.js 22+** 和 npm：
 
 ```bash
-VITE_DEFAULT_API_URL=https://api.openai.com/v1
-```
-
-**启动开发服务器**：
-
-```bash
-npm install
+git clone https://github.com/han-cczu/image-playground.git
+cd image-playground
+npm ci
 npm run dev
 ```
 
-**跨域代理（可选）**：如果开发时遇到 CORS 限制，可开启本地代理转发：
+打开终端输出的本地地址。已有项目时，在项目根目录执行最后两条命令即可。
 
-```bash
-cp dev-proxy.config.example.json dev-proxy.config.json
+### 2. 连接自己的图像 API
+
+点击左下角 **设置 → 图像 API**，填写服务商、API URL、API Key 和模型 ID，然后保存。可以保存多套配置，在底部模型菜单中切换。
+
+![设置面板：图像 API 配置与提示词优化、反推、运行参数等分类](docs/images/settings.png)
+
+*图像生成、提示词优化和反推提示词分别配置；仅使用生图时，先填好「图像 API」即可。图中密钥输入框为空。*
+
+| 接入方式 | API URL 示例 | 选择模型时注意 |
+| --- | --- | --- |
+| OpenAI 兼容 · Images | `https://api.openai.com/v1` | 使用上游支持的图像模型；生成与编辑分别调用 `images/generations`、`images/edits` |
+| OpenAI 兼容 · Responses | `https://api.openai.com/v1` | 使用上游支持 `image_generation` 工具的模型，调用 `responses` |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta` | 使用支持图像输出的模型，调用 `models/{model}:generateContent` |
+
+接入自定义网关时，将 URL 换成该网关的接口基础地址，保留它要求的路径前缀。**模型和参数能力取决于实际服务商**；项目默认模型不保证在每个网关上可用。Gemini 图像接口不使用遮罩与 `quality` 参数。
+
+### 3. 开始第一轮创作
+
+点击 **新建创作**，写下画面描述，选择模型、尺寸和风格，再点击生成。也可以先点空白页中的示例卡片，将示例提示词填入输入框。
+
+```text
+一只深绿色玻璃香氛瓶，放在米白色石质台面上。
+左侧自然光，柔和阴影，背景干净，完整呈现瓶身，产品摄影。
 ```
 
-修改 `dev-proxy.config.json` 中的 `target` 为真实接口地址，重启开发服务器，在页面设置中开启 **API 代理** 即可。仅在 `npm run dev` 阶段生效，打包产物不受影响。
+**每次点击新建都会创建独立对话，可以连续创建多个。** 输入区共用一份提示词、参考图和参数草稿，切换对话时会保留。输入框上方的 **「生成到：…」** 表示新任务归属；浏览「全部作品」时也按这个目标生成。
 
-**构建静态产物**：`npm run build`，输出位于 `dist/` 目录，部署到任意静态文件服务器即可。
+<a id="workflow"></a>
 
----
+## 从生成到迭代
 
-## 🐳 Docker 部署
+```mermaid
+flowchart LR
+    A[描述画面] --> B[选择模型与参数]
+    B --> C[生成作品]
+    C --> D[查看详情与比较]
+    D --> E[收藏或导出]
+    D --> F[输出转为参考图]
+    F --> G[调整提示词或绘制遮罩]
+    G --> B
+```
 
-项目自带多阶段 `Dockerfile`、`nginx.conf`、`docker-compose.yml`、`Caddyfile`、`Caddyfile.lan`、`cors-proxy.conf`，可一键部署到任意支持 Docker 的服务器（VPS / 自建机），与现有 `npm run deploy`（Cloudflare Workers）路径**完全独立**，两套部署可以并存。
+### 查看细节，保留创作上下文
 
-### 三种部署模式速查
+卡片完整展示不同画幅的预览，并保留收藏、选择和详情入口。打开 **查看详情**，可以逐张浏览同一任务的输出，查看提示词、参考图、来源配置和参数。
 
-| 模式 | 适用场景 | 启动命令 | 能力完整性 |
-|---|---|---|---|
-| **HTTPS（推荐）** | 有域名 + DNS 指向服务器 | `docker compose --profile https up -d --build` | ✅ 完整功能（PWA / 离线 / 剪贴板写入 / kill-switch） |
-| **HTTP + IP** | LAN 内网 / VPS 无域名 / 临时调试 | `docker compose --profile lan up -d --build` | ⚠️ 丢失 PWA / 离线 / kill-switch / 剪贴板写入；图像生成 + IndexedDB 历史正常 |
-| **HTTPS over IP（sslip.io）** | 没买域名又想要 HTTPS | 改 `Caddyfile` 域名为 `<服务器IP>.sslip.io`，再 `--profile https` | ✅ 完整功能（与 HTTPS 模式相同） |
+![作品详情：左侧多图浏览，右侧提示词、参考图、派生来源和参数](docs/images/task-detail.png)
 
-> 默认 `docker compose up -d` 不带 profile 不会启任何外层反代（`caddy` / `caddy-lan` 都被 profile 守门）；**必须**显式 `--profile https` 或 `--profile lan`。
+*「复用配置」将任务配置带回输入区；「编辑输出」把生成结果作为下一轮参考图。详情还可以沿派生来源查看完整谱系。*
 
-<details>
-<summary>方式 A：单容器（快速试跑，无 HTTPS）</summary>
+当接口返回实际参数或改写后的提示词时，详情会显示这些信息，便于与请求内容对照；接口未返回的字段使用请求值。
+
+### 参考图与局部编辑
+
+通过 **参考图** 按钮选图，也可以粘贴图片或将文件拖入页面，单次最多 16 张。参考图支持排序；需要局部修改时，从参考图进入遮罩编辑器，绘制并保存后再提交。
+
+常用的模型、尺寸、风格直接放在输入区底部；**更多** 中提供高级参数、提示词片段、提示词优化、反推提示词和参数网格等工具。提示词优化可对比修改前后再决定采用，反推提示词可从图片提取描述；两者使用各自配置的文本或视觉 API。
+
+### 用批量实验比较方案
+
+普通生成支持提示词通配。例如：
+
+```text
+一只{绿色|琥珀色}玻璃瓶，{米白|浅灰}背景，自然柔光，产品摄影
+```
+
+这会展开为 **4 条任务**；每条任务仍按所选数量生成图片。超过 20 个组合会要求确认，超过 200 个组合会阻止提交。
+
+需要有组织地比较参数时，打开 **更多 → 参数网格**，选择 X 轴和可选的 Y 轴。可用维度随当前接口能力变化，包括风格、质量、尺寸、格式、数量和提示词通配。
+
+![参数矩阵局部：按质量和分辨率组织结果，附批次笔记与导出对照图入口](docs/images/parameter-grid.png)
+
+*矩阵视图局部，展示 2×2 实验的第一行。每格显示最新任务，支持批次笔记、补跑和导出带轴标签的 PNG 对照图。*
+
+勾选 **2–4 条已完成且有输出的任务**，还可以进入图片对照。矩阵的「选中整批」会包含同格历史记录；普通全选按当前显示的任务卡片选择。使用网格时，只有选择「提示词通配」轴才会展开 `{a|b}`。
+
+## 整理作品与快捷操作
+
+从左侧进入 **全部作品** 查看跨对话记录，或进入 **我的收藏** 按分类整理。搜索支持提示词和参数，也可以按任务状态筛选。在满足排序条件的单个对话视图中，可以拖动卡片调整顺序；图库、搜索、筛选或矩阵等视图下会禁用拖拽。
+
+| 操作 | 方式 |
+| --- | --- |
+| 提交当前提示词 | 在提示词框中按 `Ctrl / ⌘ + Enter` |
+| 打开命令面板 | `Ctrl / ⌘ + K`，搜索对话、设置、配置、主题或导出命令 |
+| 选择多条任务 | 卡片复选框；桌面支持框选与 `Ctrl / ⌘` 点选，手机支持侧滑选择 |
+| 关闭当前弹层 | `Esc` |
+| 切换放大浏览的图片 | 左右方向键 |
+
+## 数据保存在什么地方
+
+历史记录与图片保存在当前站点的 **IndexedDB** 中，API 配置和草稿等保存在 **localStorage** 中。图片按内容哈希去重，同一张图片被多个任务引用时无需重复存储。
+
+这里的「本地优先」指数据保存方式：**生成时，提示词、参考图、适用的遮罩及认证信息会发送到你配置的 API；使用代理时还会经过该代理。** 提示词优化和反推也会调用对应接口。API Key 以明文保存在本机浏览器中。
+
+在 **设置 → 数据管理** 中查看存储使用情况并导出 ZIP。备份包含历史、图片、对话、收藏分类、片段、批次笔记、去密钥配置及文字 / 参数 / 参考图草稿；**不包含 API Key，也不包含尚未提交的遮罩草稿**。支持合并或替换导入，新设备需要重新填写密钥。
+
+浏览器数据可能因清理站点数据、存储回收或更换设备而丢失，请定期备份。不同浏览器、域名和端口使用各自的存储，不会自动同步。
+
+生产版本成功缓存后，可离线打开界面、查看本地历史；**生成、拉取模型、提示词优化和反推仍需联网**。PWA 安装等功能还取决于浏览器支持及 HTTPS / localhost 等安全上下文。
+
+## 自部署
+
+项目输出静态前端，可部署到静态文件服务器，也提供 Docker 与 Cloudflare Workers 配置。
+
+| 场景 | 入口 |
+| --- | --- |
+| 本机试跑 Docker | 见下方单容器命令 |
+| 自有域名与 HTTPS | [Docker Compose + Caddy](docs/deployment.md#compose-https) |
+| 局域网或临时 HTTP 访问 | [LAN 部署](docs/deployment.md#compose-lan) |
+| 静态托管 / Cloudflare Workers | [静态与 Cloudflare 部署](docs/deployment.md#static-hosting) |
+| API 跨域问题 | [开发代理及生产代理说明](docs/deployment.md#cors) |
+
+在仓库根目录执行：
 
 ```bash
-# 在仓库根目录
 docker build -t image-playground .
 docker run -d --name image-playground -p 8080:80 image-playground
-# 访问 http://localhost:8080
 ```
 
-镜像基于 `nginx:alpine`，体积约 30 MB 左右，已内置：
-
-- SPA fallback（`try_files ... /index.html`）
-- `/sw.js` 强制 `Cache-Control: no-cache, no-store, must-revalidate`（保留 kill-switch 逃生通道）
-- `/assets/*` 长缓存 + `immutable`
-- gzip 启用
-- `/healthz` 健康检查
-
-</details>
+然后打开 `http://localhost:8080`，在页面内配置 API。单容器模式只托管前端；需要跨域代理、HTTPS 或维护升级步骤时，请看 [完整部署指南](docs/deployment.md)。
 
 <details>
-<summary>方式 B：docker-compose 全栈（推荐，含 HTTPS + CORS 代理）</summary>
+<summary>外部集成：通过 URL 预填 API 配置</summary>
 
-包含四个服务（按 profile 启停）：
+`apiUrl`、`apiKey`、`provider` 仅从 URL 的 **hash** 读取，读取后从地址栏清除。查询串中的这三个同名参数会被清理，不会写入配置。
 
-| 服务 | 启用条件 | 作用 |
-|---|---|---|
-| `app` | 默认（无 profile） | nginx:alpine 托管前端静态产物 |
-| `cors-proxy` | 默认（无 profile） | nginx:alpine 反代到上游图像/文本 API，补 CORS 响应头 |
-| `caddy` | `--profile https` | 对外反向代理 + 自动 Let's Encrypt HTTPS 证书（监听 80/443）|
-| `caddy-lan` | `--profile lan` | HTTP + IP 直连模式 Caddy（仅监听 80，无 HTTPS）|
+| 参数 | 位置与示例 | 作用 |
+| --- | --- | --- |
+| `apiUrl` | `#apiUrl=https%3A%2F%2Fexample.com%2Fv1` | 设置当前配置的 API 基础地址 |
+| `apiKey` | `#apiKey=YOUR_API_KEY` | 一次性写入当前配置的密钥 |
+| `provider` | `#provider=openai` 或 `#provider=gemini` | 切换服务商；跨服务商切换会重置端点、模型并清空旧密钥 |
+| `apiMode` | `?apiMode=images` 或 `?apiMode=responses` | 选择 OpenAI 接口模式 |
+| `codexCli` | `?codexCli=true` | 开启面向兼容网关的 Codex CLI 模式 |
 
-> `caddy` 与 `caddy-lan` 同时绑 80 端口、互斥启动，必须二选一。
+组合示例（各参数值应进行 URL 编码）：
 
-**HTTPS 部署步骤**：
+```text
+https://image-playground.diaohan111.workers.dev/?apiMode=images#apiUrl=https%3A%2F%2Fexample.com%2Fv1&apiKey=YOUR_API_KEY
+```
 
-1. 把代码 clone 到服务器，进入仓库根目录。
-2. 编辑 `Caddyfile`，把两处 `your-domain.com` / `cors.your-domain.com` 改成你自己的域名（需提前把 A/AAAA 记录指向当前服务器公网 IP）：
-
-   ```caddyfile
-   your-domain.com {
-       reverse_proxy app:80
-   }
-   cors.your-domain.com {
-       reverse_proxy cors-proxy:80
-   }
-   ```
-
-3. （可选）编辑 `cors-proxy.conf`，把 `$upstream` 改成你需要代理的 API：
-
-   ```nginx
-   # 默认：OpenAI
-   set $upstream      "https://api.openai.com";
-   set $upstream_host "api.openai.com";
-
-   # 切换 Gemini：
-   # set $upstream      "https://generativelanguage.googleapis.com";
-   # set $upstream_host "generativelanguage.googleapis.com";
-   ```
-
-4. 启动：
-
-   ```bash
-   docker compose --profile https up -d --build
-   ```
-
-5. 首次访问 `https://your-domain.com`，Caddy 会自动签发证书。
-
-**在 SettingsModal 配合 CORS 代理使用**：
-
-打开 ⚙️ 设置，把当前 profile 的 **API 地址** 改成刚才部署的 CORS 代理子域名：
-
-| 上游 | 填入的 API 地址 |
-|---|---|
-| OpenAI / OpenAI 兼容 | `https://cors.your-domain.com/v1` |
-| Google Gemini | `https://cors.your-domain.com/v1beta` |
-| 自定义网关 | `https://cors.your-domain.com/<你的 path 前缀>` |
-
-之后浏览器所有图像 API 请求都会走该子域名转发，绕开上游 CORS 限制。
-
-> 同一个 CORS 代理容器一次只能对应一个上游 origin。如果想同时代理多家，可在 `docker-compose.yml` 里复制一份 `cors-proxy` 服务并指向不同的 `*.conf`，再在 `Caddyfile` 里加一个新 vhost（如 `cors-gemini.your-domain.com`）。
+示例使用占位符。含真实密钥的链接不要公开分享或提交到仓库。Codex CLI 兼容模式会调整部分参数和多图请求方式，应按所接网关的需要开启。
 
 </details>
 
-<details>
-<summary>方式 C：HTTP + IP 直连模式（无域名 / LAN / 临时）</summary>
+## 开发与项目结构
 
-适合企业内网、VPS 还没绑域名、临时演示等场景。**注意**：HTTP 模式下浏览器会自动禁用 secure context 限制的能力：
+技术栈：**React 19 · TypeScript · Vite 6 · Tailwind CSS 3 · Zustand 5 · dnd-kit · IndexedDB**。
 
-- ❌ Service Worker / PWA 安装 / 离线访问 / kill-switch
-- ❌ `navigator.clipboard.write` / Web Share API
-- ✅ 图像生成 / IndexedDB 历史 / 贴粘图片（onPaste 事件不受限）
+| 命令 | 作用 |
+| --- | --- |
+| `npm run dev` | 启动 Vite 开发服务 |
+| `npm test` | 运行 Vitest 测试 |
+| `npm run lint` | 执行 ESLint 检查 |
+| `npm run build` | TypeScript 检查、静态构建、Service Worker 资源注入及 CSP 校验，输出至 `dist/` |
+| `npm run preview` | 先构建，再通过 Wrangler 本地预览 |
+| `npm run deploy` | 依次执行 lint、测试、构建并部署到 Cloudflare；需要自己的账号与配置 |
 
-**步骤**：
+```text
+src/
+├── components/       工作台、创作面板、卡片和各类编辑弹窗
+├── lib/              API 适配、任务运行、图片处理、导入导出等逻辑
+├── store/            状态切片与持久化
+└── styles/           浅色 / 深色主题的语义颜色变量
+public/               PWA 图标、Service Worker 与静态资源
+scripts/              构建辅助与安全策略校验
+docs/                 部署、安全策略及设计说明
+```
 
-1. 把代码 clone 到服务器，进入仓库根目录。
-2. （可选）编辑 `cors-proxy.conf`，把 `$upstream` 改成你需要代理的 API（同方式 B 的第 3 步）。
-3. 启动：
-
-   ```bash
-   docker compose --profile lan up -d --build
-   ```
-
-4. 浏览器访问 `http://<服务器 IP>`（局域网内也可以 `http://<内网 IP>` / `http://localhost`）。
-5. 页面顶部会显示一行黄色 banner 提示「当前为 HTTP 模式…」，可点 × 关闭，关闭状态会保留到下次访问。
-
-> 想要 HTTPS 但又没买域名？看下一节 ↓
-
-</details>
-
-<details>
-<summary>方式 D：HTTPS over IP（sslip.io，零购买）</summary>
-
-[sslip.io](https://sslip.io/) 提供「IP 嵌入到域名里」的零配置 DNS 服务：访问 `1.2.3.4.sslip.io` 会自动解析到 `1.2.3.4`，且能向 Let's Encrypt 签发真实证书。
-
-**步骤**：
-
-1. 编辑 `Caddyfile`，把 `your-domain.com` 换成 `<你的服务器 IP>.sslip.io`，把 `cors.your-domain.com` 换成 `cors.<服务器 IP>.sslip.io`（**注意：IP 里的点号照常保留**）：
-
-   ```caddyfile
-   1.2.3.4.sslip.io {
-       reverse_proxy app:80
-   }
-   cors.1.2.3.4.sslip.io {
-       reverse_proxy cors-proxy:80
-   }
-   ```
-
-2. 启动：
-
-   ```bash
-   docker compose --profile https up -d --build
-   ```
-
-3. 首次访问 `https://1.2.3.4.sslip.io`，Caddy 自动签证书。**完整功能可用**，与方式 B 等价。
-
-</details>
-
-<details>
-<summary>维护与升级</summary>
-
-- 拉取新代码后用对应模式的命令滚动更新：
-  - HTTPS（含 sslip.io）：`GIT_COMMIT=$(git rev-parse --short HEAD) docker compose --profile https up -d --build`
-  - HTTP + IP：`GIT_COMMIT=$(git rev-parse --short HEAD) docker compose --profile lan up -d --build`
-  - 不传 `GIT_COMMIT` 也能构建，只是 CACHE_NAME 变成 `nogit-<时间戳>`（仍随每次构建轮换）。
-- 旧版本 Service Worker 通过 `__CACHE_NAME__` 注入机制自动失效（仅 HTTPS 模式下生效；HTTP 模式 SW 本就未注册）。
-- 仅修改 `cors-proxy.conf` 时：`docker compose restart cors-proxy`。
-- 仅修改 `Caddyfile` 时：`docker compose --profile https restart caddy`。
-- 仅修改 `Caddyfile.lan` 时：`docker compose --profile lan restart caddy-lan`。
-- 在两种模式之间切换：先 `docker compose --profile <旧> down`，再 `docker compose --profile <新> up -d --build`（不能同时跑，两者都绑 80 端口）。
-
-</details>
-
----
-
-## 💻 技术栈
-
-- **前端框架**：[React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
-- **构建工具**：[Vite](https://vite.dev/)
-- **样式方案**：[Tailwind CSS 3](https://tailwindcss.com/)
-- **状态管理**：[Zustand](https://zustand.docs.pmnd.rs/)
-- **拖拽交互**：[dnd-kit](https://dndkit.com/)
-- **本地数据**：IndexedDB Blob 存储 + localStorage
+开发代理配置和默认 API 地址环境变量见 [部署指南](docs/deployment.md#local-development)。修改安全响应头或内联主题脚本前，请阅读 [安全响应头说明](docs/security-headers.md)。
