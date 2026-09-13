@@ -7,6 +7,7 @@ import { normalizeStoredTasks } from '../lib/tasks'
 import { useStore } from './index'
 import { terminateIndexedDbSyncRunningTasks } from './idbRuntimeBridge'
 import {
+  getIndexedDbMutationRevision,
   isPendingIndexedDbConversationDelete,
   isPendingIndexedDbConversationWrite,
   isPendingIndexedDbTaskDelete,
@@ -116,8 +117,16 @@ function getStoppedRunningTasks(currentTasks: TaskRecord[], nextTasks: TaskRecor
 
 export async function refreshIndexedDbBackedStoreState(): Promise<void> {
   const token = ++refreshToken
-  const [conversations, tasks] = await Promise.all([getAllConversations(), getAllTasks()])
+  let readRevision = getIndexedDbMutationRevision()
+  let snapshot = await Promise.all([getAllConversations(), getAllTasks()])
+  // 两张表的异步读取期间若本页完成了写入/删除,pending 可能已经清零。丢弃这次旧快照并重读,
+  // 保留正常的跨标签页刷新语义,也不让已落 done / 已删除的记录被迟到快照回滚。
+  while (token === refreshToken && readRevision !== getIndexedDbMutationRevision()) {
+    readRevision = getIndexedDbMutationRevision()
+    snapshot = await Promise.all([getAllConversations(), getAllTasks()])
+  }
   if (token !== refreshToken) return
+  const [conversations, tasks] = snapshot
 
   // 自家库快照不截断:被截掉的最新任务会从 UI「消失」,且 clearStaleUiReferences 会连带清掉它们的引用
   const normalizedTasks = normalizeStoredTasks(tasks)

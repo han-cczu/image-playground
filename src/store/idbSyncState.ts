@@ -12,12 +12,21 @@ const pendingTaskWrites = new Map<string, number>()
 const pendingTaskDeletes = new Map<string, number>()
 const pendingConversationWrites = new Map<string, number>()
 const pendingConversationDeletes = new Map<string, number>()
+// pending 清零不代表已经开始的读取足够新:读库途中一次写入可完整结束,旧快照仍会迟到。
+// 版本涵盖登记和清理,刷新读到版本变化时重新取快照,不再用已清空的 pending 总账接纳旧数据。
+let mutationRevision = 0
+
+export function getIndexedDbMutationRevision(): number {
+  return mutationRevision
+}
 
 function bump(map: Map<string, number>, id: string): void {
+  mutationRevision++
   map.set(id, (map.get(id) ?? 0) + 1)
 }
 
 function drop(map: Map<string, number>, id: string): void {
+  mutationRevision++
   const count = map.get(id) ?? 0
   if (count <= 1) map.delete(id)
   else map.set(id, count - 1)
@@ -73,6 +82,7 @@ export function isPendingIndexedDbConversationDelete(conversationId: string): bo
 
 /** 仅测试用 */
 export function resetIndexedDbSyncStateForTest(): void {
+  mutationRevision++
   pendingTaskWrites.clear()
   pendingTaskDeletes.clear()
   pendingConversationWrites.clear()

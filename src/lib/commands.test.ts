@@ -4,12 +4,12 @@ import { buildCommands, COMMAND_GROUP_ORDER, type CommandCtx, type CommandStore 
 vi.mock('./exportImport', () => ({
   exportData: vi.fn().mockResolvedValue(undefined),
 }))
-vi.mock('./taskRuntime', () => ({
+vi.mock('./taskRuntime/cancel', () => ({
   cancelAllRunning: vi.fn(() => ({ aborted: 1, skipped: 2 })),
 }))
 
 import { exportData } from './exportImport'
-import { cancelAllRunning } from './taskRuntime'
+import { cancelAllRunning } from './taskRuntime/cancel'
 
 function makeStore(overrides: Partial<CommandStore> = {}): CommandStore {
   return {

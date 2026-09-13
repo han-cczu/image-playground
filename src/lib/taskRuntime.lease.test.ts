@@ -29,6 +29,8 @@ import { queryHeldTaskLeases, watchTaskLeaseRelease } from './taskRuntime/lease'
 import { CONVERSATION_MIGRATION_VERSION } from './conversations'
 import { useStore } from '../store'
 import { initStore, resetTaskRuntimeForTest, SYNC_HTTP_INTERRUPTED_ERROR } from './taskRuntime'
+import { enqueueTask } from './taskRuntime/submit'
+import * as taskLeases from './taskRuntime/lease'
 
 function runningTask(id: string): TaskRecord {
   return {
@@ -95,6 +97,7 @@ describe('initStore 与任务租约(另一标签页正在执行的任务不能�
 
   it('无人持有租约的 running 任务照旧翻成「请求中断」并落库', async () => {
     vi.mocked(getAllTasks).mockResolvedValue([runningTask('orphan')])
+    vi.mocked(getTask).mockResolvedValue(runningTask('orphan'))
 
     await initStore()
 
@@ -109,6 +112,7 @@ describe('initStore 与任务租约(另一标签页正在执行的任务不能�
 
   it('被别的标签页持有租约的 running 任务原样保留、不写库,并挂上租约释放观察者', async () => {
     vi.mocked(getAllTasks).mockResolvedValue([runningTask('owned'), runningTask('orphan')])
+    vi.mocked(getTask).mockResolvedValue(runningTask('orphan'))
     vi.mocked(queryHeldTaskLeases).mockResolvedValue(new Set(['owned']))
 
     await initStore()
@@ -141,7 +145,7 @@ describe('initStore 与任务租约(另一标签页正在执行的任务不能�
     onReleased()
     await vi.runAllTimersAsync()
     expect(putTask).not.toHaveBeenCalled()
-    expect(useStore.getState().tasks[0].status).toBe('running')
+    expect(useStore.getState().tasks[0].status).toBe('done')
 
     // 崩溃:库里仍 running → 补标
     vi.mocked(getTask).mockResolvedValueOnce(runningTask('owned'))
@@ -153,5 +157,78 @@ describe('initStore 与任务租约(另一标签页正在执行的任务不能�
     expect(marked.finishedAt).toBeGreaterThanOrEqual(10_000)
     expect(marked.elapsed).toBe((marked.finishedAt ?? 0) - marked.createdAt)
     expect(putTask).toHaveBeenCalledWith(expect.objectContaining({ id: 'owned', status: 'error' }))
+  })
+
+  it('查询租约前持有者已经完成,不能把旧 running 快照写回为中断', async () => {
+    const completed: TaskRecord = {
+      ...runningTask('completed'),
+      status: 'done',
+      outputImages: ['result'],
+      finishedAt: 5_000,
+    }
+    vi.mocked(getAllTasks).mockResolvedValue([runningTask('completed')])
+    vi.mocked(getTask).mockResolvedValue(completed)
+
+    await initStore()
+
+    expect(useStore.getState().tasks[0]).toMatchObject({ status: 'done', outputImages: ['result'] })
+    expect(putTask).not.toHaveBeenCalled()
+  })
+
+  it.each(['running', 'done'] as const)(
+    '启动尚未完成时租约已释放,观察者正确恢复 %s 记录',
+    async (status) => {
+      vi.mocked(getAllTasks).mockResolvedValue([runningTask('owned')])
+      vi.mocked(queryHeldTaskLeases).mockResolvedValue(new Set(['owned']))
+      vi.mocked(getTask).mockResolvedValue({ ...runningTask('owned'), status })
+      vi.mocked(watchTaskLeaseRelease).mockImplementation((_id, released) => {
+        released()
+      })
+
+      await initStore()
+      await vi.runAllTimersAsync()
+
+      expect(useStore.getState().tasks[0].status).toBe(status === 'running' ? 'error' : 'done')
+    },
+  )
+
+  it('查询租约前任务已被删除,不能用旧 running 快照复活它', async () => {
+    vi.mocked(getAllTasks).mockResolvedValue([runningTask('deleted')])
+    vi.mocked(getTask).mockResolvedValue(undefined)
+
+    await initStore()
+
+    expect(useStore.getState().tasks).toEqual([])
+    expect(putTask).not.toHaveBeenCalled()
+  })
+
+  it('入队等待实际取得租约后才把 running 任务写入数据库', async () => {
+    let grant!: () => void
+    const acquired = new Promise<void>((resolve) => {
+      grant = resolve
+    })
+    const acquire = vi.spyOn(taskLeases, 'acquireTaskLease').mockReturnValue(acquired)
+    try {
+      const enqueue = enqueueTask({
+        prompt: 'prompt',
+        params: { ...DEFAULT_PARAMS },
+        apiProvider: 'openai',
+        apiProfileId: 'p',
+        apiProfileName: 'P',
+        apiModel: 'model',
+        inputImageIds: [],
+        maskTargetImageId: null,
+        maskImageId: null,
+        conversationId: 'conv-a',
+      })
+      await Promise.resolve()
+      expect(putTask).not.toHaveBeenCalled()
+      grant()
+      await enqueue
+      expect(putTask).toHaveBeenCalledOnce()
+    } finally {
+      grant()
+      acquire.mockRestore()
+    }
   })
 })

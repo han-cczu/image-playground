@@ -16,8 +16,8 @@
 
 const LEASE_NAME_PREFIX = 'image-playground:task:'
 
-/** 本标签页持有的租约:taskId → 释放函数(resolve 传给 locks.request 的挂起 promise 即释放锁)。 */
-const releaseByTask = new Map<string, () => void>()
+/** ready 在实际获锁后完成;release 结束传给 locks.request 的挂起 promise。 */
+const releaseByTask = new Map<string, { ready: Promise<void>; release: () => void }>()
 
 function getLockManager(): LockManager | null {
   try {
@@ -34,40 +34,55 @@ export function isTaskLeaseSupported(): boolean {
 }
 
 /**
- * 为任务持有租约,直到 releaseTaskLease / 文档卸载。必须在任务以 running 落库**之前**调用:
+ * 为任务持有租约,直到 releaseTaskLease / 文档卸载。必须在任务以 running 落库**之前等待完成**:
  * 别的标签页只要在库里看到 running,就一定能查到对应的锁,否则中间有一段无主窗口。
  * 幂等:重复调用不会叠加持锁。
  */
-export function acquireTaskLease(taskId: string): void {
+export function acquireTaskLease(taskId: string): Promise<void> {
   const locks = getLockManager()
-  if (!locks || releaseByTask.has(taskId)) return
+  if (!locks) return Promise.resolve()
+  const existing = releaseByTask.get(taskId)
+  if (existing) return existing.ready
   let release: () => void = () => {}
   const held = new Promise<void>((resolve) => {
     release = resolve
   })
-  releaseByTask.set(taskId, release)
+  let acquired!: () => void
+  const ready = new Promise<void>((resolve) => {
+    acquired = resolve
+  })
+  const entry = { ready, release }
+  releaseByTask.set(taskId, entry)
+  const abandon = () => {
+    if (releaseByTask.get(taskId) === entry) releaseByTask.delete(taskId)
+    acquired()
+  }
   // ifAvailable:任务只会被入队它的那个标签页执行,锁理应总是空闲;若被别人持有(理论上不会发生)
   // 不排队等待,以免请求挂在别的文档上,直接放弃持有。
-  void locks
-    .request(LEASE_NAME_PREFIX + taskId, { mode: 'exclusive', ifAvailable: true }, (lock) => {
-      if (!lock) {
-        releaseByTask.delete(taskId)
-        return undefined
-      }
-      return held
-    })
-    .catch(() => {
-      // 锁请求失败(如文档正在卸载)等价于没有租约:退回旧行为即可,不向用户报错
-      releaseByTask.delete(taskId)
-    })
+  try {
+    void locks
+      .request(LEASE_NAME_PREFIX + taskId, { mode: 'exclusive', ifAvailable: true }, (lock) => {
+        if (!lock) {
+          abandon()
+          return undefined
+        }
+        acquired()
+        return held
+      })
+      .catch(abandon)
+  } catch {
+    // 锁请求失败(如文档正在卸载)退回旧行为,但不能让等待 ready 的提交永久挂起。
+    abandon()
+  }
+  return ready
 }
 
 /** 释放租约。任务落终态、被取消/删除、入队失败回滚时都要调用;对未持有的 taskId 无操作。 */
 export function releaseTaskLease(taskId: string): void {
-  const release = releaseByTask.get(taskId)
-  if (!release) return
+  const entry = releaseByTask.get(taskId)
+  if (!entry) return
   releaseByTask.delete(taskId)
-  release()
+  entry.release()
 }
 
 /** 仅测试用:释放本标签页持有的全部租约。 */
@@ -96,16 +111,15 @@ export async function queryHeldTaskLeases(): Promise<Set<string>> {
  * 等某条任务的租约被释放后回调一次——持有它的标签页正常收尾会释放,崩溃/关闭也会由浏览器释放。
  * initStore 对「有人持锁」而跳过标记的任务挂这个观察者:持有者若崩溃,这条任务就成了真正的孤儿
  * running,由观察者补做中断标记;持有者正常完成时回调方读库看到终态,自然无事可做。
- * 排队等待锁的请求不会阻塞任何人,拿到锁后立即归还。
+ * 排队等待不占锁;拿到后只持有到回调(含持久化)完成,避免另一观察者抢先读取未落盘的旧状态。
  */
-export function watchTaskLeaseRelease(taskId: string, onReleased: () => void): void {
+export function watchTaskLeaseRelease(
+  taskId: string,
+  onReleased: () => void | Promise<void>,
+): void {
   const locks = getLockManager()
   if (!locks) return
-  void locks
-    .request(LEASE_NAME_PREFIX + taskId, { mode: 'exclusive' }, () => {
-      onReleased()
-    })
-    .catch(() => {
-      /* 文档卸载时挂起的请求会被拒绝,无需处理 */
-    })
+  void locks.request(LEASE_NAME_PREFIX + taskId, { mode: 'exclusive' }, onReleased).catch(() => {
+    /* 文档卸载时挂起的请求会被拒绝,无需处理 */
+  })
 }

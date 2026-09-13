@@ -98,11 +98,16 @@ function abortTaskRequest(taskId: string) {
   if (controller && !controller.signal.aborted) controller.abort()
 }
 
-/** 统一收口在途任务的运行期资源:中止请求 + 清 watchdog 定时器 + 清 AbortController + 唤醒退避睡眠 + 释放租约。 */
-export function terminateTaskRuntime(taskId: string) {
+/** 结束一次请求尝试。超时重试仍由本页执行,必须继续持有任务租约,否则观察页会误标「请求中断」。 */
+export function abortTaskAttempt(taskId: string) {
   abortTaskRequest(taskId)
   clearSyncHttpWatchdogTimer(taskId)
   clearTaskAbortController(taskId)
+}
+
+/** 统一收口在途任务的运行期资源:中止请求 + 清 watchdog 定时器 + 清 AbortController + 唤醒退避睡眠 + 释放租约。 */
+export function terminateTaskRuntime(taskId: string) {
+  abortTaskAttempt(taskId)
   wakeRetryBackoffSleep(taskId)
   // 取消/删除/跨标签页终止后本页不再执行它,租约随之释放(留着会让别的标签页误以为它还在跑)
   releaseTaskLease(taskId)

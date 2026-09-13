@@ -28,6 +28,7 @@ import { callImageApi } from './api'
 import type { CallApiResult } from './api'
 import { getImage } from './db'
 import { clearImageCache } from './imageCache'
+import * as taskLeases from './taskRuntime/lease'
 import { useStore } from '../store'
 import { cancelAllRunning, cancelTask, resetTaskRuntimeForTest, submitTask } from './taskRuntime'
 
@@ -75,6 +76,7 @@ describe('瞬时失败自动重试(executeTask 集成)', () => {
 
   afterEach(() => {
     resetTaskRuntimeForTest()
+    vi.restoreAllMocks()
     vi.useRealTimers()
   })
 
@@ -210,6 +212,32 @@ describe('瞬时失败自动重试(executeTask 集成)', () => {
     expect(task.status).toBe('error')
     expect(task.error).toContain('请求超时')
     expect(task.error).toContain('已自动重试 1 次')
+  })
+
+  it('超时重试与退避期间继续持有租约,成功后才释放', async () => {
+    const releaseLease = vi.spyOn(taskLeases, 'releaseTaskLease')
+    vi.mocked(callImageApi)
+      .mockImplementationOnce(
+        (opts) =>
+          new Promise((_resolve, reject) => {
+            opts.signal?.addEventListener('abort', () =>
+              reject(new DOMException('aborted', 'AbortError')),
+            )
+          }),
+      )
+      .mockResolvedValueOnce(SUCCESS_RESULT)
+
+    await submitAndWaitFirstCall()
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(currentTask().status).toBe('running')
+    expect(useStore.getState().taskRetryInfo[currentTask().id]).toBeTruthy()
+    expect(releaseLease).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(callImageApi).toHaveBeenCalledTimes(2)
+    expect(currentTask().status).toBe('done')
+    expect(releaseLease).toHaveBeenCalledWith(currentTask().id)
   })
 
   it('输入图 IDB 读挂起(默认 autoRetryMax=2):超时不进重试而直落 error,任务不会永久 running', async () => {

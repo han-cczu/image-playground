@@ -1,6 +1,7 @@
 import type { AppState } from '../store'
 import { exportData } from './exportImport'
-import { cancelAllRunning } from './taskRuntime'
+// 命令面板是懒加载 chunk;直连取消模块,避免经过聚合导出与 store 形成跨 chunk 的循环重导出。
+import { cancelAllRunning } from './taskRuntime/cancel'
 
 /** 命令分组（也是面板里的展示顺序） */
 export type CommandGroup =

@@ -44,7 +44,7 @@ import {
   clearTaskAbortController,
   registerTaskRuntimeTestReset,
   sleepForRetryBackoff,
-  terminateTaskRuntime,
+  abortTaskAttempt,
 } from './shared'
 import { registerWatchdogTimeoutRetryArbiter, scheduleSyncHttpWatchdog } from './watchdog'
 import { acquireTaskLease, releaseTaskLease } from './lease'
@@ -155,12 +155,12 @@ export async function enqueueTask(spec: EnqueueTaskSpec): Promise<string | null>
     ...(spec.gridAxes ? { gridAxes: spec.gridAxes, gridCoord: spec.gridCoord } : {}),
   }
 
-  const latestTasks = useStore.getState().tasks
-  useStore.getState().setTasks([task, ...latestTasks])
-  markPendingIndexedDbTaskWrite(taskId)
   // 租约必须先于 running 落库:别的标签页一旦在库里看到 running,就要能查到本页持锁,否则其 initStore
   // 会把这条正在跑的任务当孤儿翻成「请求中断」(见 lease.ts 头注释)。executeTask 收尾统一释放。
-  acquireTaskLease(taskId)
+  await acquireTaskLease(taskId)
+  const latestTasks = useStore.getState().tasks
+  markPendingIndexedDbTaskWrite(taskId)
+  useStore.getState().setTasks([task, ...latestTasks])
   try {
     await putTask(task)
   } catch (err) {
@@ -518,8 +518,8 @@ registerWatchdogTimeoutRetryArbiter((taskId) => {
   if (!task || task.status !== 'running') return { kind: 'fail', retriesUsed }
   timeoutRetryFlags.add(taskId)
   // 中止在途请求:fetch 以 AbortError 拒绝进入 attempt 的 catch,循环凭标记识别为超时重试。
-  // 注意必须在置标记之后 terminate(先 abort 会让 catch 抢在标记前消费)。
-  terminateTaskRuntime(taskId)
+  // 只中止本次请求,保留贯穿重试与退避的租约;标记须在 abort 之前设置。
+  abortTaskAttempt(taskId)
   return { kind: 'takeover' }
 })
 

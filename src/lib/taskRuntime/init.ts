@@ -15,7 +15,7 @@ import {
 import { queryHeldTaskLeases, watchTaskLeaseRelease } from './lease'
 import { getDataJobInProgress } from '../dataJobState'
 import { getInFlightImageIds } from '../inFlightImages'
-import { updateTaskInStoreSilently } from './persistence'
+import { updateTaskInStore } from './persistence'
 import { collectReferencedImageIds, pruneOrphanImages } from '../storageStats'
 import { setCachedImage } from '../imageCache'
 import {
@@ -42,9 +42,17 @@ import {
  */
 async function markOrphanedTaskInterrupted(taskId: string): Promise<void> {
   const latest = await getTask(taskId)
-  if (!latest || !isRunningSyncHttpTask(latest)) return
+  if (!latest || !isRunningSyncHttpTask(latest)) {
+    // 完成/删除通知可能早于本页初始化写 store。这里同步当前记录,避免最后停在旧 running 副本上。
+    useStore.setState((state) => ({
+      tasks: state.tasks.flatMap((task) =>
+        task.id === taskId ? (latest ? [latest] : []) : [task],
+      ),
+    }))
+    return
+  }
   const now = Date.now()
-  updateTaskInStoreSilently(taskId, {
+  await updateTaskInStore(taskId, {
     status: 'error',
     error: SYNC_HTTP_INTERRUPTED_ERROR,
     finishedAt: now,
@@ -175,18 +183,20 @@ async function initStoreOnce() {
   // 不跳过就会把用户在 A 页的整批在途任务全部写成中断,再经跨标签页刷新中止 A 页的真实请求)。
   // 被跳过的挂一个租约释放观察者:持有者崩溃时由本页补标中断,不留幽灵 running。
   const heldLeases = await queryHeldTaskLeases()
+  // 读到 running 后、查询租约前,持有者可能已完成落库并释放锁。无锁候选必须再读当前记录,
+  // 否则旧快照会把成功结果覆写为 error,甚至复活已删除的任务。新任务在入库前已等待获锁。
+  const checkedTasks = (
+    await Promise.all(
+      storedTasks.map((task) =>
+        isRunningSyncHttpTask(task) && !heldLeases.has(task.id) ? getTask(task.id) : task,
+      ),
+    )
+  ).filter((task) => task !== undefined)
   const {
     tasks: interruptedNormalizedTasks,
     interruptedTasks,
     skippedOwnedTasks,
-  } = markInterruptedSyncHttpTasks(storedTasks, initStartedAt, heldLeases)
-  for (const owned of skippedOwnedTasks) {
-    watchTaskLeaseRelease(owned.id, () => {
-      void markOrphanedTaskInterrupted(owned.id).catch((err) =>
-        console.error('补标孤儿任务失败:', err),
-      )
-    })
-  }
+  } = markInterruptedSyncHttpTasks(checkedTasks, initStartedAt, heldLeases)
 
   /*
    * ========================================================================
@@ -255,6 +265,14 @@ async function initStoreOnce() {
   useStore
     .getState()
     .setTasks(memoryOnlyTasks.length ? [...memoryOnlyTasks, ...finalTasks] : finalTasks)
+
+  // 必须在任务进 store 后挂观察者:锁可能已在初始化期间释放,回调会立即执行;提前挂会找不到记录,
+  // 或把刚补标的终态再次被初始化快照覆盖。
+  for (const owned of skippedOwnedTasks) {
+    watchTaskLeaseRelease(owned.id, () =>
+      markOrphanedTaskInterrupted(owned.id).catch((err) => console.error('补标孤儿任务失败:', err)),
+    )
+  }
 
   // 3.3 若没有 activeConversationId 或指向不存在的对话，激活 updatedAt 最新的对话
   const currentActiveId = useStore.getState().activeConversationId

@@ -94,6 +94,36 @@ describe('task lease (Web Locks)', () => {
     expect(fake.held.size).toBe(0)
   })
 
+  it('request 回调延迟时 acquire 保持等待,回调获锁后完成', async () => {
+    const request = fake.manager.request.getMockImplementation()!
+    let grant!: () => void
+    fake.manager.request.mockImplementationOnce(
+      (name, options, callback) =>
+        new Promise((resolve) => {
+          grant = () => resolve(request(name, options, callback))
+        }),
+    )
+    let acquired = false
+    const acquiring = acquireTaskLease('task-a').then(() => {
+      acquired = true
+    })
+    await flush()
+    expect(acquired).toBe(false)
+    expect(fake.held.size).toBe(0)
+
+    grant()
+    await acquiring
+    expect(await queryHeldTaskLeases()).toEqual(new Set(['task-a']))
+  })
+
+  it('request 失败时结束等待并清理登记,后续可重新取得租约', async () => {
+    fake.manager.request.mockRejectedValueOnce(new Error('unavailable'))
+    await acquireTaskLease('task-a')
+    expect(fake.held.size).toBe(0)
+    await acquireTaskLease('task-a')
+    expect(await queryHeldTaskLeases()).toEqual(new Set(['task-a']))
+  })
+
   it('观察者在持有者释放后才被回调一次,且拿到锁后立即归还', async () => {
     acquireTaskLease('task-a')
     await flush()

@@ -850,6 +850,43 @@ describe('跨标签页刷新不回滚本地未落盘变更(idbSyncState 总账)'
     expect(useStore.getState().tasks[0]).toMatchObject({ status: 'error', error: '已取消生成' })
   })
 
+  it('刷新读取期间完成落盘后,迟到的旧快照不能把 done 回退为 running', async () => {
+    const reading = createDeferred<(typeof conv)[]>()
+    vi.mocked(getAllConversations).mockReturnValueOnce(reading.promise).mockResolvedValue([conv])
+    vi.mocked(getAllTasks).mockResolvedValueOnce([baseTask])
+    useStore.setState({ tasks: [baseTask], conversations: [conv], activeConversationId: 'conv-a' })
+
+    const refreshing = refreshIndexedDbBackedStoreState()
+    await updateTaskInStore('task-1', {
+      status: 'done',
+      outputImages: ['img'],
+      finishedAt: 5,
+      elapsed: 4,
+    })
+    // 此时 pending write 已清零,但前面的读取仍握着旧 running 快照。
+    vi.mocked(getAllTasks).mockResolvedValue(useStore.getState().tasks)
+    reading.resolve([conv])
+    await refreshing
+
+    expect(useStore.getState().tasks[0]).toMatchObject({ status: 'done', outputImages: ['img'] })
+  })
+
+  it('刷新读取期间删除已落盘,迟到的旧快照不能复活任务', async () => {
+    const reading = createDeferred<(typeof conv)[]>()
+    const doneTask: TaskRecord = { ...baseTask, status: 'done', finishedAt: 2, elapsed: 1 }
+    vi.mocked(getAllConversations).mockReturnValueOnce(reading.promise).mockResolvedValue([conv])
+    vi.mocked(getAllTasks).mockResolvedValueOnce([doneTask])
+    useStore.setState({ tasks: [doneTask], conversations: [conv], activeConversationId: 'conv-a' })
+
+    const refreshing = refreshIndexedDbBackedStoreState()
+    await removeTask(doneTask)
+    vi.mocked(getAllTasks).mockResolvedValue([])
+    reading.resolve([conv])
+    await refreshing
+
+    expect(useStore.getState().tasks).toEqual([])
+  })
+
   it('删除尚未落盘时,仍含该记录的快照不能把它复活', async () => {
     const deleting = createDeferred<undefined>()
     vi.mocked(deleteTask).mockReturnValueOnce(deleting.promise)
