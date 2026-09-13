@@ -199,7 +199,7 @@ function BatchCaptionPanel({ imageIds, close }: { imageIds: string[]; close: () 
       <ModalHeaderBar>
         <ModalTitle>
           批量反推
-          <span className="text-xs font-normal text-gray-400 dark:text-gray-500">
+          <span className="text-xs font-normal text-content-subtle dark:text-content-subtle">
             {doneCount}/{items.length} 完成{errorCount > 0 ? ` · ${errorCount} 失败` : ''}
           </span>
         </ModalTitle>
@@ -217,7 +217,7 @@ function BatchCaptionPanel({ imageIds, close }: { imageIds: string[]; close: () 
             <button
               type="button"
               onClick={saveAllAsSnippets}
-              className="rounded-lg bg-blue-50 px-2.5 py-1 text-xs text-blue-600 transition hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20"
+              className="rounded-lg bg-brand-soft px-2.5 py-1 text-xs text-brand-ink transition hover:bg-brand-soft dark:bg-brand-soft dark:text-brand-ink dark:hover:bg-brand-soft"
             >
               全部存为片段
             </button>
@@ -235,29 +235,29 @@ function BatchCaptionPanel({ imageIds, close }: { imageIds: string[]; close: () 
         {items.map((it) => (
           <div
             key={it.imageId}
-            className="flex gap-3 rounded-2xl border border-gray-200/60 p-3 dark:border-white/[0.06]"
+            className="flex gap-3 rounded-2xl border border-line p-3 dark:border-line"
           >
-            <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-gray-100 dark:bg-black/20">
+            <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-surface-muted dark:bg-black/20">
               {thumbs[it.imageId] && (
                 <img src={thumbs[it.imageId]} className="h-full w-full object-cover" alt="" />
               )}
             </div>
             <div className="min-w-0 flex-1">
               {it.status === 'running' || it.status === 'pending' ? (
-                <div className="text-xs text-gray-400 dark:text-gray-500">
+                <div className="text-xs text-content-subtle dark:text-content-subtle">
                   {it.status === 'running' ? '反推中…' : '排队中…'}
                 </div>
               ) : it.status === 'error' ? (
                 <div className="text-xs text-red-500 dark:text-red-400">反推失败：{it.error}</div>
               ) : (
                 <>
-                  <div className="whitespace-pre-wrap break-words text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+                  <div className="whitespace-pre-wrap break-words text-xs leading-relaxed text-content dark:text-content">
                     {it.text}
                   </div>
                   <button
                     type="button"
                     onClick={() => copyText(it.text)}
-                    className="mt-1.5 text-xs text-blue-500 transition hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
+                    className="mt-1.5 text-xs text-brand-ink transition hover:text-brand-ink dark:text-brand-ink dark:hover:text-brand-ink"
                   >
                     复制
                   </button>

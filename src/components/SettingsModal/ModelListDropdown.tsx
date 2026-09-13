@@ -47,7 +47,7 @@ export function ModelListDropdown({
           onChange={(e) => onChange(e.target.value)}
           type="text"
           placeholder={placeholder}
-          className="flex-1 min-w-0 rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+          className="flex-1 min-w-0 ui-field text-base md:text-sm"
         />
         {showFetchButton && (
           <button
@@ -56,7 +56,7 @@ export function ModelListDropdown({
             disabled={isLoading}
             title="从 API 拉取模型列表"
             aria-label="从 API 拉取模型列表"
-            className="flex-shrink-0 rounded-xl border border-gray-200/70 bg-white/60 px-2.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+            className="flex-shrink-0 rounded-xl border border-line bg-surface px-2.5 text-content-muted transition hover:bg-surface-muted hover:text-content disabled:opacity-50 disabled:cursor-not-allowed dark:border-line dark:bg-surface-raised dark:text-content-muted dark:hover:bg-surface-raised dark:hover:text-content"
           >
             <svg
               className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`}
@@ -76,13 +76,17 @@ export function ModelListDropdown({
         )}
       </div>
       {isOpen && (
-        <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] py-1 max-h-60 overflow-y-auto ring-1 ring-black/5 dark:ring-white/10 animate-dropdown-down">
+        <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-surface dark:bg-surface-muted backdrop-blur-xl border border-line dark:border-line rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] py-1 max-h-60 overflow-y-auto ring-1 ring-black/5 dark:ring-line animate-dropdown-down">
           {isLoading ? (
-            <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">加载中…</div>
+            <div className="px-3 py-2 text-xs text-content-muted dark:text-content-muted">
+              加载中…
+            </div>
           ) : error ? (
             <div className="px-3 py-2 text-xs text-red-500 dark:text-red-400 break-all">
               {error}
-              <div className="mt-1 text-gray-400 dark:text-gray-500">可继续手动填写模型 ID。</div>
+              <div className="mt-1 text-content-subtle dark:text-content-subtle">
+                可继续手动填写模型 ID。
+              </div>
             </div>
           ) : modelList && modelList.length > 0 ? (
             modelList.map((id) => (
@@ -94,15 +98,17 @@ export function ModelListDropdown({
                 }}
                 className={`px-3 py-2 text-xs cursor-pointer transition-colors break-all ${
                   id === value
-                    ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium'
-                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/[0.06]'
+                    ? 'bg-brand-soft dark:bg-brand-soft text-brand-ink dark:text-brand-ink font-medium'
+                    : 'text-content dark:text-content hover:bg-surface-muted dark:hover:bg-surface-raised'
                 }`}
               >
                 {id}
               </div>
             ))
           ) : (
-            <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">暂无可用模型</div>
+            <div className="px-3 py-2 text-xs text-content-muted dark:text-content-muted">
+              暂无可用模型
+            </div>
           )}
         </div>
       )}

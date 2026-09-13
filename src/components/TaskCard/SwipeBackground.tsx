@@ -19,21 +19,29 @@ export default function SwipeBackground({
   const showSwipeAction = isSwipeReady || swipeActionActive
   const swipeBgClass = showSwipeAction
     ? swipeStartedSelected
-      ? 'bg-gray-500 dark:bg-gray-600'
-      : 'bg-blue-500'
-    : 'bg-gray-200 dark:bg-gray-700'
+      ? 'bg-content-muted'
+      : 'bg-brand'
+    : 'bg-surface-muted'
 
   return (
     <div
-      className={`absolute inset-0 rounded-xl flex items-center transition-opacity duration-200 pointer-events-none ${
+      className={`absolute inset-0 rounded-2xl flex items-center transition-opacity duration-200 pointer-events-none ${
         isSwiping || swipeOffset || swipeActionActive ? 'opacity-100' : 'opacity-0'
-      } ${swipeBgClass} ${
-        swipeOffset > 0 ? 'justify-start pl-6' : 'justify-end pr-6'
-      }`}
+      } ${swipeBgClass} ${swipeOffset > 0 ? 'justify-start pl-6' : 'justify-end pr-6'}`}
     >
-      <svg className={`w-8 h-8 transition-transform duration-150 ${showSwipeAction ? 'scale-110 text-white' : 'scale-90 text-white/60'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg
+        className={`w-8 h-8 transition-transform duration-150 ${showSwipeAction ? 'scale-110 text-white' : 'scale-90 text-white/60'}`}
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
         {swipeStartedSelected && showSwipeAction ? (
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M6 18L18 6M6 6l12 12"
+          />
         ) : (
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
         )}

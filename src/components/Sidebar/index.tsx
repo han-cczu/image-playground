@@ -1,105 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import { normalizeConversations } from '../../lib/conversations'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
 import { useLockBodyScroll } from '../../hooks/useLockBodyScroll'
+import { useFocusTrap } from '../../hooks/useFocusTrap'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import ConversationItem from './ConversationItem'
 
 interface SidebarProps {
-  /** 移动端抽屉是否打开（< md 断点时使用） */
   mobileOpen: boolean
-  /** 关闭移动端抽屉 */
   onMobileClose: () => void
-}
-
-/** 简易 Logo（图标 + 文字），与品牌色一致。折叠态变为可点击的展开入口。 */
-function Logo({ collapsed, onToggle }: { collapsed: boolean; onToggle?: () => void }) {
-  const inner = (
-    <>
-      <span
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-purple-500 text-white"
-        aria-hidden="true"
-      >
-        <svg
-          className="h-4 w-4"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <rect x="3" y="3" width="18" height="18" rx="3" />
-          <circle cx="9" cy="9" r="1.5" fill="currentColor" />
-          <path d="M21 15l-5-5L5 21" />
-        </svg>
-      </span>
-      {!collapsed && (
-        <div className="flex min-w-0 flex-col leading-tight">
-          <span className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">
-            Image Playground
-          </span>
-          <span className="truncate text-[11px] text-gray-400 dark:text-gray-500">
-            创作你的图像
-          </span>
-        </div>
-      )}
-    </>
-  )
-
-  // 折叠态：Logo 变 button，点击展开（弥补原 toggle button 被布局挤掉的问题）
-  if (collapsed && onToggle) {
-    return (
-      <button
-        type="button"
-        onClick={onToggle}
-        className="group flex items-center gap-2 rounded-lg p-0.5 transition hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-500/50"
-        title="展开 sidebar"
-        aria-label="展开 sidebar"
-      >
-        <span className="relative">
-          <span
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-purple-500 text-white"
-            aria-hidden="true"
-          >
-            <svg
-              className="h-4 w-4"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3" y="3" width="18" height="18" rx="3" />
-              <circle cx="9" cy="9" r="1.5" fill="currentColor" />
-              <path d="M21 15l-5-5L5 21" />
-            </svg>
-          </span>
-          <span
-            aria-hidden="true"
-            className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-white opacity-0 shadow-sm ring-1 ring-gray-200 transition-opacity duration-150 group-hover:opacity-100 dark:bg-gray-800 dark:ring-white/10"
-          >
-            <svg
-              className="h-2.5 w-2.5 text-gray-600 dark:text-gray-300"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path d="M9 6l6 6-6 6" />
-            </svg>
-          </span>
-        </span>
-      </button>
-    )
-  }
-  // 展开态：保持原 div 语义
-  return <div className="flex items-center gap-2">{inner}</div>
 }
 
 export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
@@ -114,234 +24,255 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
   const tasks = useStore((s) => s.tasks)
   const galleryView = useStore((s) => s.galleryView)
   const setGalleryView = useStore((s) => s.setGalleryView)
+  const filterFavorite = useStore((s) => s.filterFavorite)
+  const filterFavoriteCategoryId = useStore((s) => s.filterFavoriteCategoryId)
+  const setFilterFavorite = useStore((s) => s.setFilterFavorite)
+  const setFilterFavoriteCategoryId = useStore((s) => s.setFilterFavoriteCategoryId)
+  const isMobile = useIsMobile(768)
+  const belowDesktop = useIsMobile(1024)
+  // 平板默认收紧导航是展示选择，不在 resize 时覆盖用户的桌面折叠偏好。
+  const [tabletExpanded, setTabletExpanded] = useState(false)
+  const collapsed = !isMobile && (belowDesktop ? !tabletExpanded : sidebarCollapsed)
+  const panelRef = useRef<HTMLElement>(null)
+  useCloseOnEscape(mobileOpen && isMobile, onMobileClose)
+  useLockBodyScroll(mobileOpen)
+  useFocusTrap(mobileOpen && isMobile, panelRef)
 
-  /** 按统一规则排序的对话（archive 永远在最底）。 */
   const sortedConversations = useMemo(() => normalizeConversations(conversations), [conversations])
-
-  /** 每个对话下的任务数（用于列表项徽标）。 */
   const taskCountByConversation = useMemo(() => {
     const map = new Map<string, number>()
-    for (const t of tasks) {
-      const cid = t.conversationId
-      if (!cid) continue
-      map.set(cid, (map.get(cid) ?? 0) + 1)
+    for (const task of tasks) {
+      if (task.conversationId) map.set(task.conversationId, (map.get(task.conversationId) ?? 0) + 1)
     }
     return map
   }, [tasks])
 
-  /** ESC 关闭移动端抽屉(走全局 escStack:自建监听会让一次 Esc 把抽屉与其上层确认弹窗一起关掉)。 */
-  useCloseOnEscape(mobileOpen, onMobileClose)
-
-  /** 抽屉打开时阻止背景滚动;与 Modal/Lightbox 共享锁计数,避免叠层提前解锁。 */
-  useLockBodyScroll(mobileOpen)
-
-  /** 抽屉打开时简易 trap focus：把焦点收回到抽屉容器上。 */
-  const panelRef = useRef<HTMLElement>(null)
-  useEffect(() => {
-    if (!mobileOpen) return
-    const node = panelRef.current
-    if (!node) return
-    const prev = document.activeElement as HTMLElement | null
-    node.focus()
-    return () => {
-      prev?.focus?.()
-    }
-  }, [mobileOpen])
-
-  // 稳定回调(zustand action 引用稳定):配合 ConversationItem 的 memo,
-  // 任务增删时只有 taskCount 变化的对话项重渲染
   const handleSelect = useCallback(
     (id: string) => {
-      // F3：active id 必须真实存在；否则忽略点击
-      const target = useStore.getState().conversations.find((c) => c.id === id)
-      if (!target) return
+      if (!useStore.getState().conversations.some((conversation) => conversation.id === id)) return
       setGalleryView(false)
       setActiveConversation(id)
       onMobileClose()
     },
     [setGalleryView, setActiveConversation, onMobileClose],
   )
-
   const handleDelete = useCallback(
     (id: string) => {
       deleteConversationWithTasks(id)
     },
     [deleteConversationWithTasks],
   )
-
   const handleCreate = () => {
-    // 复用空「新对话」否则新建:逻辑下沉到 store(命令面板同口径),避免两处判定漂移
     setGalleryView(false)
     createOrReuseEmptyConversation()
     onMobileClose()
   }
-
-  // —— 桌面端：始终在 md 及以上断点常驻 ——
-  // —— 移动端：默认隐藏，按 mobileOpen 控制 ——
-  const widthClass = sidebarCollapsed ? 'md:w-14' : 'md:w-64'
-
-  // 抽屉显示状态：移动端打开 -> 滑入；否则 transform 隐藏（< md 才生效）
-  const mobileTransform = mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+  const openGallery = (favorites: boolean) => {
+    // 只改变范围与收藏条件；搜索、状态和全局草稿继续保留。setter 自己判断是否需要清多选。
+    setGalleryView(true)
+    setFilterFavorite(favorites)
+    if (!favorites) setFilterFavoriteCategoryId(null)
+    onMobileClose()
+  }
+  const toggleNavigation = () => {
+    if (belowDesktop) setTabletExpanded((value) => !value)
+    else toggleSidebar()
+  }
+  const galleryActive = galleryView && !filterFavorite && !filterFavoriteCategoryId
+  const favoritesActive = galleryView && filterFavorite
+  const navClass = (active: boolean) =>
+    `flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${active ? 'bg-brand-soft font-semibold text-brand-ink' : 'text-content-muted hover:bg-surface-raised hover:text-content'} ${collapsed ? 'justify-center px-0' : ''}`
 
   return (
     <>
-      {/* 移动端遮罩 */}
       {mobileOpen && (
         <button
           type="button"
-          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] md:hidden"
+          className="fixed inset-0 z-40 bg-black/40 md:hidden"
           aria-label="关闭对话列表"
           onClick={onMobileClose}
         />
       )}
-
       <aside
         ref={panelRef}
         tabIndex={-1}
         aria-label="对话列表"
-        className={`app-enter-sidebar fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-gray-200 bg-white outline-none transition-[transform,width] duration-200 dark:border-white/[0.08] dark:bg-gray-950 md:static md:z-0 md:h-screen ${widthClass} ${mobileTransform}`}
+        aria-hidden={isMobile && !mobileOpen ? true : undefined}
+        inert={isMobile && !mobileOpen ? true : undefined}
+        data-collapsed={collapsed}
+        className={`workspace-sidebar fixed inset-y-0 left-0 z-50 flex flex-col border-r border-line bg-surface transition-[transform,width] duration-200 md:static md:z-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
       >
-        {/* 顶部：Logo + 折叠按钮。折叠态时 Logo 自身承担"展开"入口，toggle button 不再渲染，避免双入口冲突。 */}
-        <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-3 py-3 dark:border-white/[0.06]">
-          <Logo collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
-          {!sidebarCollapsed && (
+        <div
+          className={`flex min-h-20 items-center gap-2 px-4 ${collapsed ? 'justify-center px-2' : ''}`}
+        >
+          <button
+            type="button"
+            onClick={collapsed ? toggleNavigation : handleCreate}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand-ink"
+            aria-label={collapsed ? '展开 sidebar' : 'Image Playground，新建创作'}
+            title={collapsed ? '展开侧栏' : '新建创作'}
+          >
+            <svg
+              className="h-5 w-5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              aria-hidden="true"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="5" />
+              <circle cx="9" cy="9" r="1.5" />
+              <path d="m4 17 5-5 4 4 3-3 4 4" />
+            </svg>
+          </button>
+          {!collapsed && (
+            <span className="min-w-0 flex-1 text-sm font-semibold tracking-tight text-content">
+              Image Playground
+            </span>
+          )}
+          {!collapsed && (
             <button
               type="button"
-              onClick={toggleSidebar}
-              className="hidden h-8 w-8 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200 md:flex"
-              title="折叠 sidebar"
-              aria-label="折叠 sidebar"
+              onClick={isMobile ? onMobileClose : toggleNavigation}
+              className="ui-icon-button h-8 w-8"
+              aria-label={isMobile ? '关闭导航' : '折叠 sidebar'}
+              title="折叠侧栏"
             >
               <svg
                 className="h-4 w-4"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
+                strokeWidth="1.7"
                 aria-hidden="true"
               >
-                <path d="M15 18l-6-6 6-6" />
+                <path d="m14 6-6 6 6 6" />
               </svg>
             </button>
           )}
         </div>
 
-        {/* 图库 */}
-        <div className="px-3 pt-2">
-          <button
-            type="button"
-            onClick={() => {
-              setGalleryView(true)
-              onMobileClose()
-            }}
-            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-              galleryView
-                ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300'
-                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06]'
-            } ${sidebarCollapsed ? 'justify-center px-2' : ''}`}
-            title="图库"
-            aria-label="打开图库（全部任务）"
-            aria-current={galleryView ? 'true' : undefined}
-          >
-            <svg
-              className="h-4 w-4 shrink-0"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="9" cy="9" r="2" />
-              <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-            </svg>
-            {!sidebarCollapsed && <span>图库</span>}
-          </button>
-        </div>
-
-        {/* 新建对话 */}
-        <div className="px-3 py-2">
+        <div className={collapsed ? 'px-3 pb-5' : 'px-4 pb-5'}>
           <button
             type="button"
             onClick={handleCreate}
-            className={`flex w-full items-center gap-2 rounded-lg border border-dashed border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200 dark:hover:border-blue-500/30 dark:hover:bg-blue-500/10 dark:hover:text-blue-300 ${
-              sidebarCollapsed ? 'justify-center px-2' : ''
-            }`}
-            title="新建对话"
+            className={`flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2.5 text-sm font-semibold text-on-brand transition-colors hover:bg-brand-hover ${collapsed ? 'px-0' : ''}`}
             aria-label="新建对话"
+            title="新建创作"
           >
             <svg
-              className="h-4 w-4 shrink-0"
+              className="h-5 w-5 shrink-0"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
+              strokeWidth="1.8"
+              aria-hidden="true"
             >
-              <path d="M12 5v14" />
-              <path d="M5 12h14" />
+              <path d="M12 5v14M5 12h14" />
             </svg>
-            {!sidebarCollapsed && <span>新建对话</span>}
+            {!collapsed && <span>新建创作</span>}
           </button>
         </div>
-
-        {/* 计数 */}
-        {!sidebarCollapsed && (
-          <div className="px-4 pt-1 pb-2 text-xs text-gray-400 dark:text-gray-500">
-            对话 · {sortedConversations.length} 个
-          </div>
-        )}
-
-        {/* 列表 */}
-        <nav className="flex-1 overflow-y-auto px-2 pb-2" aria-label="对话列表">
-          <ul className="flex flex-col gap-0.5">
-            {sortedConversations.map((c) => (
-              <li key={c.id}>
-                <ConversationItem
-                  conversation={c}
-                  active={!galleryView && c.id === activeConversationId}
-                  collapsed={sidebarCollapsed}
-                  taskCount={taskCountByConversation.get(c.id) ?? 0}
-                  onSelect={handleSelect}
-                  onDelete={handleDelete}
-                />
-              </li>
-            ))}
-          </ul>
+        <nav aria-label="作品导航" className="space-y-1 px-3">
+          <button
+            type="button"
+            onClick={() => openGallery(false)}
+            className={navClass(galleryActive)}
+            aria-current={galleryActive ? 'page' : undefined}
+            aria-label="打开图库（全部任务）"
+            title="全部作品"
+          >
+            <svg
+              className="h-5 w-5 shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              aria-hidden="true"
+            >
+              <rect x="3" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" />
+              <rect x="3" y="14" width="7" height="7" rx="1.5" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" />
+            </svg>
+            {!collapsed && <span>全部作品</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => openGallery(true)}
+            className={navClass(favoritesActive)}
+            aria-current={favoritesActive ? 'page' : undefined}
+            aria-label="打开我的收藏"
+            title="我的收藏"
+          >
+            <svg
+              className="h-5 w-5 shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              aria-hidden="true"
+            >
+              <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" />
+            </svg>
+            {!collapsed && <span>我的收藏</span>}
+          </button>
         </nav>
 
-        {/* 底部：设置 */}
-        <div className="border-t border-gray-100 px-3 py-2 dark:border-white/[0.06]">
+        {!collapsed && (
+          <div className="mt-7 flex items-center justify-between px-5 pb-2 text-xs font-medium text-content-subtle">
+            <span>近期对话</span>
+            <span>{sortedConversations.length}</span>
+          </div>
+        )}
+        <nav
+          className={`min-h-0 flex-1 overflow-y-auto px-3 pb-4 ${collapsed ? 'mt-5' : ''}`}
+          aria-label="对话列表"
+        >
+          {!collapsed && (
+            <ul className="flex flex-col gap-1">
+              {sortedConversations.map((conversation) => (
+                <li key={conversation.id}>
+                  <ConversationItem
+                    conversation={conversation}
+                    active={!galleryView && conversation.id === activeConversationId}
+                    collapsed={false}
+                    taskCount={taskCountByConversation.get(conversation.id) ?? 0}
+                    onSelect={handleSelect}
+                    onDelete={handleDelete}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+          {!collapsed && !sortedConversations.length && (
+            <p className="px-2 py-3 text-xs leading-5 text-content-subtle">创作记录会保存在这里</p>
+          )}
+        </nav>
+        <div className="border-t border-line p-3 pb-[max(12px,env(safe-area-inset-bottom))]">
           <button
             type="button"
             onClick={() => {
               setShowSettings(true)
               onMobileClose()
             }}
-            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06] ${
-              sidebarCollapsed ? 'justify-center px-2' : ''
-            }`}
-            title="设置"
+            className={navClass(false)}
             aria-label="打开设置"
+            title="设置"
           >
             <svg
-              className="h-4 w-4 shrink-0"
+              className="h-5 w-5 shrink-0"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
+              strokeWidth="1.6"
+              aria-hidden="true"
             >
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82c.16.39.5.69.92.86H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              <path d="M4 7h16M4 17h16" />
+              <circle cx="9" cy="7" r="3" fill="currentColor" stroke="none" />
+              <circle cx="15" cy="17" r="3" fill="currentColor" stroke="none" />
             </svg>
-            {!sidebarCollapsed && <span>设置</span>}
+            {!collapsed && <span>设置</span>}
           </button>
         </div>
       </aside>

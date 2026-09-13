@@ -41,15 +41,19 @@ export default function CanvasViewport({
   children,
 }: CanvasViewportProps) {
   return (
-    <div ref={stageRef} className="flex-1 relative flex items-center justify-center overflow-hidden bg-gray-100/50 dark:bg-black/50 p-0 pb-[76px] sm:p-6 sm:pb-[100px]" style={{ containerType: 'size' }}>
+    <div
+      ref={stageRef}
+      className="flex-1 relative flex items-center justify-center overflow-hidden bg-surface-muted dark:bg-black/50 p-0 pb-[76px] sm:p-6 sm:pb-[100px]"
+      style={{ containerType: 'size' }}
+    >
       {isLoading && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/50 text-sm text-gray-500 backdrop-blur-sm dark:bg-gray-900/50 dark:text-gray-300">
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-surface text-sm text-content-muted backdrop-blur-sm dark:bg-surface-muted dark:text-content">
           正在载入图片...
         </div>
       )}
       <div
         ref={baseFrameRef}
-        className="relative max-h-full max-w-full sm:rounded-xl shadow-inner sm:ring-1 ring-black/5 touch-none dark:bg-black/50 dark:ring-white/5"
+        className="relative max-h-full max-w-full sm:rounded-xl shadow-inner sm:ring-1 ring-black/5 touch-none dark:bg-black/50 dark:ring-line"
         style={{
           aspectRatio: size ? `${size.width} / ${size.height}` : '1 / 1',
           width: size ? `min(100%, 100cqh * ${size.width / size.height})` : '520px',
@@ -64,11 +68,22 @@ export default function CanvasViewport({
           }}
         >
           <canvas ref={imageCanvasRef} className="absolute inset-0 h-full w-full" />
-          <canvas ref={previewCanvasRef} className="absolute inset-0 h-full w-full pointer-events-none" />
+          <canvas
+            ref={previewCanvasRef}
+            className="absolute inset-0 h-full w-full pointer-events-none"
+          />
           <canvas
             ref={maskCanvasRef}
             className="absolute inset-0 h-full w-full touch-none select-none opacity-0"
-            style={{ cursor: isPanning ? 'grabbing' : isAltKeyPressed ? 'grab' : hoverPoint ? 'none' : 'crosshair' }}
+            style={{
+              cursor: isPanning
+                ? 'grabbing'
+                : isAltKeyPressed
+                  ? 'grab'
+                  : hoverPoint
+                    ? 'none'
+                    : 'crosshair',
+            }}
             onPointerDown={handlers.onPointerDown}
             onPointerMove={handlers.onPointerMove}
             onPointerUp={handlers.onPointerUp}
@@ -78,7 +93,10 @@ export default function CanvasViewport({
           />
         </div>
       </div>
-      <canvas ref={cursorCanvasRef} className="absolute inset-0 h-full w-full pointer-events-none" />
+      <canvas
+        ref={cursorCanvasRef}
+        className="absolute inset-0 h-full w-full pointer-events-none"
+      />
       {children}
     </div>
   )

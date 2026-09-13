@@ -16,7 +16,7 @@ export default function HelpButton() {
         setTourStep(0)
         setTourActive(true)
       }}
-      className="rounded-lg p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
+      className="ui-icon-button"
       title="重看新手引导"
       aria-label="重看新手引导"
     >

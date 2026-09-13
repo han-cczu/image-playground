@@ -39,7 +39,7 @@ function TourPanel() {
   // active profile)。不用 profiles.some——key 只在非激活 profile 时按钮仍是灰色,some 口径会让
   // 文案说「已配置」而按钮实际灰着(profiles.some 仅用于老用户豁免,见 autoStart.ts)
   const hasApiKey = useStore((s) => Boolean(s.settings.apiKey.trim()))
-  const isMobile = useIsMobile()
+  const isMobile = useIsMobile(768)
 
   const steps = useMemo(() => buildTourSteps({ isMobile, hasApiKey }), [isMobile, hasApiKey])
   // isMobile 中途变化会让 steps 变短:下标 clamp 防越界
@@ -186,7 +186,7 @@ function TourPanel() {
             width: activeRect.width + SPOTLIGHT_PADDING * 2,
             height: activeRect.height + SPOTLIGHT_PADDING * 2,
             // 99999px:8K 超宽屏 + 锚点贴边时 9999px 可能盖不满远端;遮罩 0.65 保证暗色主题
-            // (近黑背景)下仍可辨,聚光语义主要靠蓝色光晕环承担
+            // (近黑背景)下仍可辨,聚光语义主要靠品牌色光晕环承担
             boxShadow:
               '0 0 0 99999px rgba(0,0,0,0.65), 0 0 0 2px rgba(59,130,246,0.6), 0 0 28px rgba(59,130,246,0.4)',
             transition: reducedMotion

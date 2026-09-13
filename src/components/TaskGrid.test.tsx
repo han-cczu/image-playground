@@ -31,6 +31,19 @@ describe('TaskGrid', () => {
     useStore.setState(useStore.getInitialState(), true)
   })
 
+  it('可见选择入口不会打开详情，详情入口仍清除多选', () => {
+    const record = task()
+    useStore.setState({ activeConversationId: 'conv-a', tasks: [record] })
+    render(<TaskGrid />)
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择这条任务' }))
+    expect(useStore.getState().selectedTaskIds).toEqual([record.id])
+    expect(useStore.getState().detailTaskId).toBeNull()
+    expect(screen.getByRole('region', { name: '已选任务操作' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '查看详情' }))
+    expect(useStore.getState().selectedTaskIds).toEqual([])
+    expect(useStore.getState().detailTaskId).toBe(record.id)
+  })
+
   it('clears drag-select body state when the window loses focus', () => {
     useStore.setState({
       activeConversationId: 'conv-a',

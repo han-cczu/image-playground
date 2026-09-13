@@ -25,7 +25,7 @@ export interface TourStep {
 
 export interface TourContext {
   isMobile: boolean
-  /** 任一 profile 已配 key(重看路径文案需状态感知:「按钮是灰色的」只对无 key 成立) */
+  /** 任一 profile 已配 key，用于区分配置入口与生成按钮的说明。 */
   hasApiKey: boolean
 }
 
@@ -47,8 +47,8 @@ export function buildTourSteps(ctx: TourContext): TourStep[] {
       anchor: '[data-tour-id="submit"]',
       title: '第一步:配置 API',
       body: ctx.hasApiKey
-        ? 'API 已配置好,这个按钮就是发送键。想换模型或调整配置,随时从侧边栏底部的齿轮进设置。'
-        : '开始前先配置 API:当前发送按钮是灰色的,点它会打开设置面板,填入你的 API Key 即可。',
+        ? 'API 已配置好,这个按钮就是发送键。想换模型或调整配置,随时从侧边栏底部进入设置。'
+        : '开始前先配置 API:点「配置 API」打开设置,填写服务地址、API Key 和模型。',
       fallback: 'center',
     },
     {
@@ -62,7 +62,7 @@ export function buildTourSteps(ctx: TourContext): TourStep[] {
       id: 'submit',
       anchor: '[data-tour-id="submit"]',
       title: '发送生成',
-      body: '点这个按钮,或按 Ctrl+Enter 发送。配好 Key 且写了提示词后,它会亮起蓝色渐变。',
+      body: '填写提示词后,点绿色生成按钮,或按 Ctrl+Enter 发送;也可以添加参考图。结果会保存在面板上方标注的目标对话。',
       fallback: 'center',
     },
     {
@@ -76,10 +76,9 @@ export function buildTourSteps(ctx: TourContext): TourStep[] {
       id: 'advanced',
       anchor: '[data-tour-id="pillrow"]',
       title: '进阶玩法',
-      body: '底部这排小按钮藏着进阶能力:「参数网格」批量扫参数生成对照矩阵、「提示词片段」存取常用模板、「AI 优化」一键改写草稿。多选已完成的任务卡还能并排对比。',
+      body: '模型、尺寸和风格可直接调整。「更多」中提供参数网格、提示词片段和 AI 优化。多选已完成的任务卡还能并排对比。',
       fallback: 'center',
-      // 结束后不还原折叠态(取舍):新用户首跑面板本就展开,onEnter 多为 no-op;
-      // 重看路径展开后用户一拖即收,还原逻辑(记忆进入前状态)复杂度不值
+      // 进入此步时展开手机参数区；结束后用户可用面板上的收起按钮恢复。
       onEnter: (api) => {
         if (ctx.isMobile) api.setMobileInputCollapsed(false)
       },

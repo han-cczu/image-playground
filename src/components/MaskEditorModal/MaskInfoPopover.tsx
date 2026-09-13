@@ -31,7 +31,7 @@ export default function MaskInfoPopover({ open, onOpenChange }: MaskInfoPopoverP
 
   return (
     <div className="flex items-center gap-1.5">
-      <h2 className="text-sm font-medium text-gray-700 dark:text-gray-200" id="mask-editor-title">
+      <h2 className="text-sm font-medium text-content dark:text-content" id="mask-editor-title">
         编辑遮罩
       </h2>
       <div className="relative flex items-center">
@@ -51,7 +51,7 @@ export default function MaskInfoPopover({ open, onOpenChange }: MaskInfoPopoverP
           }}
           onTouchStart={markTouch}
           onTouchEnd={markTouch}
-          className="flex h-6 w-6 items-center justify-center rounded-full text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 focus-visible:bg-gray-100 focus-visible:text-gray-600 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-300 dark:focus-visible:bg-gray-800 dark:focus-visible:text-gray-300"
+          className="flex h-6 w-6 items-center justify-center rounded-full text-content-subtle transition hover:bg-surface-muted hover:text-content focus-visible:bg-surface-muted focus-visible:text-content dark:text-content-subtle dark:hover:bg-surface-muted dark:hover:text-content dark:focus-visible:bg-surface-muted dark:focus-visible:text-content"
           aria-label="遮罩编辑说明"
           aria-expanded={open}
           aria-controls={open ? 'mask-info-popover' : undefined}
@@ -75,10 +75,10 @@ export default function MaskInfoPopover({ open, onOpenChange }: MaskInfoPopoverP
           <div
             ref={panelRef}
             id="mask-info-popover"
-            className="absolute left-0 top-full mt-2 w-64 rounded-xl border border-gray-200/80 bg-white px-3 py-2 text-xs leading-5 text-gray-600 shadow-lg dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-300"
+            className="absolute left-0 top-full mt-2 w-64 rounded-xl border border-line bg-white px-3 py-2 text-xs leading-5 text-content shadow-lg dark:border-line dark:bg-surface-muted dark:text-content"
           >
             {/* 箭头对准 24px 宽按钮的中心:(24 - 12) / 2 = 6px = left-1.5 */}
-            <div className="absolute -top-1.5 left-1.5 h-3 w-3 rotate-45 border-l border-t border-gray-200/80 bg-white dark:border-white/[0.08] dark:bg-gray-900" />
+            <div className="absolute -top-1.5 left-1.5 h-3 w-3 rotate-45 border-l border-t border-line bg-white dark:border-line dark:bg-surface-muted" />
             根据官方文档说明，此功能仅基于提示词，无法完全控制模型编辑区域
           </div>
         )}

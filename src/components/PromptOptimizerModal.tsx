@@ -98,12 +98,12 @@ function PromptOptimizerPanel() {
       onClose={handleClose}
       ariaLabel="提示词优化"
       containerClassName="z-[80] items-center"
-      panelClassName="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden p-5"
+      panelClassName="flex max-h-[90dvh] w-full max-w-3xl flex-col overflow-hidden p-5"
     >
-      <div className="mb-4 flex items-center justify-between gap-4">
+      <div className="mb-4 flex shrink-0 items-center justify-between gap-4">
         <ModalTitle>
           <svg
-            className="w-5 h-5 text-blue-500"
+            className="w-5 h-5 text-brand-ink"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -120,19 +120,21 @@ function PromptOptimizerPanel() {
         <ModalCloseButton onClick={handleClose} />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1 min-h-0">
+      <div className="custom-scrollbar grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto sm:grid-cols-2">
         <div className="flex flex-col min-h-0">
-          <div className="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">原提示词</div>
-          <div className="flex-1 min-h-[200px] max-h-[50vh] overflow-y-auto rounded-2xl border border-gray-200/70 bg-white/50 p-3 text-sm text-gray-700 whitespace-pre-wrap break-words dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 custom-scrollbar">
-            {prompt || <span className="text-gray-400">（空）</span>}
+          <div className="mb-2 text-xs font-medium text-content-muted dark:text-content-muted">
+            原提示词
+          </div>
+          <div className="flex-1 min-h-[200px] max-h-[50vh] overflow-y-auto rounded-2xl border border-line bg-surface p-3 text-sm text-content whitespace-pre-wrap break-words dark:border-line dark:bg-surface-raised dark:text-content custom-scrollbar">
+            {prompt || <span className="text-content-subtle">（空）</span>}
           </div>
         </div>
 
         <div className="flex flex-col min-h-0">
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-content-muted dark:text-content-muted">
             <span>优化后</span>
             {isStreaming && (
-              <span className="flex items-center gap-1 text-blue-500 dark:text-blue-400">
+              <span className="flex items-center gap-1 text-brand-ink dark:text-brand-ink">
                 <svg
                   className="w-3 h-3 animate-spin"
                   fill="none"
@@ -146,7 +148,7 @@ function PromptOptimizerPanel() {
               </span>
             )}
           </div>
-          <div className="flex-1 min-h-[200px] max-h-[50vh] overflow-y-auto rounded-2xl border border-blue-200/70 bg-blue-50/30 p-3 text-sm text-gray-700 whitespace-pre-wrap break-words dark:border-blue-500/20 dark:bg-blue-500/[0.04] dark:text-gray-200 custom-scrollbar">
+          <div className="flex-1 min-h-[200px] max-h-[50vh] overflow-y-auto rounded-2xl border border-brand bg-brand-soft p-3 text-sm text-content whitespace-pre-wrap break-words dark:border-brand dark:bg-brand-soft dark:text-content custom-scrollbar">
             {isError ? (
               <div className="space-y-2">
                 <div className="text-red-500 dark:text-red-400 break-words">
@@ -158,14 +160,14 @@ function PromptOptimizerPanel() {
                 {optimized}
                 {isStreaming && (
                   <span
-                    className="inline-block w-[2px] h-[1em] -mb-[2px] bg-blue-500 dark:bg-blue-400 animate-pulse ml-0.5"
+                    className="inline-block w-[2px] h-[1em] -mb-[2px] bg-brand dark:bg-brand animate-pulse ml-0.5"
                     aria-hidden
                   >
                     ▍
                   </span>
                 )}
                 {!optimized && !isStreaming && !isError && (
-                  <span className="text-gray-400">（等待优化结果）</span>
+                  <span className="text-content-subtle">（等待优化结果）</span>
                 )}
               </>
             )}
@@ -173,12 +175,12 @@ function PromptOptimizerPanel() {
         </div>
       </div>
 
-      <div className="mt-5 flex items-center justify-end gap-2">
+      <div className="mt-5 flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
         {isError && (
           <button
             type="button"
             onClick={handleRetry}
-            className="rounded-xl px-4 py-2.5 text-sm font-medium text-blue-600 transition hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10"
+            className="rounded-lg px-4 py-2.5 text-sm font-medium text-brand-ink transition hover:bg-brand-soft dark:text-brand-ink dark:hover:bg-brand-soft"
           >
             重试
           </button>
@@ -186,7 +188,7 @@ function PromptOptimizerPanel() {
         <button
           type="button"
           onClick={handleClose}
-          className="rounded-xl px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06]"
+          className="rounded-lg px-4 py-2.5 text-sm text-content transition hover:bg-surface-muted dark:text-content dark:hover:bg-surface-raised"
         >
           取消
         </button>
@@ -194,7 +196,7 @@ function PromptOptimizerPanel() {
           type="button"
           onClick={handleAdopt}
           disabled={!isDone || !optimized.trim()}
-          className="rounded-xl bg-blue-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-blue-500 dark:hover:bg-blue-600"
+          className="rounded-lg bg-brand px-4 py-2.5 text-sm font-medium text-on-brand transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-40 dark:bg-brand dark:hover:bg-brand-hover"
         >
           采用
         </button>

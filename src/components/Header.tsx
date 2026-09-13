@@ -96,24 +96,35 @@ export default function Header({ onOpenMobileSidebar }: HeaderProps) {
       : 'Gemini'
 
   const galleryView = useStore((s) => s.galleryView)
+  const filterFavorite = useStore((s) => s.filterFavorite)
+  const filterFavoriteCategoryId = useStore((s) => s.filterFavoriteCategoryId)
+  const favoriteCategory = useStore((s) =>
+    s.favoriteCategories.find((category) => category.id === s.filterFavoriteCategoryId),
+  )
+  const setShowCommandPalette = useStore((s) => s.setShowCommandPalette)
   // 图库视图跨对话展示,移动端标题若仍显示激活对话名会误导用户以为只看到了这一个对话
   const activeConversation =
     activeConversationId && !galleryView
       ? conversations.find((c) => c.id === activeConversationId)
       : null
 
+  const title = galleryView
+    ? filterFavorite
+      ? '我的收藏'
+      : filterFavoriteCategoryId
+        ? (favoriteCategory?.name ?? '收藏分类')
+        : '全部作品'
+    : (activeConversation?.title ?? '创作工作台')
+
   return (
-    <header
-      data-no-drag-select
-      className="app-enter-header safe-area-top sticky top-0 z-30 border-b border-gray-200 bg-white/70 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-950/70"
-    >
-      <div className="safe-area-x safe-header-inner mx-auto flex max-w-7xl items-center justify-between gap-2">
+    <header data-no-drag-select className="safe-area-top z-30 shrink-0 bg-canvas">
+      <div className="safe-header-inner mx-auto flex w-full max-w-[1488px] items-center justify-between gap-3 px-4 py-4 md:px-6">
         {/* 左侧：移动端 hamburger + 当前对话/模型信息 */}
         <div className="flex min-w-0 items-center gap-2">
           <button
             type="button"
             onClick={onOpenMobileSidebar}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06] md:hidden"
+            className="ui-icon-button md:hidden"
             title="打开对话列表"
             aria-label="打开对话列表"
           >
@@ -132,34 +143,52 @@ export default function Header({ onOpenMobileSidebar }: HeaderProps) {
             </svg>
           </button>
 
-          <div className="flex min-w-0 items-center gap-2">
-            {/* 桌面端：当前模型名 + 模式 chip */}
-            <div className="hidden min-w-0 items-center gap-2 md:flex">
-              <span
-                className="truncate text-sm font-medium text-gray-800 dark:text-gray-100"
-                title={modelLabel}
-              >
-                {modelLabel}
-              </span>
-              <span className="inline-flex shrink-0 items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-600 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30">
-                {modeLabel}
-              </span>
-            </div>
-
-            {/* 移动端：当前对话标题（无对话时显示品牌名） */}
-            <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-100 md:hidden">
-              {galleryView ? '图库' : (activeConversation?.title ?? 'Image Playground')}
-            </span>
+          <div className="min-w-0">
+            <h1
+              className="truncate text-lg font-semibold tracking-tight text-content md:text-2xl"
+              title={title}
+            >
+              {title}
+            </h1>
+            <p className="mt-1 truncate text-xs text-content-muted">
+              {galleryView ? '汇集所有对话中的创作作品' : '从一个想法，开始下一张作品'}
+            </p>
           </div>
         </div>
 
         {/* 右上：重看引导 + 主题切换 */}
         <div className="flex shrink-0 items-center gap-1">
+          <div
+            className="mr-3 hidden max-w-48 items-center gap-2 text-xs text-content-muted lg:flex"
+            title={`${modelLabel} · ${modeLabel}`}
+          >
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" aria-hidden="true" />
+            <span className="truncate">{modelLabel}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowCommandPalette(true)}
+            className="ui-icon-button"
+            aria-label="打开命令面板"
+            title="命令面板（Ctrl / ⌘ + K）"
+          >
+            <svg
+              className="h-5 w-5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              aria-hidden="true"
+            >
+              <circle cx="10.5" cy="10.5" r="6.5" />
+              <path d="m16 16 4.5 4.5" />
+            </svg>
+          </button>
           <HelpButton />
           <button
             type="button"
             onClick={cycleTheme}
-            className="rounded-lg p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-900"
+            className="ui-icon-button"
             title={`主题:${THEME_LABEL[theme]}(点击切换)`}
             aria-label={`切换主题，当前 ${THEME_LABEL[theme]}`}
           >

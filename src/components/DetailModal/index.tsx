@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useStore } from '../../store'
-import Modal, { ModalCloseButton } from '../Modal'
+import Modal, { ModalCloseButton, ModalTitle } from '../Modal'
 import { findChildTasks, findParentTasks } from '../../lib/lineage'
 import { useDetailImages, useMaskPreview, useRunningNow } from './hooks'
 import ImagePanel from './ImagePanel'
@@ -81,52 +81,48 @@ function DetailModalPanel({
       onClose={onClose}
       ariaLabel="记录详情"
       tone="deep"
-      panelClassName="w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row"
+      panelClassName="flex max-h-[90dvh] w-full max-w-[1120px] flex-col overflow-hidden"
     >
-      <div className="flex h-14 items-center justify-end px-4 md:hidden">
-        <ModalCloseButton onClick={onClose} iconClassName="w-6 h-6" />
+      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-line px-4 py-3 md:px-5">
+        <div className="min-w-0">
+          <ModalTitle>作品详情</ModalTitle>
+          <p className="mt-1 truncate text-xs text-content-muted">
+            {task.apiModel || '图像创作'}
+            {task.outputImages.length > 0 ? ` · ${task.outputImages.length} 张输出` : ''}
+          </p>
+        </div>
+        <ModalCloseButton onClick={onClose} />
       </div>
 
-      {/* 左侧：图片 */}
-      <ImagePanel
-        task={task}
-        imageIndex={imageIndex}
-        setImageIndex={setImageIndex}
-        currentOutputImageSrc={currentOutputImageSrc}
-        currentImageRatio={currentImageRatio}
-        currentImageSize={currentImageSize}
-        durationText={durationText}
-      />
-
-      {/* 右侧：信息 */}
-      <div className="md:w-1/2 w-full p-5 overflow-y-auto flex flex-col">
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 hidden p-1 rounded-full hover:bg-gray-100 dark:hover:bg-white/[0.06] transition text-gray-400 z-10 md:block"
-          aria-label="关闭"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </button>
-
-        <InfoPanel
+      {/* 桌面高度跟随可用视口，图片不设刚性最小高度；低高度窗口仍能完整缩放预览。 */}
+      <div className="custom-scrollbar min-h-0 overflow-y-auto md:flex md:h-[min(680px,72dvh)] md:overflow-hidden">
+        {/* 左侧：图片 */}
+        <ImagePanel
           task={task}
-          parentLinks={parentLinks}
-          childLinks={childLinks}
-          imageSrcs={imageSrcs}
-          maskPreviewSrc={maskPreviewSrc}
-          currentOutputImageId={currentOutputImageId}
+          imageIndex={imageIndex}
+          setImageIndex={setImageIndex}
+          currentOutputImageSrc={currentOutputImageSrc}
+          currentImageRatio={currentImageRatio}
+          currentImageSize={currentImageSize}
           durationText={durationText}
         />
 
-        {/* 操作按钮 */}
-        <ActionBar task={task} />
+        {/* 右侧：信息 */}
+        <div className="flex min-h-0 w-full flex-col border-t border-line md:w-[340px] md:shrink-0 md:border-l md:border-t-0 lg:w-[360px]">
+          <div className="custom-scrollbar min-h-0 p-5 md:overflow-y-auto">
+            <InfoPanel
+              task={task}
+              parentLinks={parentLinks}
+              childLinks={childLinks}
+              imageSrcs={imageSrcs}
+              maskPreviewSrc={maskPreviewSrc}
+              currentOutputImageId={currentOutputImageId}
+              durationText={durationText}
+            />
+          </div>
+          {/* 操作按钮 */}
+          <ActionBar task={task} />
+        </div>
       </div>
     </Modal>
   )

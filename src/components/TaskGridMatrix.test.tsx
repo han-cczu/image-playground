@@ -14,12 +14,21 @@ vi.mock('../lib/gridSheetRender', () => ({
 }))
 
 vi.mock('./TaskCard', () => ({
-  default: ({ task, onClick, isSelected }: {
+  default: ({
+    task,
+    onClick,
+    isSelected,
+  }: {
     task: TaskRecord
     onClick: (e: React.MouseEvent) => void
     isSelected?: boolean
   }) => (
-    <button type="button" data-testid={`task-card-${task.id}`} data-selected={String(Boolean(isSelected))} onClick={onClick}>
+    <button
+      type="button"
+      data-testid={`task-card-${task.id}`}
+      data-selected={String(Boolean(isSelected))}
+      onClick={onClick}
+    >
       {task.id}
     </button>
   ),
@@ -69,6 +78,23 @@ describe('TaskGridMatrix', () => {
     cleanup()
     vi.clearAllMocks()
     useStore.setState(useStore.getInitialState(), true)
+  })
+
+  it('整批选择包含未展示的同格历史，取消整批仍保留批外选择', () => {
+    const old = task({ id: 'old-low', createdAt: 1 })
+    const latest = task({ id: 'new-low', createdAt: 3 })
+    const high = task({ id: 'high', gridCoord: { x: 'high' }, createdAt: 2 })
+    useStore.setState({ selectedTaskIds: ['outside'] })
+    render(<TaskGridMatrix batchId="batch-a" tasks={[old, latest, high]} onDelete={vi.fn()} />)
+
+    expect(screen.queryByTestId('task-card-old-low')).toBeNull()
+    expect(screen.getByTestId('task-card-new-low')).toBeTruthy()
+    expect(screen.getByText(/此批共 3 条任务，含 1 条同格历史记录/)).toBeTruthy()
+    const checkbox = screen.getByRole('checkbox', { name: /选中整批/ })
+    fireEvent.click(checkbox)
+    expect(useStore.getState().selectedTaskIds).toEqual(['outside', old.id, latest.id, high.id])
+    fireEvent.click(checkbox)
+    expect(useStore.getState().selectedTaskIds).toEqual(['outside'])
   })
 
   it('reports delayed export success through the latest toast handler', async () => {

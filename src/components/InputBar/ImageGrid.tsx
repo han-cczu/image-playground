@@ -303,7 +303,7 @@ export default function ImageGrid({
           action: () => onClearAll(),
         })
       }
-      className="w-[52px] h-[52px] rounded-xl border border-dashed border-gray-300 dark:border-white/[0.08] flex flex-col items-center justify-center gap-0.5 text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:border-red-300 dark:hover:border-red-500/40 hover:bg-red-50/50 dark:hover:bg-red-950/30 transition-all cursor-pointer flex-shrink-0"
+      className="w-[52px] h-[52px] rounded-xl border border-dashed border-line  flex flex-col items-center justify-center gap-0.5 text-content-muted  hover:text-red-500  hover:border-red-300  hover:bg-red-50/50  transition-all cursor-pointer flex-shrink-0"
       title={maskTargetImage ? '清空遮罩主图、参考图和遮罩' : '清空全部参考图'}
     >
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -314,12 +314,12 @@ export default function ImageGrid({
           d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
         />
       </svg>
-      <span className="text-[8px] leading-none">{maskTargetImage ? '清空全部' : '清空'}</span>
+      <span className="text-xs leading-none">{maskTargetImage ? '清空全部' : '清空'}</span>
     </button>
   )
 
   return (
-    <div ref={imagesRef}>
+    <div ref={imagesRef} className="max-h-32 overflow-y-auto px-2 pt-2 custom-scrollbar">
       <div className="grid grid-cols-[repeat(auto-fill,52px)] justify-between gap-x-2 gap-y-3 mb-3">
         {inputImages.map((img, idx) => {
           const isMaskTarget = maskDraft?.targetImageId === img.id

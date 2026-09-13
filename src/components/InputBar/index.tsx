@@ -1,15 +1,13 @@
-import { useRef, useEffect, useState, useMemo } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { useStore, submitTask, addImageFromFile } from '../../store'
 import { assertImagePixelLimit, MAX_INPUT_IMAGE_BYTES } from '../../lib/taskRuntime'
 import { MAX_INPUT_IMAGES_PER_SUBMISSION } from '../../lib/tasks'
 import { getChangedParams, normalizeParamsForSettings } from '../../lib/api/paramCompatibility'
 import { createMaskPreviewDataUrl } from '../../lib/image/canvasImage'
-import { filterAndSortTasks } from '../../lib/taskFilters'
 import { normalizeImageSize, detectTier } from '../../lib/image/size'
 import { fileToImageDataUrl, isImageFile } from '../../lib/image/fileMime'
 import { insertAtCursor } from '../../lib/promptSnippets'
 import { DEFAULT_PARAMS } from '../../types'
-import SelectionActionBar from './SelectionActionBar'
 import SizePickerModal from '../SizePickerModal'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useAutoResizeTextarea } from './hooks/useAutoResizeTextarea'
@@ -63,38 +61,18 @@ export default function InputBar() {
   const setShowPromptOptimizer = useStore((s) => s.setShowPromptOptimizer)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
-  const tasks = useStore((s) => s.tasks)
-  const filterStatus = useStore((s) => s.filterStatus)
-  const filterFavorite = useStore((s) => s.filterFavorite)
-  const filterFavoriteCategoryId = useStore((s) => s.filterFavoriteCategoryId)
-  const searchQuery = useStore((s) => s.searchQuery)
-  const galleryView = useStore((s) => s.galleryView)
   const activeConversationId = useStore((s) => s.activeConversationId)
+  const conversations = useStore((s) => s.conversations)
+  const setActiveConversation = useStore((s) => s.setActiveConversation)
+  const setGalleryView = useStore((s) => s.setGalleryView)
   const submitting = useStore((s) => s.submitting)
   const maskDraft = useStore((s) => s.maskDraft)
   const setMaskEditorImageId = useStore((s) => s.setMaskEditorImageId)
   const moveInputImage = useStore((s) => s.moveInputImage)
-  const sidebarCollapsed = useStore((s) => s.sidebarCollapsed)
-
-  // 「当前可见」口径必须与 TaskGrid 完全一致(含对话过滤):漏传 filterConversationId 时,
-  // 对话视图下「全选当前可见」会圈进其它对话里不可见的任务,批量删除会误删用户从未看到的记录。
-  const filteredTasks = useMemo(() => {
-    return filterAndSortTasks(tasks, {
-      searchQuery,
-      filterStatus,
-      filterFavorite,
-      filterFavoriteCategoryId,
-      filterConversationId: galleryView ? null : activeConversationId,
-    })
-  }, [
-    tasks,
-    searchQuery,
-    filterStatus,
-    filterFavorite,
-    filterFavoriteCategoryId,
-    galleryView,
-    activeConversationId,
-  ])
+  // 图库只改变浏览范围；任务始终写入真实激活对话，不另建一份导航/草稿状态。
+  const targetConversation = conversations.find(
+    (conversation) => conversation.id === activeConversationId,
+  )
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const captionFileInputRef = useRef<HTMLInputElement>(null)
@@ -117,7 +95,7 @@ export default function InputBar() {
   const [showSizePicker, setShowSizePicker] = useState(false)
   const [maskPreview, setMaskPreview] = useState<MaskPreviewState>({ key: '', url: '' })
 
-  const isMobile = useIsMobile()
+  const isMobile = useIsMobile(768)
   const { mobileCollapsed, setMobileCollapsed, dragHandleRef: handleRef } = useMobileGestures()
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
   const maskTargetImage = maskDraft
@@ -352,28 +330,15 @@ export default function InputBar() {
     />
   )
 
-  /**
-   * 底栏在桌面端 sidebar 占位时的水平偏移：
-   *   - 展开态 sidebar 宽 256px (md:w-64)，把 InputBar 中线右移一半 = 128px
-   *   - 折叠态 sidebar 宽 56px (md:w-14)，右移 28px
-   *
-   * 移动端（< md）sidebar 是抽屉，不占位，保持原中线。
-   */
-  const desktopOffsetClass = sidebarCollapsed
-    ? 'md:left-[calc(50%+28px)]'
-    : 'md:left-[calc(50%+128px)]'
-
   return (
     <>
       {/* 全屏拖拽遮罩 */}
       {isDragging && (
-        <div className="fixed inset-0 z-[100] bg-white/60 dark:bg-gray-900/60 backdrop-blur-md flex flex-col items-center justify-center pointer-events-none">
+        <div className="fixed inset-0 z-[100] bg-surface  backdrop-blur-md flex flex-col items-center justify-center pointer-events-none">
           <div className="flex flex-col items-center gap-4 p-8 rounded-3xl">
             <div
               className={`w-20 h-20 rounded-full border-2 border-dashed flex items-center justify-center ${
-                atImageLimit
-                  ? 'bg-red-50 dark:bg-red-500/10 border-red-300'
-                  : 'bg-blue-50 dark:bg-blue-500/10 border-blue-400'
+                atImageLimit ? 'bg-red-50  border-red-300' : 'bg-brand-soft  border-brand'
               }`}
             >
               {atImageLimit ? (
@@ -392,7 +357,7 @@ export default function InputBar() {
                 </svg>
               ) : (
                 <svg
-                  className="w-10 h-10 text-blue-500"
+                  className="w-10 h-10 text-brand-ink"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -410,14 +375,12 @@ export default function InputBar() {
               {atImageLimit ? (
                 <>
                   <p className="text-lg font-semibold text-red-500">已达上限 {API_MAX_IMAGES} 张</p>
-                  <p className="text-sm text-gray-400 mt-1">请先移除部分参考图后再添加</p>
+                  <p className="text-sm text-content-subtle mt-1">请先移除部分参考图后再添加</p>
                 </>
               ) : (
                 <>
-                  <p className="text-lg font-semibold text-gray-700 dark:text-gray-200">
-                    释放以添加参考图
-                  </p>
-                  <p className="text-sm text-gray-400 mt-1">支持 JPG、PNG、WebP 等格式</p>
+                  <p className="text-lg font-semibold text-content ">释放以添加参考图</p>
+                  <p className="text-sm text-content-subtle mt-1">支持 JPG、PNG、WebP 等格式</p>
                 </>
               )}
             </div>
@@ -436,56 +399,77 @@ export default function InputBar() {
 
       <div
         data-input-bar
-        className={`app-enter-inputbar fixed bottom-4 sm:bottom-6 left-1/2 z-30 w-full max-w-4xl -translate-x-1/2 px-3 transition-[left] duration-200 sm:px-4 ${desktopOffsetClass}`}
+        className="relative z-30 max-h-[calc(100dvh-112px)] w-full shrink-0 overflow-y-auto bg-canvas px-3 pt-2 pb-[max(12px,env(safe-area-inset-bottom))] md:px-6 md:pb-5 custom-scrollbar"
       >
-        <SelectionActionBar filteredTasks={filteredTasks} />
         <div
           ref={cardRef}
-          className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] rounded-2xl sm:rounded-3xl p-3 sm:p-4 ring-1 ring-black/5 dark:ring-white/10"
+          className="mx-auto max-w-[1040px] rounded-[20px] border border-line bg-surface p-3 shadow-sm md:p-4"
         >
-          {/* 移动端拖动条 */}
+          {/* 手势仍绑定原 handle；文字按钮补齐键盘与辅助技术的展开入口。 */}
           <div
             ref={handleRef}
-            className="sm:hidden flex justify-center pt-0.5 pb-2 -mt-1 cursor-pointer touch-none"
-            onClick={() => setMobileCollapsed((v) => !v)}
+            className="md:hidden flex justify-center pt-0.5 pb-1 -mt-1 touch-none"
+            aria-hidden="true"
           >
             <div
-              className={`w-10 h-1 rounded-full bg-gray-300 dark:bg-white/[0.06] transition-transform duration-200 ${mobileCollapsed ? 'scale-x-75' : ''}`}
+              className={`w-10 h-1 rounded-full bg-line transition-transform duration-200 ${mobileCollapsed ? 'scale-x-75' : ''}`}
             />
           </div>
-
-          {/* Pill 行（参数 + 上传 + 高级）：移动端通过折叠面板隐藏 */}
-          {isMobile ? (
-            <div className={`collapse-section${mobileCollapsed ? ' collapsed' : ''}`}>
-              <div className="collapse-inner">
-                <div className="mb-3">{pillRowElement}</div>
-              </div>
+          <div className="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-content-muted">
+            {targetConversation ? (
+              <button
+                type="button"
+                className="min-w-0 max-w-full truncate rounded-lg py-1 text-left hover:text-brand-ink"
+                onClick={() => {
+                  setActiveConversation(targetConversation.id)
+                  setGalleryView(false)
+                }}
+                title={`回到对话：${targetConversation.title}`}
+              >
+                生成到：{targetConversation.title}
+              </button>
+            ) : (
+              <span>提交后创建新对话</span>
+            )}
+            <div className="flex max-w-full flex-wrap items-center gap-2">
+              {inputImages.length > 0 && <span>{referenceImages.length} 张参考图</span>}
+              {maskDraft && (
+                <span className="rounded-md bg-brand-soft px-2 py-1 text-brand-ink">
+                  遮罩已启用
+                </span>
+              )}
+              {isMobile && (
+                <button
+                  type="button"
+                  className="ui-button min-h-9 px-2 text-xs"
+                  aria-expanded={!mobileCollapsed}
+                  aria-controls="inputbar-parameters"
+                  onClick={() => setMobileCollapsed((value) => !value)}
+                >
+                  {mobileCollapsed ? '展开创作面板' : '收起创作面板'}
+                </button>
+              )}
             </div>
-          ) : (
-            <div className="mb-3">{pillRowElement}</div>
-          )}
+          </div>
 
           {/* 输入图片行（移动端可折叠） */}
           {inputImages.length > 0 &&
             (isMobile ? (
               <>
-                <div className={`collapse-section${mobileCollapsed ? ' collapsed' : ''}`}>
+                <div
+                  className={`collapse-section${mobileCollapsed ? ' collapsed' : ''}`}
+                  inert={mobileCollapsed || undefined}
+                  aria-hidden={mobileCollapsed || undefined}
+                >
                   <div className="collapse-inner">{imageGridElement}</div>
                 </div>
-                {mobileCollapsed && (
-                  <div className="text-xs text-gray-500 dark:text-gray-400 mb-2 ml-1">
-                    {maskDraft
-                      ? `1 张遮罩主图 · ${referenceImages.length} 张参考图`
-                      : `${inputImages.length} 张参考图`}
-                  </div>
-                )}
               </>
             ) : (
               imageGridElement
             ))}
 
-          {/* 输入框 + 发送 */}
-          <div className="flex items-end gap-2">
+          {/* 输入框始终挂载；折叠、切换对话和多选不会丢失光标或全局草稿。 */}
+          <div className="mb-2">
             <TextareaInput
               value={prompt}
               onChange={setPrompt}
@@ -494,6 +478,26 @@ export default function InputBar() {
               textareaRef={textareaRef}
               adjustHeight={adjustTextareaHeight}
             />
+          </div>
+          <div className="flex flex-wrap items-end justify-end gap-2 border-t border-line pt-3">
+            <div
+              id="inputbar-parameters"
+              className="min-w-0 flex-1"
+              hidden={isMobile && mobileCollapsed}
+            >
+              {(!isMobile || !mobileCollapsed) && pillRowElement}
+            </div>
+            {isMobile && mobileCollapsed && (
+              <button
+                type="button"
+                className="ui-button mr-auto text-xs"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={atImageLimit}
+                aria-label="上传参考图"
+              >
+                添加参考图
+              </button>
+            )}
             <SubmitButton
               canSubmit={Boolean(canSubmit)}
               hasMask={Boolean(maskDraft)}

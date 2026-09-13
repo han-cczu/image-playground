@@ -90,29 +90,31 @@ export function DataManagementSection({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-xl bg-gray-50/60 dark:bg-white/[0.03] p-3 space-y-2.5">
+      <div className="rounded-xl bg-surface-muted dark:bg-surface-raised p-3 space-y-2.5">
         {storageLoading || !storageStats ? (
-          <div className="text-xs text-gray-400 dark:text-gray-500">正在统计本地占用…</div>
+          <div className="text-xs text-content-subtle dark:text-content-subtle">
+            正在统计本地占用…
+          </div>
         ) : (
           <>
             <div className="flex items-baseline justify-between">
-              <span className="text-sm text-gray-700 dark:text-gray-200">本地图片占用</span>
-              <span className="text-sm font-medium text-gray-800 dark:text-gray-100">
+              <span className="text-sm text-content dark:text-content">本地图片占用</span>
+              <span className="text-sm font-medium text-content dark:text-content">
                 {formatBytes(storageStats.totalBytes)} · {storageStats.imageCount} 张
               </span>
             </div>
 
             {storageStats.quota && storageStats.quota.quota > 0 && (
               <div className="space-y-1">
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-white/[0.08]">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-muted dark:bg-surface-raised">
                   <div
-                    className="h-full rounded-full bg-blue-500/80"
+                    className="h-full rounded-full bg-brand"
                     style={{
                       width: `${Math.min(100, (storageStats.quota.usage / storageStats.quota.quota) * 100).toFixed(1)}%`,
                     }}
                   />
                 </div>
-                <div className="text-[11px] text-gray-400 dark:text-gray-500">
+                <div className="text-[11px] text-content-subtle dark:text-content-subtle">
                   浏览器已用 {formatBytes(storageStats.quota.usage)} /{' '}
                   {formatBytes(storageStats.quota.quota)}
                 </div>
@@ -150,7 +152,7 @@ export function DataManagementSection({
                 return (
                   <span
                     key={key}
-                    className="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500 dark:bg-white/[0.06] dark:text-gray-400"
+                    className="rounded-md bg-surface-muted px-2 py-0.5 text-[11px] text-content-muted dark:bg-surface-raised dark:text-content-muted"
                   >
                     {label} {bucket.count}·{formatBytes(bucket.bytes)}
                   </span>
@@ -174,18 +176,20 @@ export function DataManagementSection({
                   </button>
                 </>
               ) : (
-                <span className="text-xs text-gray-400 dark:text-gray-500">无可清理的孤儿图</span>
+                <span className="text-xs text-content-subtle dark:text-content-subtle">
+                  无可清理的孤儿图
+                </span>
               )}
             </div>
           </>
         )}
       </div>
 
-      <div className="flex gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <button
           onClick={handleExport}
           disabled={busy !== null}
-          className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
+          className="flex-1 min-h-11 rounded-lg bg-surface-muted px-4 py-2.5 text-sm text-content transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60 dark:bg-surface-raised dark:text-content dark:hover:bg-surface-raised flex items-center justify-center gap-1.5"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
@@ -200,7 +204,7 @@ export function DataManagementSection({
         <button
           onClick={() => onConfirmMergeImport(() => selectImportFile('merge'))}
           disabled={busy !== null}
-          className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
+          className="flex-1 min-h-11 rounded-lg bg-surface-muted px-4 py-2.5 text-sm text-content transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60 dark:bg-surface-raised dark:text-content dark:hover:bg-surface-raised flex items-center justify-center gap-1.5"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
@@ -215,7 +219,7 @@ export function DataManagementSection({
         <button
           onClick={() => onConfirmReplaceImport(() => selectImportFile('replace'))}
           disabled={busy !== null}
-          className="flex-1 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] flex items-center justify-center gap-1.5"
+          className="flex-1 min-h-11 rounded-lg bg-surface-muted px-4 py-2.5 text-sm text-content transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60 dark:bg-surface-raised dark:text-content dark:hover:bg-surface-raised flex items-center justify-center gap-1.5"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
@@ -237,7 +241,7 @@ export function DataManagementSection({
       </div>
       <button
         onClick={() => onConfirmClearAll(onClearAll)}
-        className="w-full rounded-xl border border-red-200/80 bg-red-50/50 px-4 py-2.5 text-sm text-red-500 transition hover:bg-red-100/80 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20"
+        className="min-h-11 w-full rounded-lg border border-red-200/80 bg-red-50/50 px-4 py-2.5 text-sm text-red-500 transition hover:bg-red-100/80 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20"
       >
         清空所有数据
       </button>

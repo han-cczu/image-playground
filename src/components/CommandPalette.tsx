@@ -28,7 +28,7 @@ function HighlightedTitle({ title, indices }: { title: string; indices: number[]
     <>
       {chars.map((ch, i) =>
         hits.has(i) ? (
-          <span key={i} className="text-blue-600 dark:text-blue-400">
+          <span key={i} className="text-brand-ink dark:text-brand-ink">
             {ch}
           </span>
         ) : (
@@ -205,9 +205,9 @@ function CommandPalettePanel({ close }: { close: () => void }) {
       panelClassName="flex w-full max-w-xl flex-col overflow-hidden"
       onPanelKeyDown={handleKeyDown}
     >
-      <div className="flex items-center gap-3 border-b border-gray-200/70 px-4 py-3 dark:border-white/[0.08]">
+      <div className="flex items-center gap-3 border-b border-line px-4 py-3 dark:border-line">
         <svg
-          className="h-5 w-5 shrink-0 text-gray-400"
+          className="h-5 w-5 shrink-0 text-content-subtle"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -235,9 +235,9 @@ function CommandPalettePanel({ close }: { close: () => void }) {
           aria-activedescendant={
             clampedIndex >= 0 ? optionDomId(flat[clampedIndex].command.id) : undefined
           }
-          className="w-full bg-transparent text-sm text-gray-800 outline-none placeholder:text-gray-400 dark:text-gray-100"
+          className="w-full bg-transparent text-base sm:text-sm text-content outline-none placeholder:text-content-subtle dark:text-content"
         />
-        <kbd className="hidden shrink-0 rounded-md border border-gray-200/80 px-1.5 py-0.5 text-[10px] text-gray-400 sm:block dark:border-white/[0.1]">
+        <kbd className="hidden shrink-0 rounded-md border border-line px-1.5 py-0.5 text-[10px] text-content-subtle sm:block dark:border-line">
           Esc
         </kbd>
       </div>
@@ -246,7 +246,7 @@ function CommandPalettePanel({ close }: { close: () => void }) {
       {flat.length === 0 && (
         <div
           role="status"
-          className="px-3 py-8 text-center text-sm text-gray-500 dark:text-gray-400"
+          className="px-3 py-8 text-center text-sm text-content-muted dark:text-content-muted"
         >
           无匹配命令
         </div>
@@ -269,7 +269,7 @@ function CommandPalettePanel({ close }: { close: () => void }) {
               {/* 组名由 group 的 aria-label 承担,标题对读屏隐藏,listbox 子树只留 group/option */}
               <div
                 aria-hidden="true"
-                className="px-3 pb-1 pt-2 text-[11px] font-medium text-gray-500 dark:text-gray-400"
+                className="px-3 pb-1 pt-2 text-[11px] font-medium text-content-muted dark:text-content-muted"
               >
                 {COMMAND_GROUP_LABELS[group]}
               </div>
@@ -291,10 +291,10 @@ function CommandPalettePanel({ close }: { close: () => void }) {
                     onMouseMove={() => {
                       if (activeIndex !== index) setActiveIndex(index)
                     }}
-                    className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
+                    className={`flex w-full items-center justify-between gap-3 min-h-11 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
                       isHighlighted
-                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
-                        : 'text-gray-700 dark:text-gray-200'
+                        ? 'bg-brand-soft text-brand-ink dark:bg-brand-soft dark:text-brand-ink'
+                        : 'text-content dark:text-content'
                     }`}
                   >
                     <span className="truncate">
@@ -304,7 +304,7 @@ function CommandPalettePanel({ close }: { close: () => void }) {
                     {command.active && <span className="sr-only">（当前）</span>}
                     {command.active && (
                       <svg
-                        className="h-4 w-4 shrink-0 text-blue-500 dark:text-blue-400"
+                        className="h-4 w-4 shrink-0 text-brand-ink dark:text-brand-ink"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -325,7 +325,7 @@ function CommandPalettePanel({ close }: { close: () => void }) {
           ))}
       </div>
 
-      <div className="border-t border-gray-200/70 px-4 py-2 text-[11px] text-gray-500 dark:border-white/[0.08] dark:text-gray-400">
+      <div className="border-t border-line px-4 py-2 text-[11px] text-content-muted dark:border-line dark:text-content-muted">
         ↑↓ 选择 · Enter 执行 · Esc 关闭
       </div>
     </Modal>

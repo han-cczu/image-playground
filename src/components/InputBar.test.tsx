@@ -27,10 +27,115 @@ afterEach(() => {
   cleanup()
   vi.clearAllMocks()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   useStore.setState(useStore.getInitialState(), true)
 })
 
 describe('InputBar', () => {
+  it('在图库显示真实生成目标，切换对话和返回目标保留同一份草稿', () => {
+    const initial = useStore.getInitialState()
+    const images = [{ id: 'draft-image', dataUrl: 'data:image/png;base64,DRAFT' }]
+    useStore.setState({
+      conversations: [
+        { id: 'a', title: '产品摄影', createdAt: 1, updatedAt: 1 },
+        { id: 'b', title: '建筑概念', createdAt: 2, updatedAt: 2 },
+      ],
+      activeConversationId: 'a',
+      galleryView: true,
+      prompt: '保留当前画面描述',
+      inputImages: images,
+      params: { ...initial.params, size: '1024x1536' },
+    })
+    render(<InputBar />)
+    const textarea = screen.getByRole('textbox', { name: '描述图片' })
+    expect(screen.getByRole('button', { name: '生成到：产品摄影' })).toBeTruthy()
+    const parameters = useStore.getState().params
+    act(() => useStore.getState().setActiveConversation('b'))
+    expect(screen.getByRole('textbox', { name: '描述图片' })).toBe(textarea)
+    expect((textarea as HTMLTextAreaElement).value).toBe('保留当前画面描述')
+    expect(useStore.getState().inputImages).toEqual(images)
+    expect(useStore.getState().params).toEqual(parameters)
+    fireEvent.click(screen.getByRole('button', { name: '生成到：建筑概念' }))
+    expect(useStore.getState().galleryView).toBe(false)
+    expect(useStore.getState().activeConversationId).toBe('b')
+    expect(useStore.getState().prompt).toBe('保留当前画面描述')
+    act(() => useStore.getState().setActiveConversation('deleted-conversation'))
+    expect(screen.getByText('提交后创建新对话')).toBeTruthy()
+  })
+
+  it('更多工具集中保留原功能且打开参数网格时关闭菜单', () => {
+    render(<InputBar />)
+    expect(screen.queryByRole('button', { name: '高级参数' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '更多创作工具' }))
+    for (const name of [
+      '参数网格',
+      '提示词片段',
+      'AI 提示词优化',
+      '图生文 / 反推提示词',
+      '高级参数',
+      '重置全部输入',
+    ]) {
+      expect(screen.getByRole('button', { name })).toBeTruthy()
+    }
+    fireEvent.click(screen.getByRole('button', { name: '参数网格' }))
+    expect(screen.queryByRole('dialog', { name: '更多创作工具' })).toBeNull()
+    expect(screen.getByRole('dialog', { name: '参数网格' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '生成网格' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '关闭参数网格' }))
+    expect(screen.queryByRole('dialog', { name: '参数网格' })).toBeNull()
+  })
+
+  it('尺寸入口同时提供比例和分辨率并复用原尺寸弹窗', () => {
+    render(<InputBar />)
+    fireEvent.click(screen.getByRole('button', { name: /^尺寸：/ }))
+    expect(screen.getByText('输出分辨率')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /2K/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /调整尺寸/ }))
+    expect(screen.queryByRole('dialog', { name: '选择输出分辨率' })).toBeNull()
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+  })
+
+  it('768px以下默认紧凑，展开参数不重建提示词输入', () => {
+    vi.stubGlobal('innerWidth', 700)
+    useStore.setState({ prompt: '手机草稿', mobileInputCollapsed: true })
+    render(<InputBar />)
+    const textarea = screen.getByRole('textbox', { name: '描述图片' })
+    expect(screen.queryByRole('button', { name: '更多创作工具' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '展开创作面板' }))
+    expect(screen.getByRole('button', { name: '更多创作工具' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '描述图片' })).toBe(textarea)
+    fireEvent.click(screen.getByRole('button', { name: '更多创作工具' }))
+    expect(screen.getByRole('dialog', { name: '更多创作工具' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '收起创作面板' }))
+    expect(screen.queryByRole('dialog', { name: '更多创作工具' })).toBeNull()
+    expect(useStore.getState().prompt).toBe('手机草稿')
+  })
+
+  it('手机收起参考图时禁用交互并移出辅助技术视图，展开后恢复', () => {
+    vi.stubGlobal('innerWidth', 360)
+    useStore.setState({
+      mobileInputCollapsed: true,
+      inputImages: [{ id: 'mobile-reference', dataUrl: 'data:image/png;base64,REFERENCE' }],
+    })
+    const { container } = render(<InputBar />)
+    const reference = container.querySelector('[data-input-image-index="0"]')
+    const section = reference?.closest('.collapse-section')
+    expect(section).toBeTruthy()
+    expect(section?.hasAttribute('inert')).toBe(true)
+    expect(section?.getAttribute('aria-hidden')).toBe('true')
+    expect(screen.queryByRole('button', { name: '移除此图' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '展开创作面板' }))
+    expect(section?.hasAttribute('inert')).toBe(false)
+    expect(section?.hasAttribute('aria-hidden')).toBe(false)
+    expect(screen.getByRole('button', { name: '移除此图' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '收起创作面板' }))
+    expect(section?.hasAttribute('inert')).toBe(true)
+    expect(section?.getAttribute('aria-hidden')).toBe('true')
+    expect(useStore.getState().inputImages).toHaveLength(1)
+  })
+
   it('reports delayed caption source validation failures through the latest toast handler', async () => {
     const oldToast = vi.fn()
     const latestToast = vi.fn()
@@ -82,6 +187,7 @@ describe('InputBar', () => {
     })
 
     const { container } = render(<InputBar />)
+    fireEvent.click(screen.getByRole('button', { name: '更多创作工具' }))
     expect(
       (screen.getByRole('button', { name: '图生文 / 反推提示词' }) as HTMLButtonElement).disabled,
     ).toBe(false)

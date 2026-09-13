@@ -6,7 +6,6 @@ import { applyUrlBootstrapToSettings, readUrlBootstrap } from './lib/urlBootstra
 import { getActiveApiProfile } from './lib/api/apiProfiles'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
-import AmbientGlow from './components/AmbientGlow'
 import EmptyState from './components/EmptyState'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
@@ -128,7 +127,7 @@ export default function App() {
     const applyDark = (isDark: boolean) => {
       document.documentElement.classList.toggle('dark', isDark)
       const themeMeta = document.querySelector('meta[name="theme-color"]')
-      if (themeMeta) themeMeta.setAttribute('content', isDark ? '#09090b' : '#ffffff')
+      if (themeMeta) themeMeta.setAttribute('content', isDark ? '#141a21' : '#f4f6f8')
     }
 
     if (theme === 'system') {
@@ -143,28 +142,23 @@ export default function App() {
   }, [theme])
 
   return (
-    <>
-      <AmbientGlow />
+    <div className="app-shell bg-canvas text-content">
       {/* 两条 banner 共用一个 sticky 容器:各自 sticky top-0 时滚动后会在同一位置互相覆盖 */}
       <div className="sticky top-0 z-30">
         <InsecureContextBanner />
         <InitErrorBanner error={initError} />
       </div>
-      <div className="flex min-h-screen md:h-screen md:overflow-hidden">
+      <div className="app-layout">
         <ErrorBoundary region="sidebar">
           <Sidebar mobileOpen={mobileSidebarOpen} onMobileClose={closeMobileSidebar} />
         </ErrorBoundary>
-        <div className="flex min-h-screen min-w-0 flex-1 flex-col md:h-screen md:min-h-0">
+        <div className="app-workspace">
           <ErrorBoundary region="header">
             <Header onOpenMobileSidebar={openMobileSidebar} />
           </ErrorBoundary>
           <ErrorBoundary region="main">
-            <main
-              data-home-main
-              data-drag-select-surface
-              className="flex-1 pb-48 md:overflow-y-auto"
-            >
-              <div className="app-enter-main safe-area-x mx-auto max-w-7xl">
+            <main data-home-main data-drag-select-surface className="workspace-scroll">
+              <div className="workspace-content">
                 {showEmptyState ? (
                   <EmptyState mode={galleryView ? 'gallery' : 'conversation'} />
                 ) : (
@@ -176,11 +170,11 @@ export default function App() {
               </div>
             </main>
           </ErrorBoundary>
+          <ErrorBoundary region="inputbar">
+            <InputBar />
+          </ErrorBoundary>
         </div>
       </div>
-      <ErrorBoundary region="inputbar">
-        <InputBar />
-      </ErrorBoundary>
       <ErrorBoundary region="modal">
         <DetailModal />
       </ErrorBoundary>
@@ -194,6 +188,6 @@ export default function App() {
       </ErrorBoundary>
       {/* 低频弹层统一走 LazyModals 惰性挂载(chunk 按需拉取);各弹层 z 层显式声明,DOM 顺序调整无叠层影响 */}
       <LazyModals />
-    </>
+    </div>
   )
 }

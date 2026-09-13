@@ -9,20 +9,22 @@ import {
   cancelBatch,
 } from '../store'
 import { reconstructMatrix, getGridAxisDef } from '../lib/gridExperiment'
-import { MAX_BATCH_NOTE_LEN, pickCellRepresentative } from '../lib/gridSheet'
+import { MAX_BATCH_NOTE_LEN } from '../lib/gridSheet'
+import { getGridRepresentatives, gridCellKey } from '../lib/taskPresentation'
 import { exportGridSheet } from '../lib/gridSheetRender'
 import TaskCard from './TaskCard'
 
 interface Props {
   batchId: string
   tasks: TaskRecord[]
+  representatives?: Map<string, TaskRecord>
   onDelete: (task: TaskRecord) => void
 }
 
 const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
 const HEADER_CLASS =
-  'flex items-center justify-center px-2 py-1 text-center text-xs font-medium text-gray-500 dark:text-gray-400'
+  'flex items-center justify-center px-2 py-1 text-center text-xs font-medium text-content-muted'
 
 interface MatrixCellProps {
   task: TaskRecord
@@ -68,7 +70,7 @@ const MatrixCell = memo(function MatrixCell({
 })
 
 /** XY 网格矩阵卡:行=Y 取值、列=X 取值,单元格复用 TaskCard,空格可补跑。占据流中整行。 */
-export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
+export default function TaskGridMatrix({ batchId, tasks, representatives, onDelete }: Props) {
   const selectedTaskIds = useStore((s) => s.selectedTaskIds)
   const setSelectedTaskIds = useStore((s) => s.setSelectedTaskIds)
   const batchNote = useStore((s) => s.batchNotes[batchId])
@@ -81,28 +83,11 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
 
   const matrix = useMemo(() => reconstructMatrix(tasks), [tasks])
 
-  /**
-   * 逐格代表 task(同格多 task 取最新,与导出共用 pickCellRepresentative 判定):
-   * 一次 O(成员数) 分组建表,进度统计与渲染循环共查——原先每格调 cellTasks(filter 全量成员),
-   * 两个 cols×rows 循环下是 O(格数²),且本组件订阅 selectedTaskIds,每次框选/Ctrl 点选都全量重算。
-   * 复合键以 NUL 分隔:prompt 轴的 key 是提示词原文,可含空格等任意可见字符,普通分隔符会撞键。
-   */
-  const repByCell = useMemo(() => {
-    const groups = new Map<string, TaskRecord[]>()
-    for (const t of tasks) {
-      if (!t.gridCoord) continue
-      const key = `${t.gridCoord.x}\u0000${t.gridCoord.y ?? ''}`
-      const group = groups.get(key)
-      if (group) group.push(t)
-      else groups.set(key, [t])
-    }
-    const map = new Map<string, TaskRecord>()
-    for (const [key, group] of groups) {
-      const rep = pickCellRepresentative(group)
-      if (rep) map.set(key, rep)
-    }
-    return map
-  }, [tasks])
+  // 直接使用作品区同一张代表表，保证实际卡片与“选择当前显示”一致；独立挂载时仍可重建。
+  const repByCell = useMemo(
+    () => representatives ?? getGridRepresentatives(tasks),
+    [representatives, tasks],
+  )
 
   const selectedIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds])
 
@@ -115,7 +100,7 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
     let pendingCells = 0 // 缺失或失败的格
     for (const col of matrix.cols) {
       for (const row of matrix.rows) {
-        const rep = repByCell.get(`${col.key}\u0000${row.key}`)
+        const rep = repByCell.get(gridCellKey(col.key, row.key))
         if (rep?.status === 'done') doneCells += 1
         else if (!rep || rep.status === 'error') pendingCells += 1
       }
@@ -146,7 +131,7 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
   const yLabel = axes.y ? (getGridAxisDef(axes.y.kind)?.label ?? axes.y.kind) : null
 
   const repTask = (colKey: string, rowKey: string): TaskRecord | null =>
-    repByCell.get(`${colKey}\u0000${rowKey}`) ?? null
+    repByCell.get(gridCellKey(colKey, rowKey)) ?? null
 
   const handleExport = () => {
     if (exporting) return
@@ -205,35 +190,39 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
   const toggleSelectAll = () => {
     if (allSelected) {
       const allIdSet = new Set(allIds)
-      setSelectedTaskIds(selectedTaskIds.filter((id) => !allIdSet.has(id)))
+      setSelectedTaskIds((previous) => previous.filter((id) => !allIdSet.has(id)))
     } else {
-      setSelectedTaskIds(Array.from(new Set([...selectedTaskIds, ...allIds])))
+      setSelectedTaskIds((previous) => Array.from(new Set([...previous, ...allIds])))
     }
   }
 
   return (
-    <div className="col-span-full cv-auto-matrix rounded-2xl border border-gray-200/70 bg-gray-50/40 p-3 dark:border-white/[0.08] dark:bg-white/[0.02]">
+    <div className="cv-auto-matrix col-span-full min-w-0 rounded-2xl border border-line bg-surface-muted p-4">
       {/* 小标题栏 */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs text-gray-500 dark:text-gray-400">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs text-content-muted">
           参数网格 · X: {xLabel}
           {yLabel ? ` · Y: ${yLabel}` : ''} · 完成 {doneCells}/{totalCells}
           {pendingCells > 0 ? ` · 待补 ${pendingCells}` : ''}
         </span>
-        <div className="flex items-center gap-3">
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+        <div className="flex flex-wrap items-center gap-2">
+          <label
+            className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs text-content-muted"
+            title={`选中此批 ${tasks.length} 条任务，包括 ${tasks.length - repByCell.size} 条同格历史记录`}
+          >
             <input
               type="checkbox"
               checked={allSelected}
               onChange={toggleSelectAll}
-              className="h-3.5 w-3.5 accent-blue-500"
+              className="h-4 w-4 accent-brand"
             />
-            选中整批
+            <span>选中整批</span>
+            <span>（{tasks.length} 条任务）</span>
           </label>
           <button
             type="button"
             onClick={startEditNote}
-            className="rounded-lg px-2 py-1 text-xs text-gray-500 transition hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/[0.06]"
+            className="ui-button text-content-muted"
             title={batchNote ? '编辑批次笔记' : '添加批次笔记'}
           >
             {batchNote ? '笔记 ✓' : '笔记'}
@@ -242,7 +231,7 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
             type="button"
             onClick={handleExport}
             disabled={doneCells < 1 || exporting}
-            className="rounded-lg bg-blue-50 px-2.5 py-1 text-xs text-blue-600 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20"
+            className="ui-button bg-brand-soft text-brand-ink"
             title={doneCells < 1 ? '至少 1 格完成后可导出' : '导出带轴标签的对照图 PNG'}
           >
             {exporting ? '导出中…' : '导出对照图'}
@@ -251,7 +240,7 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
             <button
               type="button"
               onClick={() => retryGridMissing(batchId, 'all')}
-              className="rounded-lg bg-amber-50 px-2.5 py-1 text-xs text-amber-600 transition hover:bg-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:hover:bg-amber-500/20"
+              className="ui-button bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
             >
               补跑全部失败格
             </button>
@@ -260,7 +249,7 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
             <button
               type="button"
               onClick={handleCancelBatch}
-              className="rounded-lg bg-red-50 px-2.5 py-1 text-xs text-red-600 transition hover:bg-red-100 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20"
+              className="ui-button bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400"
               title="中止在途请求并跳过排队任务,取消的格可补跑"
             >
               取消批次
@@ -268,6 +257,13 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
           )}
         </div>
       </div>
+
+      {tasks.length > repByCell.size && (
+        <p className="mb-3 text-xs text-content-muted">
+          此批共 {tasks.length} 条任务，含 {tasks.length - repByCell.size}{' '}
+          条同格历史记录；每格只显示最新任务。
+        </p>
+      )}
 
       {/* 批次笔记:展示行 / 行内编辑 */}
       {editingNote ? (
@@ -279,20 +275,20 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
             rows={2}
             placeholder="记录这组实验的结论（导出对照图时会带上）"
             aria-label="批次笔记"
-            className="w-full resize-none rounded-xl border border-gray-200/70 bg-white/60 px-2.5 py-1.5 text-xs leading-relaxed text-gray-700 outline-none focus:border-blue-300 custom-scrollbar dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:focus:border-blue-500/40"
+            className="ui-field custom-scrollbar w-full resize-none text-sm leading-relaxed"
           />
           <div className="flex items-center justify-end gap-1.5">
             <button
               type="button"
               onClick={() => setEditingNote(false)}
-              className="rounded-lg px-2 py-1 text-xs text-gray-500 transition hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/[0.06]"
+              className="ui-button text-content-muted"
             >
               取消
             </button>
             <button
               type="button"
               onClick={saveNote}
-              className="rounded-lg bg-blue-500 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-blue-600"
+              className="ui-button bg-brand text-on-brand hover:bg-brand-hover"
             >
               保存笔记
             </button>
@@ -304,7 +300,7 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
             type="button"
             onClick={startEditNote}
             title={batchNote.text}
-            className="mb-3 block w-full truncate rounded-lg bg-white/50 px-2.5 py-1.5 text-left text-xs text-gray-500 transition hover:bg-white dark:bg-white/[0.03] dark:text-gray-400 dark:hover:bg-white/[0.06]"
+            className="mb-3 block min-h-11 w-full truncate rounded-lg bg-surface px-3 py-2 text-left text-sm text-content-muted transition hover:bg-surface-raised"
           >
             📝 {batchNote.text}
           </button>
@@ -314,9 +310,9 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
       {/* 矩阵:第一列为行表头(无 Y 轴时占位),其余为 X 列 */}
       <div className="overflow-x-auto" data-selection-clip>
         <div
-          className="grid gap-2"
+          className="grid gap-4"
           style={{
-            gridTemplateColumns: `${hasY ? 'minmax(56px,auto)' : '0'} repeat(${cols.length}, minmax(220px, 1fr))`,
+            gridTemplateColumns: `${hasY ? 'minmax(56px,auto)' : '0'} repeat(${cols.length}, minmax(260px, 1fr))`,
           }}
         >
           {/* 表头行 */}
@@ -341,7 +337,7 @@ export default function TaskGridMatrix({ batchId, tasks, onDelete }: Props) {
                       onClick={() =>
                         retryGridCell(batchId, { x: col.key, ...(hasY ? { y: row.key } : {}) })
                       }
-                      className="flex min-h-[120px] w-full items-center justify-center rounded-xl border border-dashed border-gray-300 text-xs text-gray-400 transition hover:border-blue-300 hover:text-blue-500 dark:border-white/[0.12] dark:text-gray-500 dark:hover:border-blue-500/40"
+                      className="flex min-h-[200px] w-full items-center justify-center rounded-2xl border border-dashed border-line bg-surface text-sm text-content-muted transition hover:border-brand hover:text-brand-ink"
                     >
                       补跑此格
                     </button>

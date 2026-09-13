@@ -79,15 +79,12 @@ export default function ImageThumb({
       onTouchEnd={dragHandlers.onTouchEnd}
       onTouchCancel={dragHandlers.onTouchCancel}
     >
-      <ButtonTooltip
-        visible={hintVisible}
-        text={imageHintText}
-      />
+      <ButtonTooltip visible={hintVisible} text={imageHintText} />
       {dragHandlers.showDropBefore && (
-        <div className="absolute -left-[5px] top-0 bottom-0 w-[2px] bg-blue-500 rounded-full z-40 shadow-sm pointer-events-none" />
+        <div className="absolute -left-[5px] top-0 bottom-0 w-[2px] bg-brand rounded-full z-40 shadow-sm pointer-events-none" />
       )}
       {dragHandlers.showDropAfter && (
-        <div className="absolute -right-[5px] top-0 bottom-0 w-[2px] bg-blue-500 rounded-full z-40 shadow-sm pointer-events-none" />
+        <div className="absolute -right-[5px] top-0 bottom-0 w-[2px] bg-brand rounded-full z-40 shadow-sm pointer-events-none" />
       )}
       {/* 本体仅在 !canEdit(无内部覆盖按钮)时可交互:role=button 与真 button 一样要求子树
          presentational,canEdit 时内嵌编辑按钮会构成 nested-interactive 违例;且指针在
@@ -106,10 +103,8 @@ export default function ImageThumb({
               },
             }
           : {})}
-        className={`relative w-[52px] h-[52px] rounded-xl overflow-hidden shadow-sm cursor-grab active:cursor-grabbing select-none outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
-          isMaskTarget
-            ? 'border-2 border-blue-500'
-            : 'border border-gray-200 dark:border-white/[0.08]'
+        className={`relative w-[52px] h-[52px] rounded-xl overflow-hidden shadow-sm cursor-grab active:cursor-grabbing select-none outline-none focus-visible:ring-2 focus-visible:ring-brand/20 ${
+          isMaskTarget ? 'border-2 border-brand' : 'border border-line '
         }`}
         onClick={dragHandlers.onClickImage}
       >
@@ -121,7 +116,7 @@ export default function ImageThumb({
           />
         )}
         {isMaskTarget && (
-          <span className="absolute left-1 top-1 rounded bg-blue-500/90 px-1.5 py-0.5 text-[8px] leading-none text-white font-bold tracking-wider backdrop-blur-sm z-10 pointer-events-none">
+          <span className="absolute left-1 top-1 rounded bg-brand px-1 py-0.5 text-[10px] leading-none text-on-brand font-semibold z-10 pointer-events-none">
             MASK
           </span>
         )}
@@ -129,7 +124,7 @@ export default function ImageThumb({
           /* 焦点环用 ring-inset:父层 overflow-hidden 会裁掉外扩的 box-shadow */
           <button
             type="button"
-            className="absolute inset-0 w-full h-full bg-black/40 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-400 transition-opacity flex items-center justify-center cursor-pointer z-20 outline-none border-none"
+            className="absolute inset-0 w-full h-full bg-black/40 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/20 transition-opacity flex items-center justify-center cursor-pointer z-20 outline-none border-none"
             onClick={(e) => {
               e.stopPropagation()
               onEditMask(img.id)
@@ -137,8 +132,18 @@ export default function ImageThumb({
             title={isMaskTarget ? '编辑遮罩' : '添加遮罩'}
             aria-label={isMaskTarget ? '编辑遮罩' : '添加遮罩'}
           >
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            <svg
+              className="w-5 h-5 text-white"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+              />
             </svg>
           </button>
         )}
@@ -150,14 +155,25 @@ export default function ImageThumb({
           type="button"
           aria-label="移除此图"
           title="移除此图"
-          className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-red-500 text-white hidden group-hover:flex group-focus-within:flex [@media(hover:none)]:flex [@media(any-pointer:coarse)]:flex items-center justify-center cursor-pointer shadow-md hover:bg-red-600 z-30 outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
+          className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-red-500 text-white hidden group-hover:flex group-focus-within:flex [@media(hover:none)]:flex [@media(any-pointer:coarse)]:flex items-center justify-center cursor-pointer shadow-md hover:bg-red-600 z-30 outline-none focus-visible:ring-2 focus-visible:ring-brand/20 transition-colors"
           onClick={(e) => {
             e.stopPropagation()
             onRemove(idx)
           }}
         >
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+          <svg
+            className="w-3 h-3"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2.5}
+              d="M6 18L18 6M6 6l12 12"
+            />
           </svg>
         </button>
       )}

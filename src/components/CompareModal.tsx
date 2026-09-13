@@ -79,7 +79,9 @@ function ComparePanel({ compareTasks, close }: { compareTasks: TaskRecord[]; clo
   )
 
   // cache-first：挂载时同步吃缓存（useState 初始化器，不进 effect）
-  const [imageSrcs, setImageSrcs] = useState<Record<string, string>>(() => getCachedImageSrcs(imageIds))
+  const [imageSrcs, setImageSrcs] = useState<Record<string, string>>(() =>
+    getCachedImageSrcs(imageIds),
+  )
 
   // 未命中缓存的异步补载（setState 仅在异步回调里）
   useEffect(() => {
@@ -118,127 +120,135 @@ function ComparePanel({ compareTasks, close }: { compareTasks: TaskRecord[]; clo
       ariaLabel="并排对比"
       panelClassName="flex max-h-[92vh] w-full max-w-[95vw] flex-col overflow-hidden"
     >
-        <ModalHeaderBar>
-          <ModalTitle>
-            <svg className="h-5 w-5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="3" y="4" width="8" height="16" rx="2" />
-              <rect x="13" y="4" width="8" height="16" rx="2" />
-            </svg>
-            并排对比（{columnCount} 列）
-          </ModalTitle>
-          <ModalCloseButton onClick={close} label="关闭对比" />
-        </ModalHeaderBar>
+      <ModalHeaderBar>
+        <ModalTitle>
+          <svg
+            className="h-5 w-5 text-brand-ink"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="3" y="4" width="8" height="16" rx="2" />
+            <rect x="13" y="4" width="8" height="16" rx="2" />
+          </svg>
+          并排对比（{columnCount} 列）
+        </ModalTitle>
+        <ModalCloseButton onClick={close} label="关闭对比" />
+      </ModalHeaderBar>
 
-        <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
-          {/* 图片列区 */}
-          <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${gridColsClass}`}>
-            {compareTasks.map((task, columnIndex) => {
-              const outputs = task.outputImages || []
-              const index = Math.min(imageIndexById[task.id] ?? 0, Math.max(outputs.length - 1, 0))
-              const currentId = outputs[index]
-              const src = currentId ? imageSrcs[currentId] : ''
-              return (
-                <div key={task.id} className="flex flex-col gap-2">
-                  <div className="flex items-baseline gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-md bg-blue-500/90 text-xs font-bold text-white">
-                      {COLUMN_LETTERS[columnIndex]}
-                    </span>
-                    <span className="truncate text-xs text-gray-400 dark:text-gray-500">
-                      {columnSubtitle(task)}
-                    </span>
-                  </div>
-                  {currentId ? (
-                    <button
-                      type="button"
-                      onClick={() => setLightboxImageId(currentId, outputs)}
-                      className="flex h-[36vh] items-center justify-center overflow-hidden rounded-2xl border border-gray-200/60 bg-gray-50 dark:border-white/[0.06] dark:bg-white/[0.03]"
-                      title="点击放大"
-                      aria-label={`放大第 ${COLUMN_LETTERS[columnIndex]} 列图片`}
-                    >
-                      {src ? (
-                        <img src={src} alt={`对比列 ${COLUMN_LETTERS[columnIndex]}`} className="max-h-full max-w-full object-contain" />
-                      ) : (
-                        <span className="text-xs text-gray-400">加载中…</span>
-                      )}
-                    </button>
-                  ) : (
-                    <div className="flex h-[36vh] items-center justify-center rounded-2xl border border-dashed border-gray-200 text-xs text-gray-400 dark:border-white/[0.08]">
-                      无输出
-                    </div>
-                  )}
-                  {outputs.length > 1 && (
-                    <div className="flex items-center justify-center gap-1.5">
-                      {/* key 带下标:输出图 id 是内容寻址哈希,同批两张字节相同的图会撞 id */}
-                      {outputs.map((id, i) => (
-                        <button
-                          key={`${id}-${i}`}
-                          type="button"
-                          onClick={() => setImageIndexById((prev) => ({ ...prev, [task.id]: i }))}
-                          aria-label={`第 ${COLUMN_LETTERS[columnIndex]} 列第 ${i + 1} 张`}
-                          className={`h-2 w-2 rounded-full transition-colors ${
-                            i === index
-                              ? 'bg-blue-500'
-                              : 'bg-gray-300 hover:bg-gray-400 dark:bg-white/[0.15] dark:hover:bg-white/[0.3]'
-                          }`}
-                        />
-                      ))}
-                    </div>
-                  )}
+      <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
+        {/* 图片列区 */}
+        <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${gridColsClass}`}>
+          {compareTasks.map((task, columnIndex) => {
+            const outputs = task.outputImages || []
+            const index = Math.min(imageIndexById[task.id] ?? 0, Math.max(outputs.length - 1, 0))
+            const currentId = outputs[index]
+            const src = currentId ? imageSrcs[currentId] : ''
+            return (
+              <div key={task.id} className="flex flex-col gap-2">
+                <div className="flex items-baseline gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-md bg-brand-soft text-xs font-bold text-brand-ink">
+                    {COLUMN_LETTERS[columnIndex]}
+                  </span>
+                  <span className="truncate text-xs text-content-subtle dark:text-content-subtle">
+                    {columnSubtitle(task)}
+                  </span>
                 </div>
-              )
-            })}
-          </div>
-
-          {/* 参数对照区：行标题 + 跨列值；差异行高亮 */}
-          <div className="mt-5 overflow-x-auto">
-            <table className="w-full min-w-[560px] table-fixed border-collapse text-sm">
-              <colgroup>
-                <col className="w-16" />
-                {compareTasks.map((task) => (
-                  <col key={task.id} />
-                ))}
-              </colgroup>
-              <tbody>
-                {rows.map((row) => (
-                  <tr
-                    key={row.key}
-                    className={
-                      row.differs
-                        ? 'bg-blue-50/60 dark:bg-blue-500/[0.07]'
-                        : ''
-                    }
+                {currentId ? (
+                  <button
+                    type="button"
+                    onClick={() => setLightboxImageId(currentId, outputs)}
+                    className="flex h-[36vh] items-center justify-center overflow-hidden rounded-2xl border border-line bg-surface-muted dark:border-line dark:bg-surface-raised"
+                    title="点击放大"
+                    aria-label={`放大第 ${COLUMN_LETTERS[columnIndex]} 列图片`}
                   >
-                    <th
-                      scope="row"
-                      className="px-2 py-2 text-left align-top text-xs font-medium text-gray-400 dark:text-gray-500"
-                    >
-                      <span className="inline-flex items-center gap-1">
-                        {row.differs && (
-                          <span className="h-1.5 w-1.5 rounded-full bg-blue-500" aria-label="存在差异" />
-                        )}
-                        {row.label}
-                      </span>
-                    </th>
-                    {row.values.map((value, i) => (
-                      <td
-                        key={compareTasks[i].id}
-                        className={`px-2 py-2 align-top text-gray-700 dark:text-gray-300 ${
-                          row.multiline ? 'whitespace-pre-wrap break-words text-xs leading-relaxed' : ''
+                    {src ? (
+                      <img
+                        src={src}
+                        alt={`对比列 ${COLUMN_LETTERS[columnIndex]}`}
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    ) : (
+                      <span className="text-xs text-content-subtle">加载中…</span>
+                    )}
+                  </button>
+                ) : (
+                  <div className="flex h-[36vh] items-center justify-center rounded-2xl border border-dashed border-line text-xs text-content-subtle dark:border-line">
+                    无输出
+                  </div>
+                )}
+                {outputs.length > 1 && (
+                  <div className="flex items-center justify-center gap-1.5">
+                    {/* key 带下标:输出图 id 是内容寻址哈希,同批两张字节相同的图会撞 id */}
+                    {outputs.map((id, i) => (
+                      <button
+                        key={`${id}-${i}`}
+                        type="button"
+                        onClick={() => setImageIndexById((prev) => ({ ...prev, [task.id]: i }))}
+                        aria-label={`第 ${COLUMN_LETTERS[columnIndex]} 列第 ${i + 1} 张`}
+                        className={`h-2 w-2 rounded-full transition-colors ${
+                          i === index
+                            ? 'bg-brand'
+                            : 'bg-surface-raised hover:bg-surface-raised dark:bg-surface-raised dark:hover:bg-surface-raised'
                         }`}
-                      >
-                        {row.multiline ? (
-                          <div className="max-h-32 overflow-y-auto custom-scrollbar">{value}</div>
-                        ) : (
-                          value
-                        )}
-                      </td>
+                      />
                     ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
+
+        {/* 参数对照区：行标题 + 跨列值；差异行高亮 */}
+        <div className="mt-5 overflow-x-auto">
+          <table className="w-full min-w-[560px] table-fixed border-collapse text-sm">
+            <colgroup>
+              <col className="w-16" />
+              {compareTasks.map((task) => (
+                <col key={task.id} />
+              ))}
+            </colgroup>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.key} className={row.differs ? 'bg-brand-soft dark:bg-brand-soft' : ''}>
+                  <th
+                    scope="row"
+                    className="px-2 py-2 text-left align-top text-xs font-medium text-content-subtle dark:text-content-subtle"
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {row.differs && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-brand" aria-label="存在差异" />
+                      )}
+                      {row.label}
+                    </span>
+                  </th>
+                  {row.values.map((value, i) => (
+                    <td
+                      key={compareTasks[i].id}
+                      className={`px-2 py-2 align-top text-content dark:text-content ${
+                        row.multiline
+                          ? 'whitespace-pre-wrap break-words text-xs leading-relaxed'
+                          : ''
+                      }`}
+                    >
+                      {row.multiline ? (
+                        <div className="max-h-32 overflow-y-auto custom-scrollbar">{value}</div>
+                      ) : (
+                        value
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </Modal>
   )
 }

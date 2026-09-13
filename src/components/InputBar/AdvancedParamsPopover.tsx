@@ -1,16 +1,17 @@
+import PopoverSurface from './PopoverSurface'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store'
 import { usePopoverDismiss } from '../../hooks/usePopoverDismiss'
 import { DEFAULT_PARAMS, type TaskParams } from '../../types'
 import { getOutputImageLimitForSettings } from '../../lib/api/paramCompatibility'
-import Select from '../Select'
 import ButtonTooltip from './ButtonTooltip'
 
 const INPUT_CLASS =
-  'w-full px-3 py-2 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/60 dark:bg-white/[0.03] focus:outline-none text-sm transition-all duration-200 shadow-sm'
+  'w-full px-3 py-2 rounded-lg border border-line  bg-surface  focus:outline-none text-sm transition-all duration-200 shadow-sm'
 
+// 浏览器原生选项不受浮层 overflow 裁切，也不会与父层竞争 Escape 关闭事件。
 const SELECT_CLASS =
-  'w-full px-3 py-2 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/60 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-sm transition-all duration-200 shadow-sm'
+  'w-full px-3 py-2 rounded-lg border border-line  bg-surface  hover:bg-surface  text-sm transition-all duration-200 shadow-sm'
 
 const QUALITY_OPTIONS: Array<{ label: string; value: TaskParams['quality'] }> = [
   { label: 'auto', value: 'auto' },
@@ -142,18 +143,13 @@ export default function AdvancedParamsPopover({ anchorRef, onClose }: Props) {
   )
 
   return (
-    <div
-      ref={popoverRef}
-      role="dialog"
-      aria-label="高级参数"
-      className="absolute bottom-full right-0 mb-2 w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200/70 bg-white/95 p-4 shadow-2xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 z-40"
-    >
+    <PopoverSurface anchorRef={anchorRef} panelRef={popoverRef} label="高级参数" width={340}>
       <div className="mb-3 flex items-center justify-between">
-        <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100">高级参数</h4>
+        <h4 className="text-sm font-semibold text-content ">高级参数</h4>
         <button
           type="button"
           onClick={onClose}
-          className="rounded-md p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+          className="rounded-md p-1 text-content-subtle transition hover:bg-surface-muted hover:text-content-muted  "
           aria-label="关闭高级参数"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -170,41 +166,52 @@ export default function AdvancedParamsPopover({ anchorRef, onClose }: Props) {
       <div className="grid grid-cols-2 gap-3 text-xs">
         {/* 质量 */}
         <label className="relative flex flex-col gap-1">
-          <span className="ml-1 text-gray-500 dark:text-gray-400">质量</span>
-          <Select
+          <span className="ml-1 text-content-muted ">质量</span>
+          <select
             value={qualityDisabled ? 'auto' : params.quality}
-            onChange={(val) => {
-              if (!qualityDisabled) setParams({ quality: val })
+            onChange={(event) => {
+              if (!qualityDisabled)
+                setParams({ quality: event.target.value as TaskParams['quality'] })
             }}
-            options={QUALITY_OPTIONS}
             disabled={qualityDisabled}
             className={
               qualityDisabled
-                ? 'w-full px-3 py-2 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed text-sm shadow-sm'
+                ? 'w-full px-3 py-2 rounded-lg border border-line  bg-surface-muted  opacity-50 cursor-not-allowed text-sm shadow-sm'
                 : SELECT_CLASS
             }
-          />
+          >
+            {QUALITY_OPTIONS.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
           {qualityDisabled && (
-            <span className="ml-1 text-[10px] text-gray-500 dark:text-gray-400">
-              Codex CLI 不支持质量参数
-            </span>
+            <span className="ml-1 text-[10px] text-content-muted ">Codex CLI 不支持质量参数</span>
           )}
         </label>
 
         {/* 格式 */}
         <label className="flex flex-col gap-1">
-          <span className="ml-1 text-gray-500 dark:text-gray-400">格式</span>
-          <Select
+          <span className="ml-1 text-content-muted ">格式</span>
+          <select
             value={params.output_format}
-            onChange={(val) => setParams({ output_format: val })}
-            options={OUTPUT_FORMAT_OPTIONS}
+            onChange={(event) =>
+              setParams({ output_format: event.target.value as TaskParams['output_format'] })
+            }
             className={SELECT_CLASS}
-          />
+          >
+            {OUTPUT_FORMAT_OPTIONS.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
         </label>
 
         {/* 压缩率 */}
         <label className="flex flex-col gap-1">
-          <span className="ml-1 text-gray-500 dark:text-gray-400">压缩率</span>
+          <span className="ml-1 text-content-muted ">压缩率</span>
           <input
             value={outputCompressionInput}
             onChange={(e) => setOutputCompressionDraft(e.target.value)}
@@ -217,43 +224,45 @@ export default function AdvancedParamsPopover({ anchorRef, onClose }: Props) {
             placeholder="0-100"
             className={
               compressionDisabled
-                ? 'w-full px-3 py-2 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed text-sm shadow-sm'
+                ? 'w-full px-3 py-2 rounded-lg border border-line  bg-surface-muted  opacity-50 cursor-not-allowed text-sm shadow-sm'
                 : INPUT_CLASS
             }
           />
           {compressionDisabled && (
-            <span className="ml-1 text-[10px] text-gray-500 dark:text-gray-400">
-              仅 JPEG 和 WebP 支持
-            </span>
+            <span className="ml-1 text-[10px] text-content-muted ">仅 JPEG 和 WebP 支持</span>
           )}
         </label>
 
         {/* 审核 */}
         <label className="flex flex-col gap-1">
-          <span className="ml-1 text-gray-500 dark:text-gray-400">审核</span>
-          <Select
+          <span className="ml-1 text-content-muted ">审核</span>
+          <select
             value={moderationDisabled ? 'auto' : params.moderation}
-            onChange={(val) => {
-              if (!moderationDisabled) setParams({ moderation: val })
+            onChange={(event) => {
+              if (!moderationDisabled)
+                setParams({ moderation: event.target.value as TaskParams['moderation'] })
             }}
-            options={MODERATION_OPTIONS}
             disabled={moderationDisabled}
             className={
               moderationDisabled
-                ? 'w-full px-3 py-2 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed text-sm shadow-sm'
+                ? 'w-full px-3 py-2 rounded-lg border border-line  bg-surface-muted  opacity-50 cursor-not-allowed text-sm shadow-sm'
                 : SELECT_CLASS
             }
-          />
+          >
+            {MODERATION_OPTIONS.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
           {moderationDisabled && (
-            <span className="ml-1 text-[10px] text-gray-500 dark:text-gray-400">
-              Responses API 不支持
-            </span>
+            <span className="ml-1 text-[10px] text-content-muted ">Responses API 不支持</span>
           )}
         </label>
 
         {/* 数量 */}
         <label className="relative col-span-2 flex flex-col gap-1">
-          <span className="ml-1 text-gray-500 dark:text-gray-400">数量</span>
+          <span className="ml-1 text-content-muted ">数量</span>
           <input
             value={nInput}
             onChange={(e) => handleNInputChange(e.target.value)}
@@ -279,6 +288,6 @@ export default function AdvancedParamsPopover({ anchorRef, onClose }: Props) {
           <ButtonTooltip visible={nLimitHintVisible} text={nLimitHintText} />
         </label>
       </div>
-    </div>
+    </PopoverSurface>
   )
 }

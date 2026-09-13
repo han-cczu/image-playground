@@ -1,3 +1,4 @@
+import PopoverSurface from './PopoverSurface'
 import { useRef } from 'react'
 import { useStore } from '../../store'
 import { usePopoverDismiss } from '../../hooks/usePopoverDismiss'
@@ -17,10 +18,10 @@ interface StyleItem {
 
 const ITEMS: StyleItem[] = [
   { key: undefined, label: '无风格' },
-  ...(Object.entries(STYLE_PRESETS).map(([key, value]) => ({
+  ...Object.entries(STYLE_PRESETS).map(([key, value]) => ({
     key: key as StylePresetKey,
     label: value.label,
-  }))),
+  })),
 ]
 
 /**
@@ -42,16 +43,8 @@ export default function StylePickerPopover({ anchorRef, onClose }: Props) {
   }
 
   return (
-    <div
-      ref={popoverRef}
-      role="dialog"
-      aria-label="选择风格预设"
-      className="absolute bottom-full left-0 mb-2 min-w-[200px] rounded-2xl border border-gray-200/70 bg-white/95 p-2 shadow-2xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10 z-40"
-    >
-      <ul
-        aria-label="选择风格预设"
-        className="flex max-h-[320px] flex-col gap-0.5 overflow-y-auto"
-      >
+    <PopoverSurface anchorRef={anchorRef} panelRef={popoverRef} label="选择风格预设" width={230}>
+      <ul aria-label="选择风格预设" className="flex max-h-[320px] flex-col gap-0.5 overflow-y-auto">
         {ITEMS.map((item) => {
           const active = params.stylePreset === item.key
           return (
@@ -61,14 +54,14 @@ export default function StylePickerPopover({ anchorRef, onClose }: Props) {
                 onClick={() => handleSelect(item.key)}
                 className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors ${
                   active
-                    ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-200'
-                    : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06]'
+                    ? 'bg-brand-soft text-brand-ink  '
+                    : 'text-content hover:bg-surface-muted  '
                 }`}
               >
                 <span className="font-medium">{item.label}</span>
                 {active && (
                   <svg
-                    className="h-4 w-4 shrink-0 text-blue-500"
+                    className="h-4 w-4 shrink-0 text-brand-ink"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -85,6 +78,6 @@ export default function StylePickerPopover({ anchorRef, onClose }: Props) {
           )
         })}
       </ul>
-    </div>
+    </PopoverSurface>
   )
 }

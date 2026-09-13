@@ -23,7 +23,8 @@ vi.mock('../../store', () => {
     setDetailTaskId: mocks.setDetailTaskId,
     setLightboxImageId: mocks.setLightboxImageId,
   })
-  const useStore = (selector: (s: ReturnType<typeof getStoreState>) => unknown) => selector(getStoreState())
+  const useStore = (selector: (s: ReturnType<typeof getStoreState>) => unknown) =>
+    selector(getStoreState())
   useStore.getState = getStoreState
   return {
     useStore,
@@ -70,6 +71,24 @@ describe('ImagePanel', () => {
     cleanup()
     vi.clearAllMocks()
     state.showToast = vi.fn()
+  })
+
+  it('明确取消的记录显示已取消并保留重试入口，含取消字样的其他错误保持原文', () => {
+    const props = {
+      imageIndex: 0,
+      setImageIndex: vi.fn(),
+      currentOutputImageSrc: '',
+      currentImageRatio: '',
+      currentImageSize: '',
+      durationText: null,
+    }
+    const { rerender } = render(<ImagePanel {...props} task={task({ error: '已取消生成' })} />)
+    expect(screen.getByText('已取消')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '重试任务' })).toBeTruthy()
+
+    rerender(<ImagePanel {...props} task={task({ error: '取消请求失败：HTTP 500' })} />)
+    expect(screen.getByText('取消请求失败：HTTP 500')).toBeTruthy()
+    expect(screen.queryByText('已取消')).toBeNull()
   })
 
   it('reports delayed error-copy success through the latest toast handler', async () => {

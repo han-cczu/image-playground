@@ -322,15 +322,15 @@ export default function MaskEditorModal() {
         aria-label="遮罩编辑器"
         tabIndex={-1}
         data-no-drag-select
-        className="fixed inset-0 z-[80] flex flex-col bg-gray-50 dark:bg-gray-900 animate-modal-in"
+        className="fixed inset-0 z-[80] flex flex-col bg-surface-muted dark:bg-surface-muted animate-modal-in"
       >
         {/* Header */}
-        <div className="flex-none flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950 z-20">
+        <div className="flex-none flex items-center justify-between px-4 py-3 border-b border-line bg-white dark:border-line dark:bg-surface-muted z-20">
           <div className="flex items-center gap-3">
             <button
               onClick={close}
               disabled={isSaving}
-              className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-lg dark:text-gray-400 dark:hover:bg-gray-800 transition"
+              className="ui-icon-button -ml-2 text-content-muted"
               title="取消"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -348,7 +348,7 @@ export default function MaskEditorModal() {
             {maskDraft?.targetImageId === imageId && (
               <button
                 onClick={handleRemoveMask}
-                className="flex h-8 items-center gap-1.5 px-4 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-lg transition"
+                className="flex min-h-11 items-center gap-1.5 px-3 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-lg transition"
               >
                 移除遮罩
               </button>
@@ -356,7 +356,7 @@ export default function MaskEditorModal() {
             <button
               onClick={handleSave}
               disabled={!canEditMaskHistory}
-              className="flex h-8 items-center gap-1.5 px-4 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg disabled:opacity-50 transition"
+              className="flex min-h-11 items-center gap-1.5 px-3 text-sm font-medium text-on-brand bg-brand hover:bg-brand-hover rounded-lg disabled:opacity-50 transition"
             >
               {isSaving ? '保存中...' : '保存'}
             </button>

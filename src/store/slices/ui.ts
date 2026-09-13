@@ -132,7 +132,7 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   hasSeenTour: false,
   setHasSeenTour: (hasSeenTour) => set({ hasSeenTour }),
 
-  mobileInputCollapsed: false,
+  mobileInputCollapsed: true,
   setMobileInputCollapsed: (mobileInputCollapsed) => set({ mobileInputCollapsed }),
 
   // Gallery view

@@ -11,18 +11,22 @@ interface Props {
   duration: string
 }
 
-/** 左侧图片区域:运行中转圈(可取消)/失败图标/完成封面,左上角耗时或比例+分辨率标签 */
+/** 4:3 预览画布：图片完整呈现，计时与真实输出张数不会因视觉裁切而丢失。 */
 export default function CoverArea({ task, thumbSrc, coverRatio, coverSize, duration }: Props) {
   const showRunningTimer = task.status === 'running'
+  // cancel.ts 以 error + 此专属消息记录主动取消；精确匹配，避免把上游含“取消”的报错误认成取消。
+  const isCancelled = task.status === 'error' && task.error === '已取消生成'
   // 自动重试瞬态徽标:仅 running 时订阅有意义;条目对象整体替换,zustand 引用比较天然精确
-  const retryInfo = useStore((s) => (task.status === 'running' ? s.taskRetryInfo[task.id] : undefined))
+  const retryInfo = useStore((s) =>
+    task.status === 'running' ? s.taskRetryInfo[task.id] : undefined,
+  )
 
   return (
-    <div className="w-40 min-w-[10rem] h-full bg-gray-100 dark:bg-black/20 relative flex items-center justify-center overflow-hidden flex-shrink-0">
+    <div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-surface-muted">
       {task.status === 'running' && (
         <div className="flex flex-col items-center gap-2">
           <svg
-            className="w-8 h-8 text-blue-400 animate-spin"
+            className="h-8 w-8 animate-spin text-brand-ink motion-reduce:animate-none"
             fill="none"
             viewBox="0 0 24 24"
           >
@@ -40,7 +44,7 @@ export default function CoverArea({ task, thumbSrc, coverRatio, coverSize, durat
               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
             />
           </svg>
-          <span className="text-xs text-gray-400 dark:text-gray-500">
+          <span className="text-xs text-content-muted">
             {retryInfo ? `第 ${retryInfo.attempt}/${retryInfo.maxAttempts} 次重试中` : '生成中...'}
           </span>
           <button
@@ -49,7 +53,7 @@ export default function CoverArea({ task, thumbSrc, coverRatio, coverSize, durat
               e.stopPropagation()
               cancelTask(task.id)
             }}
-            className="mt-0.5 rounded-full px-2 py-0.5 text-[11px] text-gray-500 transition hover:bg-gray-200 hover:text-red-500 dark:text-gray-400 dark:hover:bg-white/10"
+            className="ui-button mt-0.5 text-content-muted hover:text-red-600 dark:hover:text-red-400"
           >
             取消
           </button>
@@ -58,7 +62,7 @@ export default function CoverArea({ task, thumbSrc, coverRatio, coverSize, durat
       {task.status === 'error' && (
         <div className="flex flex-col items-center gap-1 px-2">
           <svg
-            className="w-7 h-7 text-red-400"
+            className={`w-7 h-7 ${isCancelled ? 'text-content-muted' : 'text-red-400'}`}
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -67,11 +71,17 @@ export default function CoverArea({ task, thumbSrc, coverRatio, coverSize, durat
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth={2}
-              d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              d={
+                isCancelled
+                  ? 'M8 12h8m5 0a9 9 0 11-18 0 9 9 0 0118 0z'
+                  : 'M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
+              }
             />
           </svg>
-          <span className="text-xs text-red-400 text-center leading-tight">
-            失败
+          <span
+            className={`text-center text-xs leading-tight ${isCancelled ? 'text-content-muted' : 'text-red-600 dark:text-red-400'}`}
+          >
+            {isCancelled ? '已取消' : '失败'}
           </span>
         </div>
       )}
@@ -81,20 +91,20 @@ export default function CoverArea({ task, thumbSrc, coverRatio, coverSize, durat
             src={thumbSrc}
             // 供 ImageContextMenu 按 id 重取:blob: src 在菜单打开期间可能因卡片卸载被 revoke
             data-image-id={task.outputImages?.[0]}
-            className="saveable-image w-full h-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.06]"
+            className="saveable-image h-full w-full object-contain"
             loading="lazy"
-            alt=""
+            alt={task.prompt ? `生成图片：${task.prompt.slice(0, 80)}` : '生成图片'}
           />
           {task.outputImages.length > 1 && (
-            <span className="absolute bottom-1 right-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded">
-              {task.outputImages.length}
+            <span className="absolute bottom-2 right-2 rounded-md bg-surface/95 px-2 py-1 text-xs font-medium text-content">
+              {task.outputImages.length} 张输出
             </span>
           )}
         </>
       )}
       {task.status === 'done' && !thumbSrc && (
         <svg
-          className="w-8 h-8 text-gray-300"
+          className="h-8 w-8 text-content-subtle"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -108,20 +118,25 @@ export default function CoverArea({ task, thumbSrc, coverRatio, coverSize, durat
         </svg>
       )}
       {/* 运行中显示耗时，完成后显示封面图比例与分辨率标签 */}
-      <div className="absolute top-1.5 left-1.5 flex items-center gap-1">
+      <div className="absolute left-2 top-2 flex max-w-[calc(100%-68px)] flex-wrap items-center gap-1">
         {showRunningTimer || task.status !== 'done' || !coverRatio || !coverSize ? (
-          <span className="flex items-center gap-1 bg-black/50 text-white text-[10px] sm:text-xs px-1.5 py-0.5 rounded backdrop-blur-sm font-mono">
+          <span className="flex items-center gap-1 rounded-md bg-surface/95 px-2 py-1 font-mono text-xs text-content-muted">
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
             </svg>
             {duration}
           </span>
         ) : (
           <>
-            <span className="bg-black/50 text-white text-[10px] sm:text-xs px-1.5 py-0.5 rounded backdrop-blur-sm font-mono">
+            <span className="rounded-md bg-surface/95 px-2 py-1 font-mono text-xs text-content-muted">
               {coverRatio}
             </span>
-            <span className="bg-black/50 text-white/90 text-[10px] sm:text-xs px-1.5 py-0.5 rounded backdrop-blur-sm font-medium">
+            <span className="rounded-md bg-surface/95 px-2 py-1 text-xs font-medium text-content-muted">
               {coverSize}
             </span>
           </>

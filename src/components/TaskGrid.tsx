@@ -19,10 +19,11 @@ import { CSS } from '@dnd-kit/utilities'
 import type { TaskRecord } from '../types'
 import { useStore, reuseConfig, editOutputs, removeTask, reorderTask } from '../store'
 import { filterAndSortTasks, TASK_GRID_RENDER_CAP } from '../lib/taskFilters'
-import { groupIntoGridBlocks } from '../lib/gridExperiment'
+import { buildTaskPresentation } from '../lib/taskPresentation'
 import { pickFallbackColor } from '../lib/conversations'
 import TaskCard from './TaskCard'
 import TaskGridMatrix from './TaskGridMatrix'
+import SelectionActionBar from './InputBar/SelectionActionBar'
 
 export interface ConversationTag {
   id: string
@@ -167,23 +168,9 @@ export default function TaskGrid() {
     filterConversationId,
   ])
 
-  // 把扁平任务流分组成渲染项:同 batchId 的网格 task 聚合成矩阵块,其余为普通卡片。
-  const renderItems = useMemo(() => groupIntoGridBlocks(filteredTasks), [filteredTasks])
-  // 极端大库兜底:按 task 计数(矩阵块计成员数)累计到 RENDER_CAP 截断——renderItems.length
-  // 会因网格块把整批算 1 项而严重低估真实 task 数,故用 task 数为准(与 spec 一致)
-  const isCapped = filteredTasks.length > RENDER_CAP
-  const visibleItems = useMemo(() => {
-    if (!isCapped) return renderItems
-    const out: typeof renderItems = []
-    let count = 0
-    for (const item of renderItems) {
-      const n = item.type === 'grid' ? item.tasks.length : 1
-      if (count + n > RENDER_CAP) break
-      out.push(item)
-      count += n
-    }
-    return out
-  }, [renderItems, isCapped])
+  // 渲染、普通全选和整批成员共用呈现结果，矩阵上限边界不再与批量栏的平面 slice 漂移。
+  const presentation = useMemo(() => buildTaskPresentation(filteredTasks), [filteredTasks])
+  const { blocks: visibleItems, isCapped } = presentation
   const hasGridBlock = useMemo(() => visibleItems.some((i) => i.type === 'grid'), [visibleItems])
   // 拖拽排序只在普通卡片间:矩阵成员不进 SortableContext;sortableIds 仅取已渲染项,
   // 避免 cap 截断时 items 引用未渲染卡造成 dnd 不一致。
@@ -460,7 +447,7 @@ export default function TaskGrid() {
     // 「真正的空对话」由 App 的 EmptyState 承接；这里只在用户主动加了筛选/搜索时占位。
     if (searchQuery || filterFavorite || filterFavoriteCategoryId || filterStatus !== 'all') {
       return (
-        <div className="text-center py-20 text-gray-400 dark:text-gray-500">
+        <div className="py-20 text-center text-content-muted">
           <p className="text-sm">没有找到匹配的记录</p>
         </div>
       )
@@ -470,9 +457,10 @@ export default function TaskGrid() {
 
   return (
     <div ref={rootRef} data-task-grid-root className="relative min-h-[50vh]">
+      <SelectionActionBar presentation={presentation} />
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={sortableIds} strategy={rectSortingStrategy}>
-          <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
+          <div ref={gridRef} className="workspace-task-grid pb-6">
             {visibleItems.map((item, index) => {
               if (item.type === 'grid') {
                 return (
@@ -480,6 +468,7 @@ export default function TaskGrid() {
                     key={`grid-${item.batchId}`}
                     batchId={item.batchId}
                     tasks={item.tasks}
+                    representatives={presentation.representativesByBatch.get(item.batchId)}
                     onDelete={handleDelete}
                   />
                 )
@@ -508,14 +497,15 @@ export default function TaskGrid() {
         </SortableContext>
       </DndContext>
       {isCapped && (
-        <div className="py-6 text-center text-xs text-gray-400 dark:text-gray-500">
-          仅显示前 {RENDER_CAP} 条,共 {filteredTasks.length} 条记录。请用搜索 /
-          筛选缩小范围以查看其余。
+        <div className="py-6 text-center text-xs text-content-muted">
+          当前显示 {presentation.displayedTasks.length} 张任务卡，包含{' '}
+          {presentation.renderedMemberCount} 条记录；共 {filteredTasks.length} 条，显示上限{' '}
+          {RENDER_CAP} 条。矩阵按整批显示，请用搜索或筛选查看其余。
         </div>
       )}
       {selectionBox && (
         <div
-          className="fixed bg-blue-500/20 border border-blue-500/50 pointer-events-none z-[30]"
+          className="pointer-events-none fixed z-[30] border border-brand bg-brand/15"
           style={{
             left: Math.min(selectionBox.startX, selectionBox.currentX),
             top: Math.min(selectionBox.startY, selectionBox.currentY),

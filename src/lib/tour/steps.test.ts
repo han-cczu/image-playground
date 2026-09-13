@@ -26,22 +26,21 @@ describe('buildTourSteps', () => {
     const configured = buildTourSteps({ isMobile: false, hasApiKey: true })
     const freshBody = fresh.find((s) => s.id === 'configure-api')!.body
     const configuredBody = configured.find((s) => s.id === 'configure-api')!.body
-    expect(freshBody).toContain('灰色')
-    expect(configuredBody).not.toContain('灰色')
+    expect(freshBody).toContain('配置 API')
+    expect(configuredBody).not.toContain('点「配置 API」')
     expect(configuredBody).toContain('已配置')
   })
 
   it('advanced step expands the mobile collapse panel only on mobile', () => {
     const api = { setMobileInputCollapsed: vi.fn() }
 
-    buildTourSteps({ isMobile: true, hasApiKey: false })
-      .find((s) => s.id === 'advanced')!
-      .onEnter!(api)
+    buildTourSteps({ isMobile: true, hasApiKey: false }).find((s) => s.id === 'advanced')!.onEnter!(
+      api,
+    )
     expect(api.setMobileInputCollapsed).toHaveBeenCalledWith(false)
 
     api.setMobileInputCollapsed.mockClear()
-    buildTourSteps({ isMobile: false, hasApiKey: false })
-      .find((s) => s.id === 'advanced')!
+    buildTourSteps({ isMobile: false, hasApiKey: false }).find((s) => s.id === 'advanced')!
       .onEnter!(api)
     expect(api.setMobileInputCollapsed).not.toHaveBeenCalled()
   })

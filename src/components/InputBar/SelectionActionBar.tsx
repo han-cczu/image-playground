@@ -1,6 +1,6 @@
-import { useCallback } from 'react'
+import { useMemo } from 'react'
 import type { TaskRecord } from '../../types'
-import { TASK_GRID_RENDER_CAP } from '../../lib/taskFilters'
+import { getPresentedSelection, type TaskPresentation } from '../../lib/taskPresentation'
 import {
   cancelTask,
   clearTaskFavorite,
@@ -11,10 +11,11 @@ import {
 import FavoriteCategoryMenu from '../FavoriteCategoryMenu'
 
 interface Props {
-  filteredTasks: TaskRecord[]
+  presentation: TaskPresentation
 }
 
-export default function SelectionActionBar({ filteredTasks }: Props) {
+/** 与作品区共享显示集合；整批显式选择的历史成员保留，但隐藏块永远不进入可执行集合。 */
+export default function SelectionActionBar({ presentation }: Props) {
   const selectedTaskIds = useStore((s) => s.selectedTaskIds)
   const setSelectedTaskIds = useStore((s) => s.setSelectedTaskIds)
   const clearSelection = useStore((s) => s.clearSelection)
@@ -22,105 +23,99 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const setCompareTaskIds = useStore((s) => s.setCompareTaskIds)
   const setCaptionBatchImageIds = useStore((s) => s.setCaptionBatchImageIds)
+  const byId = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks])
 
-  // 「当前可见」以 TaskGrid 实际渲染的上限为准:超过 TASK_GRID_RENDER_CAP 时只渲染前 N 条,
-  // 全选若按 filteredTasks 全量选中,批量删除会命中用户从未看到的记录
-  const renderedTasks =
-    filteredTasks.length > TASK_GRID_RENDER_CAP
-      ? filteredTasks.slice(0, TASK_GRID_RENDER_CAP)
-      : filteredTasks
-  const visibleTaskIds = new Set(renderedTasks.map((task) => task.id))
-  const actionableSelectedTaskIds = selectedTaskIds.filter((id) => visibleTaskIds.has(id))
+  const { taskIds, historyCount, batchCount } = getPresentedSelection(presentation, selectedTaskIds)
+  const selected = new Set(taskIds)
+  const selectedTasks = taskIds
+    .map((id) => byId.get(id))
+    .filter((task): task is TaskRecord => Boolean(task))
+  const allDisplayedSelected =
+    presentation.displayedTasks.length > 0 &&
+    presentation.displayedTasks.every((task) => selected.has(task.id))
+  const scopeText =
+    batchCount > 0 ? `涉及 ${batchCount} 个矩阵批次，包含 ${historyCount} 条同格历史记录。` : ''
 
-  const allVisibleSelected =
-    actionableSelectedTaskIds.length === renderedTasks.length && renderedTasks.length > 0
-
-  const handleSelectAllToggle = useCallback(() => {
-    if (allVisibleSelected) {
-      clearSelection()
+  const handleSelectAllToggle = () => {
+    // 普通全选只改变卡片代表；取消当前显示全选时不顺带取消用户明确选中的历史成员。
+    if (allDisplayedSelected) {
+      setSelectedTaskIds((previous) =>
+        previous.filter(
+          (id) => presentation.memberTaskIds.has(id) && !presentation.displayedTaskIds.has(id),
+        ),
+      )
     } else {
-      setSelectedTaskIds(renderedTasks.map((t) => t.id))
+      setSelectedTaskIds((previous) => [
+        ...new Set([
+          ...previous.filter((id) => presentation.memberTaskIds.has(id)),
+          ...presentation.displayedTaskIds,
+        ]),
+      ])
     }
-  }, [allVisibleSelected, renderedTasks, clearSelection, setSelectedTaskIds])
+  }
 
-  const handleSetFavoriteCategory = useCallback(
-    (categoryId: string | null) => {
-      if (!categoryId) return
-      const selectedTasks = tasks.filter((t) => actionableSelectedTaskIds.includes(t.id))
-      const allInTarget =
-        selectedTasks.length > 0 &&
-        selectedTasks.every((t) => t.isFavorite && t.favoriteCategoryId === categoryId)
-      if (allInTarget) return
-
-      setConfirmDialog({
-        title: '批量收藏',
-        message: `确定要把选中的 ${actionableSelectedTaskIds.length} 条记录收藏到此分类吗？`,
-        confirmText: '确认收藏',
-        action: () => {
-          return Promise.allSettled(
-            actionableSelectedTaskIds.map((id) => setTaskFavoriteCategory(id, categoryId)),
-          ).then((results) => {
+  const handleSetFavoriteCategory = (categoryId: string | null) => {
+    if (
+      !categoryId ||
+      selectedTasks.every((task) => task.isFavorite && task.favoriteCategoryId === categoryId)
+    )
+      return
+    setConfirmDialog({
+      title: '批量收藏',
+      message: `确定要把选中的 ${taskIds.length} 条记录收藏到此分类吗？${scopeText}`,
+      confirmText: '确认收藏',
+      action: () =>
+        Promise.allSettled(taskIds.map((id) => setTaskFavoriteCategory(id, categoryId))).then(
+          (results) => {
             const failed = results.filter((result) => result.status === 'rejected').length
-            if (failed > 0) {
+            if (failed > 0)
               useStore.getState().showToast(`批量收藏失败：${failed} 条未保存`, 'error')
-            }
             clearSelection()
-          })
-        },
-      })
-    },
-    [tasks, actionableSelectedTaskIds, clearSelection, setConfirmDialog],
-  )
+          },
+        ),
+    })
+  }
 
-  const handleClearFavorite = useCallback(() => {
+  const handleClearFavorite = () => {
     setConfirmDialog({
       title: '批量取消收藏',
-      message: `确定要取消收藏选中的 ${actionableSelectedTaskIds.length} 条记录吗？`,
+      message: `确定要取消收藏选中的 ${taskIds.length} 条记录吗？${scopeText}`,
       confirmText: '确认取消',
-      action: () => {
-        return Promise.allSettled(
-          actionableSelectedTaskIds.map((id) => clearTaskFavorite(id)),
-        ).then((results) => {
+      action: () =>
+        Promise.allSettled(taskIds.map((id) => clearTaskFavorite(id))).then((results) => {
           const failed = results.filter((result) => result.status === 'rejected').length
-          if (failed > 0) {
+          if (failed > 0)
             useStore.getState().showToast(`批量取消收藏失败：${failed} 条未保存`, 'error')
-          }
           clearSelection()
-        })
-      },
+        }),
     })
-  }, [actionableSelectedTaskIds, clearSelection, setConfirmDialog])
+  }
 
-  const handleDeleteSelected = useCallback(() => {
+  const handleDeleteSelected = () => {
     setConfirmDialog({
       title: '批量删除',
-      message: `确定要删除选中的 ${actionableSelectedTaskIds.length} 条记录吗？`,
-      // 全选+秒点确认是误删风险最高点:短暂禁用确认键,强制看清数量再删
+      message: `确定要删除选中的 ${taskIds.length} 条记录吗？${scopeText}`,
       minConfirmDelayMs: 700,
-      action: () => {
-        return removeMultipleTasks(actionableSelectedTaskIds)
-      },
+      tone: 'danger',
+      action: () => removeMultipleTasks(taskIds),
     })
-  }, [actionableSelectedTaskIds, setConfirmDialog])
+  }
 
-  if (actionableSelectedTaskIds.length === 0) return null
+  if (taskIds.length === 0) return null
 
   const allSelectedFavorite =
-    actionableSelectedTaskIds.length > 0 &&
-    actionableSelectedTaskIds.every((id) => tasks.find((t) => t.id === id)?.isFavorite)
-
-  // 取消生成:选中集里的在途任务(通配批散卡多选取消的入口;取消≠删除,记录保留可重试/补跑)
-  const runningSelected = actionableSelectedTaskIds.filter(
-    (id) => tasks.find((t) => t.id === id)?.status === 'running',
-  )
+    selectedTasks.length > 0 && selectedTasks.every((task) => task.isFavorite)
+  const runningSelected = selectedTasks
+    .filter((task) => task.status === 'running')
+    .map((task) => task.id)
   const handleCancelRunning = () => {
     setConfirmDialog({
       title: '取消生成',
-      message: `确定取消选中的 ${runningSelected.length} 条进行中任务?已发请求会被丢弃,记录保留可重试。`,
+      message: `确定取消选中的 ${runningSelected.length} 条进行中任务？已发请求会被丢弃，记录保留可重试。${scopeText}`,
       confirmText: '取消生成',
       tone: 'danger',
       action: () => {
-        // cancelTask 自带 status guard:弹窗期间转 done 的成员幂等跳过,计数取实际值
+        // 确认期间完成的任务由运行时 guard 跳过；提示必须使用实际取消数。
         let cancelled = 0
         for (const id of runningSelected) if (cancelTask(id)) cancelled += 1
         useStore
@@ -133,208 +128,114 @@ export default function SelectionActionBar({ filteredTasks }: Props) {
     })
   }
 
-  // 对比:2~4 条已完成且有输出图的任务
   const canCompare =
-    actionableSelectedTaskIds.length >= 2 &&
-    actionableSelectedTaskIds.length <= 4 &&
-    actionableSelectedTaskIds.every((id) => {
-      const t = tasks.find((task) => task.id === id)
-      return t?.status === 'done' && (t.outputImages?.length ?? 0) > 0
-    })
-
-  // 批量反推:选中的 done 且有输出图的任务(各取首图);谓词镜像 canCompare 但不限 2~4。
-  // 去重:不同 task 可能共享同一首图 id(重试/复制),重复会让 modal 列表 key 撞 + 重复反推
+    taskIds.length >= 2 &&
+    taskIds.length <= 4 &&
+    selectedTasks.length === taskIds.length &&
+    selectedTasks.every((task) => task.status === 'done' && task.outputImages.length > 0)
   const batchCaptionImageIds = [
     ...new Set(
-      actionableSelectedTaskIds
-        .map((id) => tasks.find((t) => t.id === id))
-        .filter((t): t is TaskRecord => t?.status === 'done' && (t.outputImages?.length ?? 0) > 0)
-        .map((t) => t.outputImages[0]),
+      selectedTasks
+        .filter((task) => task.status === 'done' && task.outputImages.length > 0)
+        .map((task) => task.outputImages[0]),
     ),
   ]
-  const canBatchCaption = batchCaptionImageIds.length >= 1
-  const handleBatchCaption = () => {
-    setCaptionBatchImageIds(batchCaptionImageIds)
-    clearSelection()
-  }
 
   return (
-    <div className="flex justify-center mb-3">
-      <div className="bg-gray-800/90 dark:bg-gray-800/90 backdrop-blur shadow-lg rounded-full flex items-center p-1 border border-white/10 pointer-events-auto">
-        <button
-          onClick={clearSelection}
-          className="p-2 text-gray-300 hover:text-white transition-colors"
-          title="取消选择"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </button>
-        <div className="w-px h-5 bg-white/20 mx-1"></div>
-        <button
-          onClick={handleSelectAllToggle}
-          className="p-2 text-blue-400 hover:text-blue-300 transition-colors"
-          title={allVisibleSelected ? '取消全选' : '全选当前可见'}
-        >
-          {allVisibleSelected ? (
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              viewBox="0 0 24 24"
-            >
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-              <path d="M9 12l2 2 4-4" />
-            </svg>
-          ) : (
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeDasharray="4 4"
-                d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"
-              />
-            </svg>
-          )}
-        </button>
-        <div className="w-px h-5 bg-white/20 mx-1"></div>
-        <div className="relative">
-          <FavoriteCategoryMenu
-            includeDefaultFallback
-            align="right"
-            onSelect={handleSetFavoriteCategory}
-            includeClearFavorite={allSelectedFavorite}
-            onClearFavorite={allSelectedFavorite ? handleClearFavorite : undefined}
-            renderTrigger={({ toggle }) => (
-              <button
-                type="button"
-                onClick={toggle}
-                className="p-2 text-yellow-400 hover:text-yellow-300 transition-colors"
-                title={allSelectedFavorite ? '收藏分类 / 取消收藏' : '收藏'}
-              >
-                <svg
-                  className="w-5 h-5"
-                  fill={allSelectedFavorite ? 'currentColor' : 'none'}
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  viewBox="0 0 24 24"
-                >
-                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                </svg>
-              </button>
-            )}
-          />
+    <section
+      data-no-drag-select
+      aria-label="已选任务操作"
+      className="mb-5 rounded-2xl border border-brand/25 bg-brand-soft p-3 text-content"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="px-1">
+          <p className="text-sm font-semibold">已选择 {taskIds.length} 条任务</p>
+          {scopeText && <p className="mt-1 text-xs text-content-muted">{scopeText}</p>}
         </div>
-        <div className="w-px h-5 bg-white/20 mx-1"></div>
-        <button
-          onClick={() => canCompare && setCompareTaskIds(actionableSelectedTaskIds)}
-          disabled={!canCompare}
-          className={`p-2 transition-colors ${
-            canCompare
-              ? 'text-emerald-400 hover:text-emerald-300'
-              : 'text-gray-500 cursor-not-allowed'
-          }`}
-          title={canCompare ? '并排对比选中任务' : '选择 2~4 条已完成任务进行对比'}
-          aria-label="并排对比"
-        >
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            viewBox="0 0 24 24"
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleSelectAllToggle}
+            className="ui-button bg-surface text-brand-ink"
+            title={allDisplayedSelected ? '取消当前显示全选' : '选择当前显示的任务'}
           >
-            <rect x="3" y="4" width="8" height="16" rx="2" />
-            <rect x="13" y="4" width="8" height="16" rx="2" />
-          </svg>
-        </button>
-        <button
-          onClick={() => canBatchCaption && handleBatchCaption()}
-          disabled={!canBatchCaption}
-          className={`p-2 transition-colors ${
-            canBatchCaption
-              ? 'text-purple-400 hover:text-purple-300'
-              : 'text-gray-500 cursor-not-allowed'
-          }`}
-          title={
-            canBatchCaption
-              ? `批量反推(${batchCaptionImageIds.length} 张图)`
-              : '选择已完成任务批量反推提示词'
-          }
-          aria-label="批量反推"
-        >
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            viewBox="0 0 24 24"
+            {allDisplayedSelected ? '取消当前显示全选' : '选择当前显示的任务'}
+          </button>
+          <div className="shrink-0">
+            <FavoriteCategoryMenu
+              includeDefaultFallback
+              align="right"
+              onSelect={handleSetFavoriteCategory}
+              includeClearFavorite={allSelectedFavorite}
+              onClearFavorite={allSelectedFavorite ? handleClearFavorite : undefined}
+              renderTrigger={({ toggle }) => (
+                <button
+                  type="button"
+                  onClick={toggle}
+                  className="ui-button bg-surface"
+                  title={allSelectedFavorite ? '收藏分类 / 取消收藏' : '收藏'}
+                >
+                  收藏
+                </button>
+              )}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => canCompare && setCompareTaskIds(taskIds)}
+            disabled={!canCompare}
+            className="ui-button bg-surface"
+            title={canCompare ? '并排对比选中任务' : '选择 2~4 条已完成任务进行对比'}
+            aria-label="并排对比"
           >
-            <rect x="3" y="3" width="18" height="14" rx="2" />
-            <path d="M3 13l4-4 4 4 4-5 6 6" />
-            <path d="M8 21h8" />
-          </svg>
-        </button>
-        {runningSelected.length > 0 && (
-          <>
-            <div className="w-px h-5 bg-white/20 mx-1"></div>
+            对比
+          </button>
+          <button
+            type="button"
+            disabled={batchCaptionImageIds.length === 0}
+            onClick={() => {
+              setCaptionBatchImageIds(batchCaptionImageIds)
+              clearSelection()
+            }}
+            className="ui-button bg-surface"
+            aria-label="批量反推"
+            title={
+              batchCaptionImageIds.length
+                ? `批量反推(${batchCaptionImageIds.length} 张图)`
+                : '选择已完成任务批量反推提示词'
+            }
+          >
+            反推
+          </button>
+          {runningSelected.length > 0 && (
             <button
+              type="button"
               onClick={handleCancelRunning}
-              className="p-2 text-red-400 hover:text-red-300 transition-colors"
-              title={`取消生成(${runningSelected.length} 条在途)`}
+              className="ui-button bg-surface text-red-600 dark:text-red-400"
               aria-label="取消选中的在途任务"
             >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                viewBox="0 0 24 24"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <rect x="9" y="9" width="6" height="6" />
-              </svg>
+              取消生成 {runningSelected.length}
             </button>
-          </>
-        )}
-        <div className="w-px h-5 bg-white/20 mx-1"></div>
-        <button
-          onClick={handleDeleteSelected}
-          className="p-2 text-red-400 hover:text-red-300 transition-colors"
-          title="删除选中"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-            />
-          </svg>
-        </button>
+          )}
+          <button
+            type="button"
+            onClick={handleDeleteSelected}
+            className="ui-button bg-surface text-red-600 dark:text-red-400"
+            aria-label="删除选中"
+            title="删除选中"
+          >
+            删除
+          </button>
+          <button
+            type="button"
+            onClick={clearSelection}
+            className="ui-button text-content-muted"
+            title="取消选择"
+          >
+            清除选择
+          </button>
+        </div>
       </div>
-    </div>
+    </section>
   )
 }

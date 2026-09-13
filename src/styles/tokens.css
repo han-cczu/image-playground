@@ -1,0 +1,38 @@
+:root {
+  color-scheme: light;
+  --ui-canvas: 244 246 248;
+  --ui-surface: 255 255 255;
+  --ui-surface-muted: 249 250 251;
+  --ui-surface-raised: 244 246 248;
+  --ui-content: 28 37 46;
+  --ui-content-muted: 99 115 129;
+  --ui-content-subtle: 111 124 136;
+  --ui-line: 223 227 232;
+  --ui-brand: 0 120 103;
+  --ui-brand-hover: 0 96 82;
+  --ui-brand-soft: 231 246 239;
+  --ui-brand-ink: 0 120 103;
+  --ui-on-brand: 255 255 255;
+  --ui-shadow-card: 0 2px 4px rgb(28 37 46 / 0.02), 0 8px 24px rgb(28 37 46 / 0.04);
+  --ui-shadow-popover: 0 12px 40px rgb(28 37 46 / 0.14);
+  --ui-sidebar-width: 256px;
+}
+
+:root.dark {
+  color-scheme: dark;
+  --ui-canvas: 20 26 33;
+  --ui-surface: 28 37 46;
+  --ui-surface-muted: 32 43 54;
+  --ui-surface-raised: 40 51 63;
+  --ui-content: 244 246 248;
+  --ui-content-muted: 178 188 200;
+  --ui-content-subtle: 151 165 181;
+  --ui-line: 52 66 79;
+  --ui-brand: 91 228 155;
+  --ui-brand-hover: 119 232 176;
+  --ui-brand-soft: 23 58 46;
+  --ui-brand-ink: 119 232 176;
+  --ui-on-brand: 11 48 35;
+  --ui-shadow-card: 0 2px 4px rgb(0 0 0 / 0.08), 0 8px 24px rgb(0 0 0 / 0.1);
+  --ui-shadow-popover: 0 16px 48px rgb(0 0 0 / 0.36);
+}

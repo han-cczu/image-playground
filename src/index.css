@@ -1,5 +1,6 @@
 @import url('https://fontsapi.zeoseven.com/442/main/result.css');
 @import url('https://cdn.jsdelivr.net/npm/@lobehub/webfont-harmony-sans-sc@1.0.0/css/index.css');
+@import './styles/tokens.css';
 
 @tailwind base;
 @tailwind components;
@@ -16,13 +17,108 @@
 }
 
 html {
-  overflow-y: scroll;
+  overflow-y: auto;
 }
 
 body {
   padding: 0;
   -webkit-user-select: none;
   user-select: none;
+}
+
+@layer components {
+  .ui-button {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-content transition-colors hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .ui-icon-button {
+    @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-content-muted transition-colors hover:bg-surface-raised hover:text-content disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .ui-field {
+    @apply min-h-10 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-content placeholder:text-content-subtle;
+  }
+  .ui-panel {
+    @apply rounded-2xl border border-line bg-surface shadow-card;
+  }
+}
+
+/* 所有可键盘访问的原生控件保持统一焦点；不依赖 hover 才能发现操作。 */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgb(var(--ui-brand-ink));
+  outline-offset: 3px;
+}
+
+.app-shell {
+  display: flex;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  flex-direction: column;
+}
+.app-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.app-workspace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.workspace-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 0 24px 24px;
+}
+.workspace-content {
+  margin: 0 auto;
+  max-width: 1440px;
+}
+.workspace-task-grid {
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(100%, max(260px, calc((100% - 60px) / 4))), 1fr)
+  );
+  gap: 20px;
+}
+.workspace-sidebar {
+  width: var(--ui-sidebar-width);
+}
+.workspace-sidebar[data-collapsed='true'] {
+  --ui-sidebar-width: 72px;
+}
+
+@media (min-width: 768px) {
+  .workspace-sidebar {
+    position: relative;
+    height: 100%;
+    flex-shrink: 0;
+  }
+}
+@media (max-width: 767px) {
+  .workspace-scroll {
+    padding: 0 max(16px, var(--safe-area-right)) 20px max(16px, var(--safe-area-left));
+  }
+  .workspace-task-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .workspace-sidebar {
+    --ui-sidebar-width: min(288px, calc(100vw - 48px));
+    height: 100dvh;
+  }
+  .ui-icon-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 input,
@@ -98,10 +194,10 @@ input[type='number'] {
 @keyframes pulse-border {
   0%,
   100% {
-    border-color: #3b82f6;
+    border-color: rgb(var(--ui-brand-ink));
   }
   50% {
-    border-color: #93c5fd;
+    border-color: rgb(var(--ui-line));
   }
 }
 .generating {
@@ -340,7 +436,7 @@ input[type='number'] {
   animation: app-rise-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) 0.18s backwards;
 }
 .app-enter-inputbar {
-  animation: app-rise-in-centered 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.26s backwards;
+  animation: app-rise-in 0.2s ease-out backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -402,7 +498,7 @@ input[type='number'] {
   }
 }
 .card-enter {
-  animation: card-rise-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation: card-rise-in 0.18s ease-out backwards;
 }
 
 /* 大库性能(C1):视口外卡片/矩阵块跳过渲染/布局/绘制,DOM 节点仍在场——dnd useSortable
@@ -416,7 +512,7 @@ input[type='number'] {
    占位估高(估不准只影响滚动条初长)。不支持的旧浏览器忽略该属性,优雅降级为现状全量渲染。 */
 .cv-auto {
   content-visibility: auto;
-  contain-intrinsic-size: auto 160px;
+  contain-intrinsic-size: auto 400px;
 }
 .cv-auto-matrix {
   content-visibility: auto;
@@ -457,7 +553,7 @@ input[type='number'] {
 }
 
 .safe-header-inner {
-  min-height: 3.5rem;
+  min-height: 4rem;
 }
 
 @media (max-width: 640px) {

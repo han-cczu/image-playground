@@ -70,7 +70,7 @@ function TaskCard({
     : null
 
   return (
-    <div ref={attachCoverRef} className="relative rounded-xl">
+    <div ref={attachCoverRef} className="relative rounded-2xl">
       {/* 侧滑底图 */}
       <SwipeBackground
         isSwiping={isSwiping}
@@ -80,16 +80,16 @@ function TaskCard({
       />
 
       <div
-        className={`group relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer duration-200 hover:shadow-lg dark:hover:shadow-[0_10px_40px_-12px_rgba(99,102,241,0.35)] dark:hover:bg-gray-800/80 ${
+        className={`group relative overflow-hidden rounded-2xl border bg-surface text-content shadow-sm cursor-pointer duration-150 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand ${
           !isSwiping
             ? 'transition-[box-shadow,border-color,background-color,transform]'
             : 'transition-[box-shadow,border-color,background-color]'
         } ${
-          task.status === 'running'
-            ? 'border-blue-400 generating'
-            : isSelected
-              ? 'border-blue-500 shadow-md ring-2 ring-blue-500/50'
-              : 'border-gray-200 dark:border-white/[0.08] hover:border-gray-300 dark:hover:border-white/[0.18]'
+          isSelected
+            ? 'border-brand ring-2 ring-brand/25'
+            : task.status === 'running'
+              ? 'border-brand/50'
+              : 'border-line hover:border-brand/40'
         }`}
         style={{
           transform: swipeOffset ? `translateX(${swipeOffset}px)` : undefined,
@@ -124,24 +124,6 @@ function TaskCard({
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchCancel}
       >
-        {/* 选中时的角标 */}
-        {isSelected && (
-          <div className="absolute top-2 right-2 z-10 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center shadow-sm">
-            <svg
-              className="w-3 h-3 text-white"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={3}
-                d="M5 13l4 4L19 7"
-              />
-            </svg>
-          </div>
-        )}
         {/* 拖拽手柄（仅桌面端） */}
         {dragActivatorRef && (
           <button
@@ -150,15 +132,10 @@ function TaskCard({
             {...(dragDisabled ? {} : dragAttributes)}
             {...(dragDisabled ? {} : dragListeners)}
             onClick={(e) => e.stopPropagation()}
-            title={dragDisabled ? '清除筛选后可调整顺序' : '拖动调整顺序'}
+            disabled={dragDisabled}
+            title={dragDisabled ? '当前视图不支持调整顺序' : '拖动调整顺序；空格拾起、方向键移动'}
             aria-label="拖动调整顺序"
-            className={`hidden sm:flex absolute top-2 z-10 w-5 h-5 items-center justify-center rounded-md transition-opacity ${
-              isSelected ? 'right-9' : 'right-2'
-            } ${
-              dragDisabled
-                ? 'opacity-20 cursor-not-allowed text-gray-400 dark:text-gray-500'
-                : 'opacity-0 group-hover:opacity-60 hover:!opacity-100 cursor-grab active:cursor-grabbing text-gray-500 dark:text-gray-400 bg-white/70 dark:bg-gray-900/70 backdrop-blur'
-            }`}
+            className="absolute right-2 top-2 z-10 hidden h-11 w-11 items-center justify-center rounded-lg bg-surface/90 text-content-muted shadow-sm transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-30 sm:flex cursor-grab active:cursor-grabbing"
             style={{ touchAction: 'none' }}
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
@@ -171,8 +148,8 @@ function TaskCard({
             </svg>
           </button>
         )}
-        <div className="flex h-40">
-          {/* 左侧图片区域 */}
+        <div>
+          {/* 固定比例的预览画布保留图片完整构图，任务仍以一张卡表示。 */}
           <CoverArea
             task={task}
             thumbSrc={thumbSrc}
@@ -181,14 +158,16 @@ function TaskCard({
             duration={duration}
           />
 
-          {/* 右侧信息区域 */}
+          {/* 摘要、选择、收藏和详情始终可见。 */}
           <InfoArea
             task={task}
+            isSelected={isSelected}
             favoriteCategory={favoriteCategory}
             conversationTag={conversationTag}
             onReuse={onReuse}
             onEditOutputs={onEditOutputs}
             onDelete={onDelete}
+            onOpenDetails={onClick}
           />
         </div>
       </div>

@@ -15,26 +15,44 @@ interface Props {
   conversationTag?: ConversationTagProp
 }
 
-/** 参数 pills 行(横向滚动):常规参数 + mask/收藏分类/所属对话等特殊 pill */
+/** 摘要只保留尺寸、数量和模型，完整参数继续在详情中展示；分类与对话标签可换行。 */
 export default function ParamPills({ task, favoriteCategory, conversationTag }: Props) {
   const aggregateActualParams = task.outputImages?.length
     ? { ...task.actualParams, n: task.outputImages.length }
     : task.actualParams
 
   return (
-    <div className="flex overflow-x-auto hide-scrollbar gap-1.5 whitespace-nowrap mask-edge-r min-w-0 pr-2">
-      <ParamValue task={task} paramKey="quality" className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" />
-      <ParamValue task={task} paramKey="size" className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" />
-      <ParamValue task={task} paramKey="output_format" className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" />
-      <ParamValue task={task} paramKey="n" className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" actualParams={aggregateActualParams} />
+    <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5">
+      <ParamValue
+        task={task}
+        paramKey="size"
+        className="text-xs px-1.5 py-0.5 rounded flex-shrink-0"
+      />
+      <span className="inline-flex items-center gap-1 text-xs text-content-muted">
+        <ParamValue
+          task={task}
+          paramKey="n"
+          className="shrink-0 rounded px-1.5 py-0.5"
+          actualParams={aggregateActualParams}
+        />
+        张
+      </span>
+      {task.apiModel && (
+        <span
+          className="min-w-0 max-w-40 truncate rounded bg-surface-muted px-1.5 py-0.5 text-xs text-content-muted"
+          title={task.apiModel}
+        >
+          {task.apiModel}
+        </span>
+      )}
       {task.maskImageId && (
-        <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 flex-shrink-0">
-          mask
+        <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-xs text-brand-ink">
+          遮罩
         </span>
       )}
       {favoriteCategory && task.isFavorite && (
         <span
-          className="min-w-0 max-w-28 text-xs px-1.5 py-0.5 rounded bg-gray-50 dark:bg-white/[0.04] text-gray-600 dark:text-gray-300 flex items-center gap-1 flex-shrink-0"
+          className="flex min-w-0 max-w-28 items-center gap-1 rounded bg-surface-muted px-1.5 py-0.5 text-xs text-content-muted"
           title={favoriteCategory.name}
         >
           <span
@@ -51,7 +69,7 @@ export default function ParamPills({ task, favoriteCategory, conversationTag }: 
             e.stopPropagation()
             conversationTag.onClick()
           }}
-          className="min-w-0 max-w-[140px] text-xs px-1.5 py-0.5 rounded bg-gray-50 dark:bg-white/[0.04] text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.08] flex items-center gap-1 flex-shrink-0"
+          className="flex min-h-8 min-w-0 max-w-[180px] items-center gap-1 rounded bg-surface-muted px-2 text-xs text-content-muted hover:bg-brand-soft hover:text-brand-ink"
           title={`来自对话「${conversationTag.title}」`}
           aria-label={`跳转到对话「${conversationTag.title}」`}
         >

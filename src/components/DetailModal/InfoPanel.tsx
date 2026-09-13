@@ -37,8 +37,8 @@ function ParamCard({
   actualParams?: Partial<TaskParams>
 }) {
   return (
-    <div className="bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
-      <span className="text-gray-400 dark:text-gray-500">{label}</span>
+    <div className="bg-surface-muted dark:bg-surface-raised rounded-lg px-3 py-2">
+      <span className="text-content-subtle dark:text-content-subtle">{label}</span>
       <br />
       <DetailParamValue
         task={task}
@@ -182,20 +182,20 @@ function LineageLinkButton({
       ? 'bg-green-400'
       : link.task.status === 'error'
         ? 'bg-red-400'
-        : 'bg-blue-400'
+        : 'bg-brand'
   return (
     <button
       onClick={() => onOpen(link.task.id)}
-      className="flex max-w-[180px] items-center gap-2 rounded-lg border border-gray-200 p-1 pr-2.5 transition hover:bg-gray-50 dark:border-white/[0.08] dark:hover:bg-white/[0.04]"
+      className="flex max-w-[180px] items-center gap-2 rounded-lg border border-line p-1 pr-2.5 transition hover:bg-surface-muted dark:border-line dark:hover:bg-surface-raised"
       title={link.task.prompt || '(无提示词)'}
     >
-      <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-gray-100 dark:bg-black/20">
+      <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-surface-muted dark:bg-black/20">
         {src && <img src={src} className="h-full w-full object-cover" alt="" />}
         <span
-          className={`absolute bottom-0.5 right-0.5 h-1.5 w-1.5 rounded-full ring-1 ring-white dark:ring-gray-900 ${statusColor}`}
+          className={`absolute bottom-0.5 right-0.5 h-1.5 w-1.5 rounded-full ring-1 ring-white dark:ring-line ${statusColor}`}
         />
       </span>
-      <span className="min-w-0 truncate text-xs text-gray-600 dark:text-gray-300">
+      <span className="min-w-0 truncate text-xs text-content dark:text-content">
         {link.task.prompt || '(无提示词)'}
       </span>
     </button>
@@ -297,15 +297,13 @@ export default function InfoPanel({
   }
 
   return (
-    <div data-selectable-text className="flex-1">
+    <div data-selectable-text className="min-w-0 flex-1 break-words text-content">
       <div className="flex items-center gap-1.5 mb-2">
-        <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-          输入内容
-        </h3>
+        <h3 className="text-xs font-semibold text-content-muted">输入内容</h3>
         {task.prompt && (
           <button
             onClick={handleCopyPrompt}
-            className="p-1 rounded text-gray-400 hover:bg-gray-100 dark:text-gray-500 dark:hover:bg-white/[0.06] transition"
+            className="ui-icon-button -my-2 text-content-muted"
             title="复制提示词"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -338,7 +336,7 @@ export default function InfoPanel({
           </span>
         )}
       </div>
-      <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap mb-4">
+      <p className="text-sm text-content dark:text-content leading-relaxed whitespace-pre-wrap mb-4">
         {task.prompt || '(无提示词)'}
       </p>
       {showRevisedPrompt && currentRevisedPrompt && (
@@ -354,12 +352,10 @@ export default function InfoPanel({
       {allInputImageIds.length > 0 && (
         <div className="mb-4">
           <div className="flex items-center gap-1.5 mb-2">
-            <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-              参考图
-            </h3>
+            <h3 className="text-xs font-semibold text-content-muted">参考图</h3>
             <button
               onClick={handleCopyInputImage}
-              className="p-1 rounded text-gray-400 hover:bg-gray-100 dark:text-gray-500 dark:hover:bg-white/[0.06] transition"
+              className="ui-icon-button -my-2 text-content-muted"
               title="复制参考图"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -383,8 +379,8 @@ export default function InfoPanel({
                     type="button"
                     className={`relative block w-16 h-16 rounded-lg overflow-hidden border cursor-pointer hover:opacity-80 transition ${
                       isMaskTarget
-                        ? 'border-blue-500 border-2 shadow-sm'
-                        : 'border-gray-200 dark:border-white/[0.08]'
+                        ? 'border-brand border-2 shadow-sm'
+                        : 'border-line dark:border-line'
                     }`}
                     onClick={() => setLightboxImageId(imgId, allInputImageIds)}
                     aria-label={isMaskTarget ? '放大查看参考图(遮罩目标)' : '放大查看参考图'}
@@ -394,7 +390,7 @@ export default function InfoPanel({
                       <img src={displaySrc} className="w-full h-full object-cover" alt="" />
                     )}
                     {isMaskTarget && (
-                      <span className="absolute left-1 top-1 rounded bg-blue-500/90 px-1.5 py-0.5 text-[8px] leading-none text-white font-bold tracking-wider backdrop-blur-sm z-10 pointer-events-none">
+                      <span className="absolute left-1 top-1 rounded bg-brand px-1.5 py-0.5 text-[8px] leading-none text-on-brand font-bold tracking-wider backdrop-blur-sm z-10 pointer-events-none">
                         MASK
                       </span>
                     )}
@@ -411,9 +407,7 @@ export default function InfoPanel({
         <div className="mb-4 space-y-3">
           {parentLinks.length > 0 && (
             <div>
-              <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
-                派生自
-              </h3>
+              <h3 className="text-xs font-semibold text-content-muted mb-2">派生自</h3>
               <div className="flex flex-wrap gap-2">
                 {parentLinks.map((link) => (
                   <LineageLinkButton
@@ -428,9 +422,7 @@ export default function InfoPanel({
           )}
           {childLinks.length > 0 && (
             <div>
-              <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
-                衍生出
-              </h3>
+              <h3 className="text-xs font-semibold text-content-muted mb-2">衍生出</h3>
               <div className="flex flex-wrap gap-2">
                 {childLinks.map((link) => (
                   <LineageLinkButton
@@ -451,7 +443,7 @@ export default function InfoPanel({
               setDetailTaskId(null)
               setLineageTaskId(id)
             }}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-600 transition hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-brand bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand-ink transition hover:bg-brand-soft dark:border-brand dark:bg-brand-soft dark:text-brand-ink dark:hover:bg-brand-soft"
           >
             <svg
               className="h-3.5 w-3.5"
@@ -474,15 +466,13 @@ export default function InfoPanel({
       )}
 
       {/* 参数 */}
-      <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
-        参数配置
-      </h3>
+      <h3 className="text-xs font-semibold text-content-muted mb-2">参数配置</h3>
       {showSourceInfo && (
-        <div className="mb-2 rounded-lg bg-gray-50 px-3 py-2 text-xs dark:bg-white/[0.03]">
-          <span className="text-gray-400 dark:text-gray-500">来源</span>
+        <div className="mb-2 rounded-lg bg-surface-muted px-3 py-2 text-xs dark:bg-surface-raised">
+          <span className="text-content-subtle dark:text-content-subtle">来源</span>
           <br />
-          <span className="font-medium text-gray-700 dark:text-gray-200">{taskProviderName}</span>
-          <span className="text-gray-400 dark:text-gray-500">
+          <span className="font-medium text-content dark:text-content">{taskProviderName}</span>
+          <span className="text-content-subtle dark:text-content-subtle">
             {' '}
             · {taskProfileName} · {taskModel}
           </span>
@@ -515,19 +505,17 @@ export default function InfoPanel({
       </div>
 
       {/* 时间 */}
-      <div className="text-xs text-gray-400 dark:text-gray-500 mb-4">
+      <div className="text-xs text-content-subtle dark:text-content-subtle mb-4">
         <span>创建于 {formatTime(task.createdAt)}</span>
         {durationText && <span> · 耗时 {durationText}</span>}
       </div>
 
       <div className="mb-4">
         <div className="mb-1.5 flex items-center justify-between">
-          <span className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-            收藏分类
-          </span>
+          <span className="text-xs font-semibold text-content-muted">收藏分类</span>
           {currentCategory && task.isFavorite && (
             <span
-              className="flex min-w-0 max-w-[55%] items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500"
+              className="flex min-w-0 max-w-[55%] items-center gap-1 text-[10px] text-content-subtle dark:text-content-subtle"
               title={currentCategory.name}
             >
               <span
@@ -551,7 +539,7 @@ export default function InfoPanel({
             <button
               type="button"
               onClick={toggle}
-              className="flex w-full items-center justify-between gap-2 rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition hover:bg-gray-50 focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:hover:bg-white/[0.06] dark:focus:border-blue-500/50"
+              className="flex w-full items-center justify-between gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-sm text-content outline-none transition hover:bg-surface-muted focus:border-brand dark:border-line dark:bg-surface-raised dark:text-content dark:hover:bg-surface-raised dark:focus:border-brand"
               title={label}
             >
               <span className="flex min-w-0 items-center gap-2">
@@ -561,12 +549,12 @@ export default function InfoPanel({
                     style={{ backgroundColor: selectedCategory.color }}
                   />
                 ) : (
-                  <span className="h-2 w-2 shrink-0 rounded-full border border-dashed border-gray-300 dark:border-gray-600" />
+                  <span className="h-2 w-2 shrink-0 rounded-full border border-dashed border-line dark:border-line" />
                 )}
                 <span className="min-w-0 truncate">{label}</span>
               </span>
               <svg
-                className={`h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform duration-200 dark:text-gray-500 ${isOpen ? 'rotate-180' : ''}`}
+                className={`h-3.5 w-3.5 shrink-0 text-content-subtle transition-transform duration-200 dark:text-content-subtle ${isOpen ? 'rotate-180' : ''}`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"

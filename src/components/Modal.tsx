@@ -28,7 +28,7 @@ interface ModalProps {
   panelClassName: string
   /** z 层 + 纵向对齐,默认居中;如 'z-[80] items-center'、'z-[105] items-start pt-[12vh]' */
   containerClassName?: string
-  /** deep = 更重的遮罩模糊 + 90% 表面(DetailModal/ConfirmDialog 风格) */
+  /** deep = 更深的背景遮罩(DetailModal/ConfirmDialog 风格)，面板始终不透明 */
   tone?: 'default' | 'deep'
   animation?: 'modal' | 'confirm'
   /** 点击 backdrop 是否关闭,默认 true */
@@ -41,13 +41,13 @@ interface ModalProps {
 }
 
 const BACKDROP_TONE = {
-  default: 'bg-black/30 backdrop-blur-sm',
-  deep: 'bg-black/20 dark:bg-black/40 backdrop-blur-md',
+  default: 'bg-gray-950/40 backdrop-blur-sm',
+  deep: 'bg-gray-950/60 backdrop-blur-sm',
 } as const
 
 const SURFACE_TONE = {
-  default: 'bg-white/95 shadow-2xl backdrop-blur-xl dark:bg-gray-900/95',
-  deep: 'bg-white/90 backdrop-blur-xl shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:bg-gray-900/90 dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)]',
+  default: 'bg-surface text-content shadow-popover',
+  deep: 'bg-surface text-content shadow-popover',
 } as const
 
 const ANIMATION = {
@@ -103,7 +103,7 @@ export default function Modal({
           aria-label={ariaLabel}
           tabIndex={-1}
           onKeyDown={onPanelKeyDown}
-          className={`relative z-10 rounded-3xl border border-white/50 ring-1 ring-black/5 dark:border-white/[0.08] dark:ring-white/10 ${SURFACE_TONE[tone]} ${ANIMATION[animation]} ${panelClassName}`}
+          className={`relative z-10 rounded-2xl border border-line ${SURFACE_TONE[tone]} ${ANIMATION[animation]} ${panelClassName}`}
         >
           {children}
         </div>
@@ -121,9 +121,7 @@ export function ModalTitle({
   className?: string
 }) {
   return (
-    <h3
-      className={`flex items-center gap-2 text-base font-semibold text-gray-800 dark:text-gray-100 ${className}`}
-    >
+    <h3 className={`flex items-center gap-2 text-base font-semibold text-content ${className}`}>
       {children}
     </h3>
   )
@@ -139,7 +137,7 @@ export function ModalHeaderBar({
 }) {
   return (
     <div
-      className={`flex items-center justify-between gap-4 border-b border-gray-100 px-5 py-3 dark:border-white/[0.08] ${className}`}
+      className={`flex items-center justify-between gap-4 border-b border-line px-5 py-3 ${className}`}
     >
       {children}
     </div>
@@ -163,7 +161,7 @@ export function ModalCloseButton({
       type="button"
       onClick={onClick}
       aria-label={label}
-      className={`rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200 ${className}`}
+      className={`ui-icon-button ${className}`}
     >
       <svg className={iconClassName} fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
