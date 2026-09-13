@@ -88,7 +88,7 @@ function CommandPalettePanel({ close }: { close: () => void }) {
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const conversations = useStore((s) => s.conversations)
   const activeConversationId = useStore((s) => s.activeConversationId)
-  const createOrReuseEmptyConversation = useStore((s) => s.createOrReuseEmptyConversation)
+  const createConversation = useStore((s) => s.createConversation)
   const setActiveConversation = useStore((s) => s.setActiveConversation)
   const settings = useStore((s) => s.settings)
   const setSettings = useStore((s) => s.setSettings)
@@ -113,7 +113,7 @@ function CommandPalettePanel({ close }: { close: () => void }) {
           toggleSidebar,
           conversations,
           activeConversationId,
-          createOrReuseEmptyConversation,
+          createConversation,
           setActiveConversation,
           settings,
           setSettings,
@@ -132,7 +132,7 @@ function CommandPalettePanel({ close }: { close: () => void }) {
       toggleSidebar,
       conversations,
       activeConversationId,
-      createOrReuseEmptyConversation,
+      createConversation,
       setActiveConversation,
       settings,
       setSettings,

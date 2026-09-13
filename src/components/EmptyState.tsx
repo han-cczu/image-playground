@@ -28,11 +28,11 @@ export default function EmptyState({
 }) {
   const setPrompt = useStore((state) => state.setPrompt)
   const setGalleryView = useStore((state) => state.setGalleryView)
-  const createOrReuseEmptyConversation = useStore((state) => state.createOrReuseEmptyConversation)
+  const createConversation = useStore((state) => state.createConversation)
   const isGallery = mode === 'gallery'
   const start = () => {
     setGalleryView(false)
-    createOrReuseEmptyConversation()
+    createConversation()
     document.querySelector<HTMLTextAreaElement>('[data-input-bar] textarea')?.focus()
   }
 

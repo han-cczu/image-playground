@@ -19,7 +19,6 @@ import {
 import {
   ARCHIVE_CONVERSATION_ID,
   MAX_CONVERSATIONS,
-  findReusableEmptyConversation,
   normalizeConversations,
   MAX_CONVERSATION_ID_LEN,
   genConversationId,
@@ -234,9 +233,8 @@ export interface TasksSlice {
   conversations: Conversation[]
   activeConversationId: string | null
   setConversations: (conversations: Conversation[]) => void
+  /** 显式新建始终创建并激活独立对话（达到数量上限时保留原有保护）。 */
   createConversation: (seedTitle?: string) => string
-  /** 侧栏 / 命令面板「新建对话」共用:已有可复用的空「新对话」就切过去,否则新建——避免连按堆积同名空对话并写库 */
-  createOrReuseEmptyConversation: () => string
   renameConversation: (id: string, title: string) => Promise<void>
   deleteConversationWithTasks: (id: string) => void
   setActiveConversation: (id: string | null) => void
@@ -584,28 +582,6 @@ export const createTasksSlice: StateCreator<AppState, [], [], TasksSlice> = (set
       })
       .finally(() => clearPendingIndexedDbConversationWrite(id))
     return id
-  },
-  createOrReuseEmptyConversation: () => {
-    const state = get()
-    const taskCountByConversation = new Map<string, number>()
-    for (const task of state.tasks) {
-      if (!task.conversationId) continue
-      taskCountByConversation.set(
-        task.conversationId,
-        (taskCountByConversation.get(task.conversationId) ?? 0) + 1,
-      )
-    }
-    const reusable = findReusableEmptyConversation(
-      normalizeConversations(state.conversations),
-      taskCountByConversation,
-    )
-    if (reusable) {
-      if (state.activeConversationId !== reusable.id) {
-        set({ activeConversationId: reusable.id, selectedTaskIds: [] })
-      }
-      return reusable.id
-    }
-    return state.createConversation()
   },
   renameConversation: async (id, title) => {
     if (!title.trim()) return

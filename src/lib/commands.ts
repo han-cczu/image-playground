@@ -50,7 +50,7 @@ export type CommandStore = Pick<
   | 'toggleSidebar'
   | 'conversations'
   | 'activeConversationId'
-  | 'createOrReuseEmptyConversation'
+  | 'createConversation'
   | 'setActiveConversation'
   | 'settings'
   | 'setSettings'
@@ -127,8 +127,8 @@ export function buildCommands(ctx: CommandCtx): Command[] {
     group: 'conversation',
     keywords: 'new conversation create xinjian duihua',
     run: () => {
-      // 与侧栏「新建对话」同口径:复用空的「新对话」而不是每按一次都新建并写库
-      store.createOrReuseEmptyConversation()
+      // 与侧栏「新建对话」同口径：每次执行都创建并激活一个新对话。
+      store.createConversation()
       store.setGalleryView(false)
       close()
     },

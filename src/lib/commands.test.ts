@@ -19,7 +19,7 @@ function makeStore(overrides: Partial<CommandStore> = {}): CommandStore {
     toggleSidebar: vi.fn(),
     conversations: [],
     activeConversationId: null,
-    createOrReuseEmptyConversation: vi.fn(() => 'conv-new'),
+    createConversation: vi.fn(() => 'conv-new'),
     setActiveConversation: vi.fn(),
     settings: {
       theme: 'light',
@@ -163,14 +163,21 @@ describe('buildCommands', () => {
       expect(ctx.close).toHaveBeenCalledTimes(1)
     })
 
-    it('conversation:new creates a conversation and leaves gallery view', () => {
-      const ctx = makeCtx({ galleryView: true })
-      buildCommands(ctx)
-        .find((c) => c.id === 'conversation:new')!
-        .run()
-      expect(ctx.store.createOrReuseEmptyConversation).toHaveBeenCalledTimes(1)
-      expect(ctx.store.setGalleryView).toHaveBeenCalledWith(false)
-      expect(ctx.close).toHaveBeenCalledTimes(1)
+    it('conversation:new 每次执行都新建对话、退出图库并关闭面板', () => {
+      const ctx = makeCtx({
+        galleryView: true,
+        conversations: [{ id: 'empty', title: '新对话', createdAt: 1, updatedAt: 1 }],
+        activeConversationId: 'empty',
+      })
+      // 已有默认标题的空对话也不跳过创建；再次打开面板执行仍触发新建。
+      for (let execution = 1; execution <= 2; execution++) {
+        buildCommands(ctx)
+          .find((c) => c.id === 'conversation:new')!
+          .run()
+        expect(ctx.store.createConversation).toHaveBeenCalledTimes(execution)
+        expect(ctx.store.setGalleryView).toHaveBeenNthCalledWith(execution, false)
+        expect(ctx.close).toHaveBeenCalledTimes(execution)
+      }
     })
 
     it('conversation:switch activates the conversation and leaves gallery view', () => {

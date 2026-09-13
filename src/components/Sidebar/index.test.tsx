@@ -5,6 +5,7 @@ import Sidebar from './index'
 import { useLockBodyScroll } from '../../hooks/useLockBodyScroll'
 import { useStore } from '../../store'
 import { DEFAULT_PARAMS } from '../../types'
+import * as db from '../../lib/db'
 
 const originalWidthDescriptor = Object.getOwnPropertyDescriptor(window, 'innerWidth')!
 
@@ -40,6 +41,34 @@ function ExtraBodyLock({ active }: { active: boolean }) {
 
 describe('Sidebar', () => {
   beforeEach(() => resizeTo(1440))
+
+  it('连续点击新建会逐次增加对话，即使已有空的新对话也不会复用', async () => {
+    const putConversation = vi.spyOn(db, 'putConversation').mockResolvedValue('saved')
+    const preserved = seedCreationContext()
+    useStore.setState({
+      galleryView: true,
+      conversations: [{ id: 'conv-a', title: '新对话', createdAt: 1, updatedAt: 1 }],
+      tasks: [],
+    })
+    render(<Sidebar mobileOpen={false} onMobileClose={vi.fn()} />)
+
+    const created: string[] = []
+    for (let i = 0; i < 3; i += 1) {
+      fireEvent.click(screen.getByRole('button', { name: '新建对话' }))
+      created.push(useStore.getState().activeConversationId!)
+      expect(useStore.getState().conversations).toHaveLength(i + 2)
+    }
+    expect(new Set(created).size).toBe(3)
+    expect(created).not.toContain('conv-a')
+    expect(useStore.getState()).toMatchObject({
+      ...preserved,
+      activeConversationId: created[2],
+      galleryView: false,
+      selectedTaskIds: [],
+    })
+    expect(putConversation).toHaveBeenCalledTimes(3)
+    await Promise.resolve()
+  })
 
   afterEach(() => {
     cleanup()

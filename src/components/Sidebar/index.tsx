@@ -16,7 +16,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
   const conversations = useStore((s) => s.conversations)
   const activeConversationId = useStore((s) => s.activeConversationId)
   const setActiveConversation = useStore((s) => s.setActiveConversation)
-  const createOrReuseEmptyConversation = useStore((s) => s.createOrReuseEmptyConversation)
+  const createConversation = useStore((s) => s.createConversation)
   const deleteConversationWithTasks = useStore((s) => s.deleteConversationWithTasks)
   const sidebarCollapsed = useStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
@@ -64,7 +64,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
   )
   const handleCreate = () => {
     setGalleryView(false)
-    createOrReuseEmptyConversation()
+    createConversation()
     onMobileClose()
   }
   const openGallery = (favorites: boolean) => {

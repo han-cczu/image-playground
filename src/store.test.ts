@@ -2848,8 +2848,14 @@ describe('conversation store actions', () => {
     await vi.waitFor(() => expect(useStore.getState().activeConversationId).toBe('conv-recent'))
   })
 
-  it('createOrReuseEmptyConversation 复用空「新对话」而不是每次新建', () => {
+  it('连续新建会保留已有空对话，创建独立记录并保留全局草稿', () => {
+    const draft = {
+      prompt: '尚未提交的草稿',
+      inputImages: [imageA],
+      params: { ...DEFAULT_PARAMS, n: 3 },
+    }
     useStore.setState({
+      ...draft,
       conversations: [
         { id: 'conv-empty', title: '新对话', createdAt: 5, updatedAt: 5 },
         { id: 'conv-busy', title: '新对话', createdAt: 6, updatedAt: 6 },
@@ -2859,20 +2865,21 @@ describe('conversation store actions', () => {
       showToast: vi.fn(),
     })
 
-    expect(useStore.getState().createOrReuseEmptyConversation()).toBe('conv-empty')
-    expect(useStore.getState().activeConversationId).toBe('conv-empty')
-    expect(useStore.getState().conversations).toHaveLength(2)
-    expect(putConversation).not.toHaveBeenCalled()
-
-    useStore.setState({
-      tasks: [
-        task({ id: 't', conversationId: 'conv-busy' }),
-        task({ id: 't2', conversationId: 'conv-empty' }),
-      ],
-    })
-    const created = useStore.getState().createOrReuseEmptyConversation()
-    expect(created).not.toBe('conv-empty')
-    expect(useStore.getState().conversations).toHaveLength(3)
+    const created = Array.from({ length: 3 }, () => useStore.getState().createConversation())
+    expect(new Set(created).size).toBe(3)
+    expect(created).not.toContain('conv-empty')
+    expect(created).not.toContain('conv-busy')
+    expect(useStore.getState().activeConversationId).toBe(created[2])
+    expect(useStore.getState().conversations).toHaveLength(5)
+    expect(useStore.getState().conversations.map((conversation) => conversation.id)).toEqual([
+      ...[...created].reverse(),
+      'conv-empty',
+      'conv-busy',
+    ])
+    expect(putConversation).toHaveBeenCalledTimes(3)
+    expect(useStore.getState()).toMatchObject(draft)
+    expect(useStore.getState().inputImages).toBe(draft.inputImages)
+    expect(useStore.getState().params).toBe(draft.params)
   })
 
   it('批量提交首条回填对话标题:同批兄弟不算「先前任务」', async () => {
